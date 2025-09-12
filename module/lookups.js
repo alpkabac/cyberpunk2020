@@ -26,15 +26,28 @@ export let attackSkills = {
 }
 
 export function getStatNames() {
-    let actorTemplate = game.system.template.Actor;
-    // v11 and earlier format
-    if (actorTemplate.templates) {
-        return actorTemplate.templates.stats.stats;
-    }
-    // v12 onwards
-    else {
-        return Object.keys(actorTemplate.character.stats);
-    }
+  // v13+
+  const docTypes = game?.system?.documentTypes?.Actor;
+  if (docTypes) {
+    // Format: { character: { stats: { int:{}, ref:{}, … } } }
+    if (docTypes.character?.stats)
+      return Object.keys(docTypes.character.stats);
+
+    // Fallback: support legacy "templates" subnode
+    if (docTypes.templates?.stats?.stats)
+      return Object.keys(docTypes.templates.stats.stats);
+  }
+
+  // v11–v12
+  const tpl = CONFIG?.Actor?.template;
+  if (tpl?.templates?.stats?.stats)
+    return Object.keys(tpl.templates.stats.stats);
+
+  if (tpl?.character?.stats)
+    return Object.keys(tpl.character.stats);
+
+  // Fallback
+  return ["int", "ref", "tech", "cool", "attr", "luck", "ma", "bt", "emp"];
 }
 
 // How a weapon attacks. Something like pistol or an SMG have rigid rules on how they can attack, but shotguns can be regular or auto shotgun, exotic can be laser, etc. So this is for weird and special stuff that isn't necessarily covered by the weapon's type or other information
@@ -154,8 +167,24 @@ export let defaultAreaLookup = {
     9: "rLeg",
     10: "rLeg"
 }
+
 export function defaultHitLocations() {
-    return game.system.template.Actor.character.hitLocations;
+  const actorDocs = game?.system?.documentTypes?.Actor;
+
+  const tpl = actorDocs?.templates?.hitLocations?.hitLocations;
+  if (tpl) return tpl;
+
+  const chr = actorDocs?.character?.hitLocations;
+  if (chr) return chr;
+
+  return {
+    Head: { location: [1], stoppingPower: 0, ablation: 0},
+    Torso: { location: [2, 4], stoppingPower: 0, ablation: 0},
+    lArm: { location: [6], stoppingPower: 0, ablation: 0},
+    rArm: { location: [5], stoppingPower: 0, ablation: 0},
+    lLeg: { location: [7, 8], stoppingPower: 0, ablation: 0},
+    rLeg: { location: [9, 10], stoppingPower: 0, ablation: 0}
+  };
 }
 
 export function rangedModifiers(weapon, targetTokens=[]) {
@@ -179,9 +208,8 @@ export function rangedModifiers(weapon, targetTokens=[]) {
                 {value:"RangeLong", localData: {range: range}},
                 {value:"RangeExtreme", localData: {range: range*2}}
             ]
-         }],
-
-         [{
+        }],
+        [{
             localKey: "Aiming",
             dataPath: "aimRounds",
             defaultValue: 0,
@@ -197,12 +225,6 @@ export function rangedModifiers(weapon, targetTokens=[]) {
             choices: defaultTargetLocations,
             allowBlank: true
         },
-        {
-            localKey: "TargetsCount",
-            dataPath: "targetsCount",
-            defaultValue: targetTokens.length,
-            readOnly: targetTokens.length != 0,
-        },
         {localKey:"Ambush", dataPath:"ambush",defaultValue: false},
         {localKey:"Blinded", dataPath:"blinded",defaultValue: false},
         {localKey:"DualWield", dataPath:"dualWield",defaultValue: false},
@@ -210,7 +232,16 @@ export function rangedModifiers(weapon, targetTokens=[]) {
         {localKey:"Hipfire", dataPath:"hipfire",defaultValue: false},
         {localKey:"Ricochet", dataPath:"ricochet",defaultValue: false},
         {localKey:"Running", dataPath:"running",defaultValue: false},
-        {localKey:"TurnFace", dataPath:"turningToFace",defaultValue: false}]
+        {localKey:"TurnFace", dataPath:"turningToFace",defaultValue: false},
+        {localKey:"FireZoneWidth",  dataPath:"zoneWidth",  dtype:"Number", defaultValue: 2},
+        {localKey:"RoundsFiredLbl", dataPath:"roundsFired", dtype:"Number", defaultValue: weapon.system.rof},
+        {
+            localKey: "TargetsCount",
+            dataPath:"targetsCount",
+            dtype:"Number",
+            defaultValue: Math.max(1, targetTokens.length)
+        },
+        ]
     ];
 }
 

@@ -737,6 +737,27 @@
 			},
 			"gear": {
 				"eurobucks": 0
+			},
+			"netrun": {
+				"icon": { "type": "String", "default": "" },
+				"deckModel": "",
+				"interface": 0,
+				"cpu": 0,
+				"speed": 0,
+				"strength": 0,
+				"dataWall": 0,
+				"ramMax": 0,
+				"ramUsed": 0,
+				"deckType": "",
+				"hasElectrodes": false,
+				"hasKeyboard": false,
+				"hasScreen": false,
+				"hasPrinter": false,
+				"hasChipReader": false,
+				"hasVoxBox": false,
+				"hasScanner": false,
+				"hasExtraChip": false,
+				"activePrograms": []
 			}
 		},
 		"character": {
@@ -785,7 +806,8 @@
 			"diffMod": 1,
 			"isChipped": false,
 			"isRoleSkill": false,
-			"stat": "cool"
+			"stat": "cool",
+			"askMods": false
 		},
 		"program": {
 			"templates": ["common"],
@@ -793,27 +815,6 @@
 			"mu": 0,
 			"programType": "",
 			"actionFormula": ""
-		},
-		"netrun": {
-			"icon": "",
-			"deckModel": "",
-			"interface": 0,
-			"cpu": 0,
-			"speed": 0,
-			"strength": 0,
-			"dataWall": 0,
-			"ramMax": 0,
-			"ramUsed": 0,
-			"deckType": "",
-			"hasElectrodes": false,
-			"hasKeyboard": false,
-			"hasScreen": false,
-			"hasPrinter": false,
-			"hasChipReader": false,
-			"hasVoxBox": false,
-			"hasScanner": false,
-			"hasExtraChip": false,
-			"activePrograms": []
 		},
 		"weapon": {
 			"templates": ["common"],

@@ -11,7 +11,7 @@ export class CyberpunkActorSheet extends ActorSheet {
 
   /** @override */
   static get defaultOptions() {
-    return mergeObject(super.defaultOptions, {
+    return foundry.utils.mergeObject(super.defaultOptions, {
       // Css classes
       classes: ["cyberpunk", "sheet", "actor"],
       template: "systems/cyberpunk2020/templates/actor/actor-sheet.hbs",
@@ -55,10 +55,10 @@ export class CyberpunkActorSheet extends ActorSheet {
 
       // Retrieve the initiative modifier from system data
       // Ensure that you have defined `initiativeMod` in your system data schema
-      const initiativeMod = getProperty(system, "initiativeMod") || 0;
+      const initiativeMod = foundry.utils.getProperty(system, "initiativeMod") || 0;
       sheetData.initiativeMod = initiativeMod;
 
-      const StunDeathMod = getProperty(system, "StunDeathMod") || 0;
+      const StunDeathMod = foundry.utils.getProperty(system, "StunDeathMod") || 0;
       sheetData.StunDeathMod = StunDeathMod;
     }
 
@@ -67,11 +67,14 @@ export class CyberpunkActorSheet extends ActorSheet {
     allPrograms.sort((a, b) => a.name.localeCompare(b.name));
     sheetData.netrunPrograms = allPrograms;
 
+    sheetData.programsTotalCost = allPrograms
+    .reduce((sum, p) => sum + Number(p.system.cost || 0), 0);
+
     /**
      * Collect the list of active programs based on the ID array
-     *   actor.system.netrun.activePrograms: string[]
+     *   actor.system.activePrograms: string[]
      */
-    const activeProgIds = this.actor.system.netrun?.activePrograms || [];
+    const activeProgIds = this.actor.system.activePrograms || [];
     // Filter out the ones the actor actually has.
     const activePrograms = allPrograms.filter(p => activeProgIds.includes(p.id));
     // Put them in sheetData so netrun-tab.hbs can output them
@@ -225,27 +228,126 @@ export class CyberpunkActorSheet extends ActorSheet {
       updateData[target] = parseInt(event.target.value, 10);
       // Mild hack to make sheet refresh and re-sort: the ability to do that should just be put in 
       await this.actor.updateEmbeddedDocuments("Item", [updateData]);
-      let combatSenseItemFind = this.actor.items.find(item => item.type === 'skill' && item.name.includes('Combat'))?.system.level || 0;
+      // let combatSenseItemFind = this.actor.items.find(item => item.type === 'skill' && item.name.includes('Combat'))?.system.level || 0;
+      let combatSenseItemFind = 
+        this.actor.items.find(item => item.type === 'skill' && item.name.includes('Combat'))?.system.level
+        ?? this.actor.items.find(item => item.type === 'skill' && item.name.includes('Боя'))?.system.level
+        ?? 0;
       await this.actor.update({ "system.CombatSenseMod": Number(combatSenseItemFind) });
-    });    
+    });
     // Toggle skill chipped
-    html.find(".chip-toggle").click(ev => {
-      let skill = this.actor.items.get(ev.currentTarget.dataset.skillId);
-      this.actor.updateEmbeddedDocuments("Item", [{
+    html.find(".chip-toggle").click(async ev => {
+      const skill = this.actor.items.get(ev.currentTarget.dataset.skillId);
+      const toggled = !skill.system.isChipped;
+
+      await this.actor.updateEmbeddedDocuments("Item", [{
         _id: skill.id,
-        "system.isChipped": !skill.system.isChipped
+        "system.isChipped": toggled,
+        "system.-=chipped": null
       }]);
     });
-
+    
     // Skill sorting
     html.find(".skill-sort > select").change(ev => {
       let sort = ev.currentTarget.value;
       this.actor.sortSkills(sort);
     });
 
+    // Skill search: auto-filter + clear button
+    const $skillSearch = html.find('input.skill-search[name="system.transient.skillFilter"]');
+    const $skillClear  = html.find('.skill-search-clear');
+
+    const toggleClear = () => $skillClear.toggleClass('is-visible', !!$skillSearch.val());
+
+    // Restore caret position after re-render (so typing continues without jumping)
+    if (this._restoreSkillCaret != null) {
+      const el = $skillSearch[0];
+      if (el) {
+        el.focus();
+        const pos = Math.min(this._restoreSkillCaret, el.value.length);
+        try { el.setSelectionRange(pos, pos); } catch(_) {}
+      }
+      this._restoreSkillCaret = null;
+    }
+
+    toggleClear();
+
+    // Auto-search while typing
+    let searchTypingTimer;
+    $skillSearch.on('input', (ev) => {
+      const val = ev.currentTarget.value || "";
+      toggleClear();
+
+      // Remember cursor position before re-render
+      this._restoreSkillCaret = ev.currentTarget.selectionStart ?? val.length;
+
+      // Update the "transient" filter in memory (without actor.update)
+      foundry.utils.setProperty(this.actor.system, "transient.skillFilter", val);
+
+      // Soft re-render of the sheet
+      clearTimeout(searchTypingTimer);
+      searchTypingTimer = setTimeout(() => this.render(false), 120);
+    });
+
+    html.on('pointerdown mousedown', '[data-action="clear-skill-search"]', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+    });
+
+    // Clear the field and instantly reset the filter
+    html.on('click', '[data-action="clear-skill-search"]', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+
+      $skillSearch.val('');
+      this._restoreSkillCaret = 0;
+      foundry.utils.setProperty(this.actor.system, "transient.skillFilter", "");
+      this.render(false);
+    });
+
+    // Prompt for modifiers
+    html.find(".skill-ask-mod")
+      .on("click",  ev => ev.stopPropagation())
+      .on("change", async ev => {
+        ev.stopPropagation();
+
+        const cb = ev.currentTarget;
+        const skillId = cb.dataset.skillId;
+        const skill = this.actor.items.get(skillId);
+        if (!skill) return ui.notifications.warn(localize("SkillNotFound"));
+
+        try {
+          await skill.update({ "system.askMods": cb.checked });
+        } catch (err) {
+          console.error(err);
+          ui.notifications.error(localize("UpdateAskModsError"));
+          cb.checked = !cb.checked;
+        }
+      });
+
     // Skill roll
     html.find(".skill-roll").click(ev => {
-      let id = ev.currentTarget.dataset.skillId;
+      const id = ev.currentTarget.dataset.skillId;
+      const skill = this.actor.items.get(id);
+      if (!skill) return;
+
+      if (skill.system?.askMods) {
+        const dlg = new ModifiersDialog(this.actor, {
+          title: localize("ModifiersSkillTitle"),
+          showAdvDis: true,
+          modifierGroups: [[
+            { localKey: "ExtraModifiers", dataPath: "extraMod", defaultValue: 0 }
+          ]],
+          onConfirm: ({ extraMod=0, advantage=false, disadvantage=false }) =>
+            this.actor.rollSkill(
+              id,
+              Number(extraMod) || 0,
+              advantage,
+              disadvantage
+            )
+        });
+        return dlg.render(true);
+      }
       this.actor.rollSkill(id);
     });
 
@@ -296,7 +398,7 @@ export class CyberpunkActorSheet extends ActorSheet {
     html.find('.item-delete').click(deleteItemDialog.bind(this));
     html.find('.rc-item-delete').bind("contextmenu", deleteItemDialog.bind(this)); 
 
-    // Кнопка "Fire" для оружия
+    // "Fire" button for weapons
     html.find('.fire-weapon').click(ev => {
       ev.stopPropagation();
       let item = getEventItem(this, ev);
@@ -416,7 +518,7 @@ export class CyberpunkActorSheet extends ActorSheet {
       ev.preventDefault();
       const skillId = ev.currentTarget.dataset.skillId;
       if (!skillId) {
-        ui.notifications.warn(`Interface skill not found - no skill to roll.`);
+        ui.notifications.warn(localize("InterfaceSkillNotFound"));
         return;
       }
       this.actor.rollSkill(skillId);
@@ -428,7 +530,7 @@ export class CyberpunkActorSheet extends ActorSheet {
       const div = ev.currentTarget;
       const itemId = div.dataset.itemId;
       if (!itemId) return;
-      const currentActive = [...(this.actor.system.netrun.activePrograms || [])];
+      const currentActive = [...(this.actor.system.activePrograms || [])];
       const idx = currentActive.indexOf(itemId);
       if (idx < 0) return;
 
@@ -438,26 +540,28 @@ export class CyberpunkActorSheet extends ActorSheet {
       for (let progId of currentActive) {
         let progItem = this.actor.items.get(progId);
         if (!progItem) continue;
-        sumMU += (progItem.system.mu || 0);
+        sumMU += Number(progItem.system.mu) || 0;
       }
 
       await this.actor.update({
-        "system.netrun.activePrograms": currentActive,
-        "system.netrun.ramUsed": sumMU
+        "system.activePrograms": currentActive,
+        "system.ramUsed": sumMU
       });
 
-      ui.notifications.info(`Программа снята с активных.`);
+      ui.notifications.info(localize("ProgramDeactivated"));
     });
 
     html.find('.filepicker').on('click', async (ev) => {
       ev.preventDefault();
-      const currentPath = this.actor.system.netrun.icon || "";
+      const currentPath = this.actor.system.icon || "";
       
       const fp = new FilePicker({
         type: "image",
         current: currentPath,
         callback: (path) => {
-          this.actor.update({"system.netrun.icon": path});
+          this.actor.update({"system.icon": path});
+          html.find(".netrun-icon-frame img").attr("src", path);
+          html.find('input[name="system.icon"]').val(path);
         },
         top: this.position.top + 40,
         left: this.position.left + 10
@@ -487,7 +591,7 @@ export class CyberpunkActorSheet extends ActorSheet {
 
       // If it is not a program, skip it
       if (itemData.type !== "program") {
-        return ui.notifications.warn(`Это не программа: ${itemData.name}`);
+        return ui.notifications.warn(localize("NotAProgram", { name: itemData.name }));
       }
 
       // If a person pulls a program that the same actor already has,
@@ -495,7 +599,7 @@ export class CyberpunkActorSheet extends ActorSheet {
       const sameActor = (data.actorId === this.actor.id);
       const existingItem = sameActor ? this.actor.items.get(itemData._id) : null;
       if (existingItem) {
-        ui.notifications.warn(`Программа '${existingItem.name}' уже есть в списке. Дубликат не создаю.`);
+        ui.notifications.warn(localize("ProgramAlreadyExists", { name: existingItem.name }));
         return;
       }
 
@@ -505,40 +609,47 @@ export class CyberpunkActorSheet extends ActorSheet {
 
     // 2. Drop in “active-programs”
     if (dropTarget.dataset.dropTarget === "active-programs") {
+      // Get Item from drag data
       let itemData = await Item.implementation.fromDropData(data);
 
       if (itemData.type !== "program") {
-        return ui.notifications.warn(`Можно активировать только программы. Это не программа: ${itemData.name}`);
+        return ui.notifications.warn(localize("OnlyProgramsCanBeActivated", { name: itemData.name }));
       }
 
-      // Maybe the actor already has the program
+      // Check if the item is already in your inventory; if not, copy it
       let item = this.actor.items.get(itemData._id);
-
-      // If suddenly there is no item in the inventory - it means that “someone else's” Item is being dragged. Let's create a copy:
       if (!item) {
-        const [created] = await this.actor.createEmbeddedDocuments("Item", [ itemData ]);
+        const [created] = await this.actor.createEmbeddedDocuments("Item", [itemData]);
         item = created;
       }
 
-      // Get an array of already activated programs (ID)
-      const currentActive = this.actor.system.netrun.activePrograms || [];
+      // Current list of active programs (ID)
+      const currentActive = this.actor.system.activePrograms || [];
+      const newMu = Number(item.system.mu) || 0;
 
-      // If this item.id is not there yet - add it and save it
+      // Count the already occupied MU
+      const usedMu = currentActive.reduce((sum, id) => {
+        const p = this.actor.items.get(id);
+        return sum + (Number(p?.system.mu) || 0);
+      }, 0);
+
+      const ramMax = Number(this.actor.system.ramMax) || 0;
+
+      // If we exceed the limit after adding, we reject it
+      if (ramMax && (usedMu + newMu) > ramMax) {
+        return ui.notifications.warn(
+          localize("NotEnoughRAM", { name: item.name, used: usedMu, max: ramMax })
+        );
+      }
+
+      // Add to active, if not already there
       if (!currentActive.includes(item.id)) {
         currentActive.push(item.id);
 
-        let sumMU = 0;
-        for (let progId of currentActive) {
-          let progItem = this.actor.items.get(progId);
-          if (!progItem) continue;
-          let muVal = progItem.system.mu || 0;
-          console.log(`DEBUG:   => Summation: add ${progItem.name} (mu=${muVal})`);
-          sumMU += muVal;
-        }
-
-        await this.actor.update({ 
-          "system.netrun.activePrograms": currentActive,
-          "system.netrun.ramUsed": sumMU
+        const totalMu = usedMu + newMu;
+        await this.actor.update({
+          "system.activePrograms": currentActive,
+          "system.ramUsed": totalMu
         });
 
         this.render(true);

@@ -11,7 +11,7 @@ export class CyberpunkItemSheet extends ItemSheet {
 
   /** @override */
   static get defaultOptions() {
-    return mergeObject(super.defaultOptions, {
+    return foundry.utils.mergeObject(super.defaultOptions, {
       classes: ["cyberpunk", "sheet", "item"],
       width: 520,
       height: 480,
@@ -138,5 +138,26 @@ export class CyberpunkItemSheet extends ItemSheet {
       cyber.sheet.render(true);
     });
   }
-  
+
+  /** @override */
+  async _updateObject(event, formData) {
+    const data = foundry.utils.expandObject(formData);
+
+    if (this.item.type === "skill") {
+      const fixNum = v => {
+        const n = parseInt(v ?? 0, 10);
+        return isNaN(n) ? 0 : n;
+      };
+      foundry.utils.setProperty(data, "system.level",     fixNum(foundry.utils.getProperty(data,"system.level")));
+      foundry.utils.setProperty(data, "system.chipLevel", fixNum(foundry.utils.getProperty(data,"system.chipLevel")));
+    }
+
+    const legacy = foundry.utils.getProperty(data, "system.chipped");
+    if (legacy !== undefined) {
+      foundry.utils.setProperty(data, "system.isChipped", !!legacy);
+      if (data.system && "chipped" in data.system) delete data.system.chipped;
+    }
+
+    await this.item.update(data);
+  }
 }
