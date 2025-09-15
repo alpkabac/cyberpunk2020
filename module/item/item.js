@@ -275,7 +275,13 @@ export class CyberpunkItem extends Item {
       attackTerms.push(system.accuracy);
     }
 
-    return await makeD10Roll(attackTerms, {
+    // Build a safe d10x10 formula from the attack terms
+    const sanitized = attackTerms.map(t => (t === null || t === undefined ? "" : String(t).trim())).filter(t => t !== "");
+    const modExpr = sanitized.join("+");
+    const formula = `1d10x10${modExpr ? ("+" + modExpr) : ""}`;
+    console.log("Attack formula:", formula, { stats: this.actor.system.stats, attackSkill: this.actor.getSkillVal(this.system.attackSkill) });
+
+    return await new Roll(formula, {
       stats: this.actor.system.stats,
       attackSkill: this.actor.getSkillVal(this.system.attackSkill)
     }).evaluate();
@@ -307,8 +313,10 @@ export class CyberpunkItem extends Item {
           // Roll damage for each of the bullets that hit
           for (let i = 0; i < roundsHit; i++) {
               let damageRoll = await new Roll(system.damage).evaluate();
-              let penetrationRoll = await new Roll(this.system.penetration).evaluate({ async: true });
-              let penetrationTotal = penetrationRoll.dice[0]?.total || 0;
+              let penetrationRoll = await new Roll(this.system.penetration).evaluate();
+              let penetrationTotal = ((typeof penetrationRoll.total === "number") 
+                ? penetrationRoll.total 
+                : (penetrationRoll.dice?.reduce((s,d)=>s + (d.total||0), 0) || 0));
               let location = (await rollLocation(attackMods.targetActor, attackMods.targetArea)).areaHit;
               if (!areaDamages[location]) {
                   areaDamages[location] = [];
@@ -354,8 +362,10 @@ export class CyberpunkItem extends Item {
           roundsHit = await new Roll("1d3").evaluate();
           for (let i = 0; i < roundsHit.total; i++) {
               let damageRoll = await new Roll(system.damage).evaluate();
-              let penetrationRoll = await new Roll(this.system.penetration).evaluate({ async: true });
-              let penetrationTotal = penetrationRoll.dice[0]?.total || 0;
+              let penetrationRoll = await new Roll(this.system.penetration).evaluate();
+              let penetrationTotal = ((typeof penetrationRoll.total === "number") 
+                ? penetrationRoll.total 
+                : (penetrationRoll.dice?.reduce((s,d)=>s + (d.total||0), 0) || 0));
               let location = (await rollLocation(attackMods.targetActor, attackMods.targetArea)).areaHit;
               if (!areaDamages[location]) {
                   areaDamages[location] = [];
@@ -432,8 +442,10 @@ export class CyberpunkItem extends Item {
       let attackRoll = await this.attackRoll(attackMods);
       let damageRoll = await new Roll(system.damage).evaluate();
 
-      let penetrationRoll = await new Roll(this.system.penetration).evaluate({ async: true });
-      let penetrationTotal = penetrationRoll.dice[0]?.total || 0;
+      let penetrationRoll = await new Roll(this.system.penetration).evaluate();
+      let penetrationTotal = ((typeof penetrationRoll.total === "number") 
+        ? penetrationRoll.total 
+        : (penetrationRoll.dice?.reduce((s,d)=>s + (d.total||0), 0) || 0));
       console.log("Penetration Total:", penetrationTotal);
       let locationRoll = await rollLocation(attackMods.targetActor, attackMods.targetArea);
       let actualRangeBracket = rangeResolve[attackMods.range](system.range);
