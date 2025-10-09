@@ -443,5 +443,6 @@
     "CYBERPUNK.ProgramTypeLabel": "Class",
     "CYBERPUNK.ProgramStrength": "Strength",
     "CYBERPUNK.ActionThrow": "Action Throw",
-    "CYBERPUNK.NetProgramsCost": "Programs Cost"
+    "CYBERPUNK.NetProgramsCost": "Programs Cost",
+    "CYBERPUNK.Energy": "Energy"
 }
