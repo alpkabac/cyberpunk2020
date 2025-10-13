@@ -150,24 +150,31 @@ export class CyberpunkActor extends Actor {
       system.carryWeight += parseFloat(weight);
     });
 
-    // Apply wound effects
+    // Apply wound effects (+ Pain Editor support)
     // Change stat total, but leave a record of the difference in stats.[statName].woundMod
     // Modifies the very-end-total, idk if this'll need to change in the future
-    let woundState = this.woundState();
-    let woundStat = function(stat, totalChange) {
-        let newTotal = totalChange(stat.total)
+    const woundState = this.woundState();
+    ['ref','int','cool'].forEach(k => { if (stats[k]) stats[k].woundMod = 0; });
+
+    // If Pain Editor is disabled, apply standard penalties to stats
+    // If enabled, do not cut stats; only debuffs on SPAS remain via woundState()
+    const hasPainEditor = !!foundry.utils.getProperty(system, "painEditor");
+    if (!hasPainEditor) {
+      const woundStat = function(stat, totalChange) {
+        const newTotal = totalChange(stat.total);
         stat.woundMod = -(stat.total - newTotal);
         stat.total = newTotal;
+      };
+
+      if (woundState >= 4) {
+        [stats.ref, stats.int, stats.cool].forEach(stat => woundStat(stat, total => Math.ceil(total/3)));
+      } else if (woundState == 3) {
+        [stats.ref, stats.int, stats.cool].forEach(stat => woundStat(stat, total => Math.ceil(total/2)));
+      } else if (woundState == 2) {
+        woundStat(stats.ref, total => total - 2);
+      }
     }
-    if(woundState >= 4) {
-      [stats.ref, stats.int, stats.cool].forEach(stat => woundStat(stat, total => Math.ceil(total/3)));
-    } 
-    else if(woundState == 3) {
-      [stats.ref, stats.int, stats.cool].forEach(stat => woundStat(stat, total => Math.ceil(total/2)));
-    }
-    else if(woundState == 2) {
-      woundStat(stats.ref, total => total - 2);
-    }
+
     // calculate and configure the humanity
     const emp = stats.emp;
     emp.humanity = {base: emp.base * 10};

@@ -444,5 +444,6 @@
     "CYBERPUNK.ProgramStrength": "Сила",
     "CYBERPUNK.ActionThrow": "Бросок действия",
     "CYBERPUNK.NetProgramsCost": "Стоимость программ",
-    "CYBERPUNK.Energy": "Энергия"
+    "CYBERPUNK.Energy": "Энергия",
+    "CYBERPUNK.PainEditor": "Редактор Боли"
 }

@@ -444,5 +444,6 @@
     "CYBERPUNK.ProgramStrength": "Strength",
     "CYBERPUNK.ActionThrow": "Action Throw",
     "CYBERPUNK.NetProgramsCost": "Programs Cost",
-    "CYBERPUNK.Energy": "Energy"
+    "CYBERPUNK.Energy": "Energy",
+    "CYBERPUNK.PainEditor": "Pain Editor"
 }
