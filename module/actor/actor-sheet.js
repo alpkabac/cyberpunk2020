@@ -157,7 +157,9 @@ export class CyberpunkActorSheet extends ActorSheet {
         listToFilter = sheetData.filteredSkillIDs; 
       }
       return listToFilter.filter(id => {
-        let skillName = this.actor.items.get(id).name;
+        let skill = this.actor.items.get(id);
+        if (!skill) { return false; }
+        let skillName = skill.name;
         return skillName.toUpperCase().includes(upperSearch);
       });
     }
