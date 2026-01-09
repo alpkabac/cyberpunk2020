@@ -421,7 +421,7 @@ export function strengthDamageBonus(bt) {
         case 11:
         case 12: return 4 
         case 13:
-        case 14: return 5
+        case 14: return 6
         default: return 8
     }
 }
