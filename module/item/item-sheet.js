@@ -129,8 +129,9 @@ async _prepareCyberware(sheet) {
     this.item.updateSource({
       "system.Module": {
         IsModule: false,
-        AllowedParentCyberwareType: [],
-        TakesOptions: 0
+        ParentId: "",
+        SlotsTaken: 0,
+        AllowedParentCyberwareType: ""
       }
     });
   }
@@ -303,23 +304,14 @@ async _prepareCyberware(sheet) {
     return null;
   };
 
-  const worldTypes = Array.from(game.items ?? [])
-    .filter(i => i.type === "cyberware")
-    .map(i => pickType(i.system?.cyberwareType))
-    .filter(Boolean);
+    // Only module-capable implant base types (no dynamic extras)
+    sheet.cw.parentCwTypeChoices = TYPE_CHOICES_BASE;
 
-  const actorTypes = this.actor
-    ? (this.actor.itemTypes.cyberware ?? [])
-        .map(i => pickType(i.system?.cyberwareType))
-        .filter(Boolean)
-    : [];
-
-  const known = new Set(TYPE_CHOICES_BASE.map(c => c.value));
-  const extra = Array.from(new Set([...worldTypes, ...actorTypes]))
-    .filter(v => typeof v === "string" && v.length && !known.has(v))
-    .map(v => ({ value: v, localKey: v }));
-
-  sheet.cw.parentCwTypeChoices = [...TYPE_CHOICES_BASE, ...extra];
+    // Normalize currently selected values (supports legacy aliases like "CYBERARM", "Arm", etc.)
+    sheet.cw.cyberwareTypeSelected = pickType(this.item.system?.cyberwareType) || "";
+    sheet.cw.allowedParentCwTypeSelected =
+      pickType(this.item.system?.Module?.AllowedParentCyberwareType) ||
+      String(this.item.system?.Module?.AllowedParentCyberwareType || "");
 
     // Implant: free/taken options with automatic module accounting (only equipped modules count)
     const provided = Number(this.item.system?.CyberWorkType?.OptionsAvailable) || 0;
@@ -371,7 +363,7 @@ async _prepareCyberware(sheet) {
           cwHasType(i, "Implant") &&
           i.id !== this.item.id &&
           !!i.system?.equipped &&
-          (!needType || String(i.system?.cyberwareType || "") === needType) &&
+          (!needType || pickType(i.system?.cyberwareType) === pickType(needType)) &&
           (zoneOf(i) === needZone) &&
           (needZone === "Arm" || needZone === "Leg" ? (!needSide || sideOf(i) === needSide) : true)
         )

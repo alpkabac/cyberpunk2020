@@ -82,8 +82,7 @@
     <span class="flex-pad"></span>
     <select name="system.Module.AllowedParentCyberwareType">
       {{#each cw.parentCwTypeChoices as |ch|}}
-        <option value="{{ch.value}}"
-          {{#if (equals ../system.Module.AllowedParentCyberwareType ch.value)}}selected{{/if}}>
+        <option value="{{ch.value}}" {{#if (equals ../cw.allowedParentCwTypeSelected ch.value)}}selected{{/if}}>
           {{#if (equals ch.localKey ch.value)}}
             {{ch.value}}
           {{else}}
@@ -355,8 +354,7 @@
       <span class="flex-pad"></span>
       <select name="system.cyberwareType">
         {{#each cw.parentCwTypeChoices as |ch|}}
-          <option value="{{ch.value}}"
-            {{#if (equals ../system.cyberwareType ch.value)}}selected{{/if}}>
+          <option value="{{ch.value}}" {{#if (equals ../cw.cyberwareTypeSelected ch.value)}}selected{{/if}}>
             {{#if (equals ch.localKey ch.value)}}
               {{ch.value}}
             {{else}}
