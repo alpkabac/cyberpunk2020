@@ -92,52 +92,96 @@ export function clamp(x, min, max) {
     return Math.min(Math.max(x, min), max);
 }
 
-export async function getDefaultSkills() {
-    // Получаем значение настройки языка
-    // Get the language setting value
-    const selectedLanguage= game.i18n.lang
+export async function getDefaultSkills(lang = game.i18n.lang) {
+  const packs = getSkillsPackNames(lang);
+  const defaultPackName = packs.find((p) => p.startsWith("cyberpunk2020.default-skills-"));
+  if (!defaultPackName) return [];
 
-    // Определяем, какой пакет загружать на основе выбранного языка
-    // Determine which package to load based on the selected language
-    let packName;
-    switch(selectedLanguage) {
-        case "en":
-            packName = "cyberpunk2020.default-skills-en";
-            break;
-        case "ru":
-            packName = "cyberpunk2020.default-skills-ru";
-            break;
-        default:
-            packName = "cyberpunk2020.default-skills-en";
-    }
+  const pack = game.packs.get(defaultPackName);
+  if (!pack) return [];
 
-    // Получаем пакет на основе его имени
-    // Retrieve the package by its name
-    const pack = game.packs.get(packName);
+  return await pack.getDocuments();
+}
 
-    // Загружаем содержимое выбранного пакета
-    // Load the content of the selected package
-    const content = await pack.getDocuments();
+function _cpNormalizeLang(lang) {
+  return String(lang || "en").trim().toLowerCase().replace("_", "-");
+}
 
-    // Возвращаем содержимое пакета
-    // Return the package content
-    return content;
+function _cpLangCandidates(lang) {
+  const l = _cpNormalizeLang(lang);
+  const out = [];
+  if (l) out.push(l);
+
+  const base = l.split("-")[0];
+  if (base && base !== l) out.push(base);
+
+  // always keep EN as a final stable fallback if present
+  if (!out.includes("en")) out.push("en");
+
+  return out;
 }
 
 /**
  * Return compendium pack names that contain skills for the given language.
- * We keep EN as a safe fallback.
+ * This is dynamic: it discovers available language packs from game.packs.
+ *
+ * Naming convention:
+ *   cyberpunk2020.default-skills-<lang>
+ *   cyberpunk2020.role-skills-<lang>
+ *
+ * Language matching priority:
+ *   exact (e.g. pt-br) -> base (pt) -> en -> first available
+ *
  * @param {string} lang
- * @returns {string[]} pack collection IDs (e.g. "cyberpunk2020.default-skills-en")
+ * @returns {string[]} pack collection IDs
  */
 export function getSkillsPackNames(lang = game.i18n.lang) {
-  const l = String(lang || "en").toLowerCase();
-  const suffix = (l === "ru" || l === "en") ? l : "en";
-  const candidates = [
-    `cyberpunk2020.default-skills-${suffix}`,
-    `cyberpunk2020.role-skills-${suffix}`
-  ];
-  return candidates.filter((n) => !!game.packs.get(n));
+  const prefixes = {
+    default: "cyberpunk2020.default-skills-",
+    role: "cyberpunk2020.role-skills-"
+  };
+
+  // Discover available packs by suffix
+  const available = {
+    default: new Map(),
+    role: new Map()
+  };
+
+  for (const pack of game.packs) {
+    const col = pack.collection;
+    if (!col) continue;
+
+    for (const [kind, prefix] of Object.entries(prefixes)) {
+      if (col.startsWith(prefix)) {
+        const suffix = col.slice(prefix.length).toLowerCase();
+        available[kind].set(suffix, col);
+      }
+    }
+  }
+
+  const want = _cpLangCandidates(lang);
+
+  const pick = (kind) => {
+    // 1) exact/base/en candidate match
+    for (const cand of want) {
+      const col = available[kind].get(cand);
+      if (col) return col;
+    }
+    // 2) if en exists but not already matched (covers cases where lang candidates didn't include en for some reason)
+    const en = available[kind].get("en");
+    if (en) return en;
+
+    // 3) otherwise: first available pack of this kind
+    return available[kind].values().next().value ?? null;
+  };
+
+  const out = [];
+  const d = pick("default");
+  const r = pick("role");
+  if (d) out.push(d);
+  if (r) out.push(r);
+
+  return out;
 }
 
 const _cpSkillIndexCache = new Map();
@@ -145,15 +189,16 @@ const _cpSkillIndexCache = new Map();
 /**
  * Get a locale-appropriate list of skills from compendiums, without requiring an Actor.
  * Returns: [{ id, name }]
- * Cached per language.
+ * Cached per resolved pack-set (not just by language string).
+ *
  * @param {string} lang
  * @returns {Promise<Array<{id: string, name: string}>>}
  */
 export async function getSkillIndex(lang = game.i18n.lang) {
-  const l = String(lang || "en").toLowerCase();
-  if (_cpSkillIndexCache.has(l)) return _cpSkillIndexCache.get(l);
+  const packs = getSkillsPackNames(lang);
+  const cacheKey = packs.join("|") || "none";
+  if (_cpSkillIndexCache.has(cacheKey)) return _cpSkillIndexCache.get(cacheKey);
 
-  const packs = getSkillsPackNames(l);
   const out = [];
 
   for (const packName of packs) {
@@ -162,6 +207,7 @@ export async function getSkillIndex(lang = game.i18n.lang) {
 
     // v12/v13: getIndex supports { fields }
     const idx = await pack.getIndex({ fields: ["name", "type"] });
+
     for (const e of idx) {
       if (e.type && e.type !== "skill") continue;
       // Compendium index uses "_id"
@@ -171,13 +217,14 @@ export async function getSkillIndex(lang = game.i18n.lang) {
 
   // De-duplicate by id (default + role packs can overlap)
   const byId = new Map();
-  for (const s of out) if (s?.id && s?.name && !byId.has(s.id)) byId.set(s.id, s);
+  for (const s of out) {
+    if (s?.id && s?.name && !byId.has(s.id)) byId.set(s.id, s);
+  }
 
   const list = Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
-  _cpSkillIndexCache.set(l, list);
+  _cpSkillIndexCache.set(cacheKey, list);
   return list;
 }
-
 
 // Checking implant mechanics
 // Accepts: the Item document itself, its system, or directly the CyberWorkType object
