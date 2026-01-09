@@ -1,6 +1,6 @@
 import { weaponTypes, meleeAttackTypes, rangedAttackTypes, attackSkills, concealability, availability, reliability, getStatNames } from "../lookups.js";
 import { formulaHasDice } from "../dice.js";
-import { localize, cwHasType } from "../utils.js";
+import { localize, cwHasType, getSkillIndex } from "../utils.js";
 import { getMartialKeyByName } from '../translations.js'
 
 /**
@@ -33,9 +33,9 @@ export class CyberpunkItemSheet extends ItemSheet {
   /* -------------------------------------------- */
 
   /** @override */
-  getData() {
+  async getData() {
     // This means the handlebars data and the form edit data actually mirror each other
-    const data = super.getData();
+    const data = await super.getData();
     data.system = this.item.system;
 
     switch (this.item.type) {
@@ -52,7 +52,7 @@ export class CyberpunkItemSheet extends ItemSheet {
         break;
 
       case "cyberware": 
-        this._prepareCyberware(data); 
+        await this._prepareCyberware(data); 
         break;
 
       default:
@@ -96,7 +96,7 @@ export class CyberpunkItemSheet extends ItemSheet {
  * Prepares data for the cyberware item sheet template.
  * Gathers option lists, selected values, and labels.
 */
-_prepareCyberware(sheet) {
+async _prepareCyberware(sheet) {
   const L = (k) => {
     if (game.i18n.has(`CYBERPUNK.${k}`)) return game.i18n.localize(`CYBERPUNK.${k}`);
     if (game.i18n.has(k)) return game.i18n.localize(k);
@@ -191,12 +191,39 @@ _prepareCyberware(sheet) {
   sheet.cw.currentPenalties = Object.keys(penObj).map((k) => ({ key: k, label: findLabel(PENALTY_KEYS, k) }));
   sheet.cw.penaltyRemain = PENALTY_KEYS.filter((p) => !(p.key in penObj));
 
-  // Skills (from the actor, if present)
+  // Skills:
+  // - If we have an Actor: use Actor's embedded skill Items (supports custom skills).
+  // - If there is no Actor (e.g. compendium/world item): load skills from locale compendiums.
+  // IMPORTANT: store selected skills in implants by Skill Item _id (stable across localizations).
   const actorSkills = this.actor?.itemTypes?.skill ?? [];
-  sheet.cw.skillOptions = actorSkills.map((s) => s.name).sort((a, b) => a.localeCompare(b));
-  sheet.cw.currentSkills = Object.keys(cwt.Skill ?? {}).sort();
-  sheet.cw.currentChipSkills = Object.keys(cwt.ChipSkills ?? {}).sort();
+  const skillsList = actorSkills.length
+    ? actorSkills.map((s) => ({ id: s.id, name: s.name }))
+    : await getSkillIndex(game.i18n.lang);
+
+  skillsList.sort((a, b) => a.name.localeCompare(b.name));
+
+  sheet.cw.skillOptions = skillsList.map((s) => s.name);
   sheet.cw.hasActor = !!this.actor;
+
+  // Maps used by sheet interaction handlers (name -> id) and for display (id -> name).
+  this._cwSkillNameToId = new Map(skillsList.map((s) => [s.name, s.id]));
+  this._cwSkillIdToName = new Map(skillsList.map((s) => [s.id, s.name]));
+
+  const resolveSkillLabel = (key) => {
+    // Prefer actor's current localized name, if actor has the skill
+    const byId = this.actor?.items?.get(key);
+    if (byId?.type === "skill") return byId.name;
+    // Otherwise resolve via compendium index for current UI language
+    return this._cwSkillIdToName.get(key) || key; // legacy name-key fallback
+  };
+
+  sheet.cw.currentSkills = Object.keys(cwt.Skill ?? {})
+    .map((k) => ({ key: k, label: resolveSkillLabel(k) }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+
+  sheet.cw.currentChipSkills = Object.keys(cwt.ChipSkills ?? {})
+    .map((k) => ({ key: k, label: resolveSkillLabel(k) }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 
   // Weapon options: from the actor's inventory or from Items
   if (this.actor) {
@@ -407,12 +434,23 @@ _prepareCyberware(sheet) {
     this.render(false);
   }
 
-  _resolveSkillName(query) {
-    const skills = this.actor?.itemTypes?.skill || [];
+  _resolveSkillKey(query) {
     const q = String(query || "").trim();
-    if (!q || !skills.length) return null;
-    const exact = skills.find(s => s.name === q);
-    return exact ? exact.name : null;
+    if (!q) return null;
+
+    // Allow pasting a skill _id directly
+    const byId = this.actor?.items?.get(q);
+    if (byId?.type === "skill") return q;
+    if (this._cwSkillIdToName?.has(q)) return q;
+
+    // Exact match by displayed name (from prepared option list)
+    const idFromName = this._cwSkillNameToId?.get(q);
+    if (idFromName) return idFromName;
+
+    // Fallback: exact name match on actor skills (custom skills)
+    const skills = this.actor?.itemTypes?.skill || [];
+    const exact = skills.find((s) => s.name === q);
+    return exact ? exact.id : null;
   }
 
   /** @override */
@@ -493,9 +531,9 @@ _prepareCyberware(sheet) {
 
     // Skill search
     const addSkillFromInput = async (inputEl, pathPrefix) => {
-      const name = this._resolveSkillName(inputEl?.value || "");
-      if (!name) return;
-      await this._cwSet(`${pathPrefix}.${name}`, 0);
+    const key = this._resolveSkillKey(inputEl?.value || "");
+    if (!key) return;
+    await this._cwSet(`${pathPrefix}.${key}`, 0);
       inputEl.value = "";
       inputEl.blur();
     };
@@ -534,9 +572,9 @@ _prepareCyberware(sheet) {
     html.on("click", ".cw-remove-location", ev => this._cwDelete("system.CyberWorkType.Locations", ev.currentTarget.dataset.key));
     html.on("click", ".cw-remove-penalty", ev => this._cwDelete("system.CyberWorkType.Penalties", ev.currentTarget.dataset.key));
     html.on("click", ".cw-remove-chipskill", async ev => {
-      const skillName = ev.currentTarget.dataset.key;
+      const skillKey = ev.currentTarget.dataset.key;
 
-      await this._cwDelete("system.CyberWorkType.ChipSkills", skillName);
+      await this._cwDelete("system.CyberWorkType.ChipSkills", skillKey);
 
       await this._cp_syncChipLevelsToSkills();
       if (typeof this._cp_syncActiveFlagsToSkills === "function") {
@@ -545,8 +583,13 @@ _prepareCyberware(sheet) {
 
       const actor = this.item.actor;
       if (actor) {
-        const skills = actor.items.filter(i => i.type === "skill" && i.name === skillName);
-        for (const s of skills) if (s.sheet?.rendered) s.sheet.render(true);
+        // New format: key is a Skill Item _id
+        const byId = actor.items.get(skillKey);
+        if (byId?.sheet?.rendered) byId.sheet.render(true);
+
+        // Legacy format fallback: key is a localized skill name
+        const byName = actor.items.filter((i) => i.type === "skill" && i.name === skillKey);
+        for (const s of byName) if (s.sheet?.rendered) s.sheet.render(true);
       }
 
       if (actor?.sheet?.rendered) actor.sheet.render(true);
@@ -699,10 +742,10 @@ _prepareCyberware(sheet) {
 
       const actor = this.item.actor;
       if (actor?.sheet?.rendered) actor.sheet.render(true);
-      const affectedNames = Object.keys(this.item.system?.CyberWorkType?.ChipSkills || {});
+      const affectedKeys = Object.keys(this.item.system?.CyberWorkType?.ChipSkills || {});
       for (const it of (actor?.items ?? [])) {
         if (it.type !== "skill") continue;
-        if (!affectedNames.includes(it.name)) continue;
+        if (!(affectedKeys.includes(it.id) || affectedKeys.includes(it.name))) continue; // id + legacy name
         if (it.sheet?.rendered) it.sheet.render(true);
       }
       this.render(true);
@@ -712,43 +755,56 @@ _prepareCyberware(sheet) {
     if (this.item.type === "skill") {
       html.on("change", "input[name='system.isChipped']", async (ev) => {
         const checked = !!ev.currentTarget.checked;
+
+        const prev = !!this.item.system?.isChipped;
+        if (prev === checked) return;
+
         const actor = this.item.actor;
+        const skillId = this.item.id;
         const skillName = this.item.name;
 
-        const chips = actor ? actor.items.filter(i =>
-          i.type === "cyberware" &&
-          cwHasType(i, "Chip") &&
-          i.system?.CyberWorkType?.ChipSkills &&
-          Object.prototype.hasOwnProperty.call(i.system.CyberWorkType.ChipSkills, skillName)
-        ) : [];
+        const chips = actor ? actor.items.filter(i => {
+          if (i.type !== "cyberware") return false;
+          if (!cwHasType(i, "Chip")) return false;
+          const map = i.system?.CyberWorkType?.ChipSkills;
+          if (!map) return false;
+
+          return (skillId && Object.prototype.hasOwnProperty.call(map, skillId)) ||
+                Object.prototype.hasOwnProperty.call(map, skillName);
+        }) : [];
 
         if (actor && chips.length) {
+          // MOST important: switch ChipActive, otherwise synchronization will “roll back” again.
           const chipUpdates = chips.map(ch => ({
             _id: ch.id,
             "system.CyberWorkType.ChipActive": checked
           }));
           await actor.updateEmbeddedDocuments("Item", chipUpdates, { render: false });
-        }
 
-        if (actor) {
+          // Synchronize levels and flags from active chips
+          if (typeof this._cp_syncChipLevelsToSkills === "function") {
+            await this._cp_syncChipLevelsToSkills();
+          }
+          if (typeof this._cp_syncActiveFlagsToSkills === "function") {
+            await this._cp_syncActiveFlagsToSkills();
+          }
+        } else if (actor) {
           await actor.updateEmbeddedDocuments("Item", [
-            { _id: this.item.id, "system.isChipped": checked }
+            { _id: skillId, "system.isChipped": checked }
           ], { render: false });
         } else {
           await this.item.update({ "system.isChipped": checked }, { render: false });
         }
 
-        // If there are no chips, leave the manual chipLevel as it is
-        if (actor && chips.length) {
-          const agg = Math.max(0, ...chips.map(ch => Number(ch.system?.CyberWorkType?.ChipSkills?.[skillName] || 0)));
-          if (Number(this.item.system?.chipLevel || 0) !== agg) {
-            await actor.updateEmbeddedDocuments("Item", [
-              { _id: this.item.id, "system.chipLevel": agg }
-            ], { render: false });
-          }
+        if (actor) {
+          await actor.updateEmbeddedDocuments("Item", [
+            { _id: skillId, "system.-=chipped": null }
+          ], { render: false });
+          if (actor.sheet?.rendered) actor.sheet.render(true);
+        } else {
+          await this.item.update({ "system.-=chipped": null }, { render: false });
         }
 
-        if (actor?.sheet?.rendered) actor.sheet.render(true);
         for (const ch of chips) if (ch.sheet?.rendered) ch.sheet.render(true);
         this.render(true);
       });
@@ -759,24 +815,45 @@ _prepareCyberware(sheet) {
       const actor = this.item.actor;
       if (!actor) return;
 
+      const skillId = this.item.id;
       const skillName = this.item.name;
+
       const n = Number(ev.currentTarget.value);
       const value = Number.isFinite(n) ? n : 0;
 
-      const chips = actor.items.filter(i =>
-        i.type === "cyberware" &&
-        cwHasType(i, "Chip") &&
-        i.system?.CyberWorkType?.ChipSkills &&
-        Object.prototype.hasOwnProperty.call(i.system.CyberWorkType.ChipSkills, skillName)
-      );
+      const prev = Number(this.item.system?.chipLevel || 0);
+      if (prev === value) return;
+
+      const chips = actor.items.filter(i => {
+        if (i.type !== "cyberware") return false;
+        if (!cwHasType(i, "Chip")) return false;
+        const map = i.system?.CyberWorkType?.ChipSkills;
+        if (!map) return false;
+
+        return (skillId && Object.prototype.hasOwnProperty.call(map, skillId)) ||
+              Object.prototype.hasOwnProperty.call(map, skillName);
+      });
 
       if (!chips.length) return;
 
-      const updates = chips.map(ch => ({
-        _id: ch.id,
-        [`system.CyberWorkType.ChipSkills.${skillName}`]: value
-      }));
-      await actor.updateEmbeddedDocuments("Item", updates, { render: false });
+      const updates = chips.map(ch => {
+        const map = ch.system?.CyberWorkType?.ChipSkills || {};
+        const patch = { _id: ch.id };
+
+        // Update keys that actually exist in the document (id — new format, name — legacy)
+        if (skillId && Object.prototype.hasOwnProperty.call(map, skillId)) {
+          patch[`system.CyberWorkType.ChipSkills.${skillId}`] = value;
+        }
+        if (Object.prototype.hasOwnProperty.call(map, skillName)) {
+          patch[`system.CyberWorkType.ChipSkills.${skillName}`] = value;
+        }
+
+        return patch;
+      }).filter(p => Object.keys(p).length > 1);
+
+      if (updates.length) {
+        await actor.updateEmbeddedDocuments("Item", updates, { render: false });
+      }
 
       if (typeof this._cp_syncChipLevelsToSkills === "function") {
         await this._cp_syncChipLevelsToSkills();
@@ -987,10 +1064,10 @@ _prepareCyberware(sheet) {
     const agg = {};
     for (const cw of chipItems) {
       const map = cw.system?.CyberWorkType?.ChipSkills || {};
-      for (const [name, lvl] of Object.entries(map)) {
+      for (const [key, lvl] of Object.entries(map)) {
         const n = Number(lvl) || 0;
         if (n < 0) continue;
-        agg[name] = Math.max(agg[name] ?? 0, n);
+        agg[key] = Math.max(agg[key] ?? 0, n);
       }
     }
 
@@ -999,7 +1076,7 @@ _prepareCyberware(sheet) {
     const updatedSkillIds = [];
 
     for (const s of skillItems) {
-      const want = Number(agg[s.name] || 0);
+      const want = Number(agg[s.id] ?? agg[s.name] ?? 0);
       const cur  = Number(s.system?.chipLevel || 0);
       if (want !== cur) {
         updates.push({ _id: s.id, "system.chipLevel": want });
@@ -1034,14 +1111,14 @@ _prepareCyberware(sheet) {
     const activeMap = {};
     for (const ch of activeChips) {
       const skills = ch.system?.CyberWorkType?.ChipSkills || {};
-      for (const name of Object.keys(skills)) activeMap[name] = true;
+      for (const key of Object.keys(skills)) activeMap[key] = true;
     }
 
     const skills = actor.items.filter(i => i.type === "skill");
     const updates = [];
     const updatedIds = [];
     for (const s of skills) {
-      const want = !!activeMap[s.name];
+      const want = !!(activeMap[s.id] ?? activeMap[s.name]);
       const cur  = !!(s.system?.isChipped);
       if (want !== cur) {
         updates.push({ _id: s.id, "system.isChipped": want });

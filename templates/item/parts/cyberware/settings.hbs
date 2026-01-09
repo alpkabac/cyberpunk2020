@@ -212,7 +212,7 @@
       <span class="flex-pad"></span>
     </div>
 
-    {{#if cw.hasActor}}
+    {{#if cw.skillOptions.length}}
       <div class="field">
         <label>{{CPLocal "CWT_AddSkill"}}</label>
         <span class="flex-pad"></span>
@@ -230,11 +230,11 @@
 
     {{#each cw.currentSkills as |sk|}}
       <div class="field">
-        <label>{{sk}}</label>
+        <label>{{sk.label}}</label>
         <span class="flex-pad"></span>
-        <input type="number" class="smallnumber" name="system.CyberWorkType.Skill.{{sk}}" placeholder="0"
-               value="{{#if (equals (lookup ../system.CyberWorkType.Skill sk) 0)}}{{else}}{{lookup ../system.CyberWorkType.Skill sk}}{{/if}}">
-        <a class="button danger cw-remove-skill" data-key="{{sk}}">x</a>
+        <input type="number" class="smallnumber" name="system.CyberWorkType.Skill.{{sk.key}}" placeholder="0"
+              value="{{#if (equals (lookup ../system.CyberWorkType.Skill sk.key) 0)}}{{else}}{{lookup ../system.CyberWorkType.Skill sk.key}}{{/if}}">
+        <a class="button danger cw-remove-skill" data-key="{{sk.key}}">x</a>
       </div>
     {{/each}}
   {{/if}}
@@ -378,7 +378,7 @@
   {{/if}}
   {{!-- ===== Chip ===== --}}
   {{#if (cwHasType system.CyberWorkType "Chip")}}
-    {{#if cw.hasActor}}
+    {{#if cw.skillOptions.length}}
       <div class="field">
         <label>{{CPLocal "CWT_AddChipSkill"}}</label>
         <span class="flex-pad"></span>
@@ -396,11 +396,11 @@
 
     {{#each cw.currentChipSkills as |sk|}}
       <div class="field">
-        <label>{{sk}}</label>
+        <label>{{sk.label}}</label>
         <span class="flex-pad"></span>
-        <input type="number" class="smallnumber" name="system.CyberWorkType.ChipSkills.{{sk}}" placeholder="0"
-               value="{{#if (equals (lookup ../system.CyberWorkType.ChipSkills sk) 0)}}{{else}}{{lookup ../system.CyberWorkType.ChipSkills sk}}{{/if}}">
-        <a class="button danger cw-remove-chipskill" data-key="{{sk}}">x</a>
+        <input type="number" class="smallnumber" name="system.CyberWorkType.ChipSkills.{{sk.key}}" placeholder="0"
+               value="{{#if (equals (lookup ../system.CyberWorkType.ChipSkills sk.key) 0)}}{{else}}{{lookup ../system.CyberWorkType.ChipSkills sk.key}}{{/if}}">
+        <a class="button danger cw-remove-chipskill" data-key="{{sk.key}}">x</a>
       </div>
     {{/each}}
   {{/if}}

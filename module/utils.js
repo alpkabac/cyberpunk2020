@@ -96,7 +96,6 @@ export async function getDefaultSkills() {
     // Получаем значение настройки языка
     // Get the language setting value
     const selectedLanguage= game.i18n.lang
-    console.log("TEST: LANG: ", selectedLanguage)
 
     // Определяем, какой пакет загружать на основе выбранного языка
     // Determine which package to load based on the selected language
@@ -124,6 +123,61 @@ export async function getDefaultSkills() {
     // Return the package content
     return content;
 }
+
+/**
+ * Return compendium pack names that contain skills for the given language.
+ * We keep EN as a safe fallback.
+ * @param {string} lang
+ * @returns {string[]} pack collection IDs (e.g. "cyberpunk2020.default-skills-en")
+ */
+export function getSkillsPackNames(lang = game.i18n.lang) {
+  const l = String(lang || "en").toLowerCase();
+  const suffix = (l === "ru" || l === "en") ? l : "en";
+  const candidates = [
+    `cyberpunk2020.default-skills-${suffix}`,
+    `cyberpunk2020.role-skills-${suffix}`
+  ];
+  return candidates.filter((n) => !!game.packs.get(n));
+}
+
+const _cpSkillIndexCache = new Map();
+
+/**
+ * Get a locale-appropriate list of skills from compendiums, without requiring an Actor.
+ * Returns: [{ id, name }]
+ * Cached per language.
+ * @param {string} lang
+ * @returns {Promise<Array<{id: string, name: string}>>}
+ */
+export async function getSkillIndex(lang = game.i18n.lang) {
+  const l = String(lang || "en").toLowerCase();
+  if (_cpSkillIndexCache.has(l)) return _cpSkillIndexCache.get(l);
+
+  const packs = getSkillsPackNames(l);
+  const out = [];
+
+  for (const packName of packs) {
+    const pack = game.packs.get(packName);
+    if (!pack) continue;
+
+    // v12/v13: getIndex supports { fields }
+    const idx = await pack.getIndex({ fields: ["name", "type"] });
+    for (const e of idx) {
+      if (e.type && e.type !== "skill") continue;
+      // Compendium index uses "_id"
+      out.push({ id: e._id, name: e.name });
+    }
+  }
+
+  // De-duplicate by id (default + role packs can overlap)
+  const byId = new Map();
+  for (const s of out) if (s?.id && s?.name && !byId.has(s.id)) byId.set(s.id, s);
+
+  const list = Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
+  _cpSkillIndexCache.set(l, list);
+  return list;
+}
+
 
 // Checking implant mechanics
 // Accepts: the Item document itself, its system, or directly the CyberWorkType object

@@ -404,17 +404,17 @@ export class CyberpunkActor extends Actor {
     const chipMap = {};
     for (const cw of activeChipware) {
       const skills = cw.system?.CyberWorkType?.ChipSkills || {};
-      for (const [skName, lvl] of Object.entries(skills)) {
+      for (const [skKey, lvl] of Object.entries(skills)) {
         const n = Number(lvl) || 0;
         if (!n) continue;
-        chipMap[skName] = Math.max(chipMap[skName] ?? 0, n);
+        chipMap[skKey] = Math.max(chipMap[skKey] ?? 0, n);
       }
     }
     const skillItems = this.items.contents.filter(i => i.type === "skill");
     for (const si of skillItems) si.system.autoChipped = false;
 
     for (const si of skillItems) {
-      const chipLvl = chipMap[si.name];
+      const chipLvl = chipMap[si.id] ?? chipMap[si.name];
       if (!chipLvl) continue;
       si.system.chipLevel = chipLvl;
       si.system.isChipped = true;
@@ -533,7 +533,7 @@ export class CyberpunkActor extends Actor {
     ].filter(Boolean);
 
     // Roll modifier from implants (Characteristic)
-    const cMod = this._getCharacteristicSkillMod(skill.name);
+    const cMod = this._getCharacteristicSkillMod(skill);
     if (cMod) parts.push(cMod);
 
     const makeRoll = () => makeD10Roll(parts, this.system); // d10 + parts
@@ -573,7 +573,9 @@ export class CyberpunkActor extends Actor {
    * @param {string} skillName
    * @returns {number}
   */
-  _getCharacteristicSkillMod(skillName) {
+  _getCharacteristicSkillMod(skill) {
+    const skillId = skill?.id;
+    const skillName = skill?.name;
     let total = 0;
 
     for (const it of this.items) {
@@ -586,8 +588,15 @@ export class CyberpunkActor extends Actor {
       const cwt = sys.CyberWorkType;
       if (!cwt || !cwHasType(cwt, "Characteristic")) continue;
 
+      // Preferred format: keys are Skill Item _id (stable across localizations).
+      // Legacy fallback: keys are localized skill names.
       const table = cwt.Skill || {};
-      const v = Number(table[skillName]) || 0;
+      const v = Number(
+        (skillId && table[skillId] != null) ? table[skillId] :
+        (skillName && table[skillName] != null) ? table[skillName] :
+        0
+      ) || 0;
+
       if (!Number.isNaN(v)) total += v;
     }
 

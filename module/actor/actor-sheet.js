@@ -353,19 +353,35 @@ export class CyberpunkActorSheet extends ActorSheet {
       ], { render: false });
 
       if (isChipped) {
+        const skillId = skill.id;
         const skillName = skill.name;
-        const chips = this.actor.items.filter(i =>
-          i.type === "cyberware" &&
-          cwHasType(i, "Chip") &&
-          i.system?.CyberWorkType?.ChipSkills &&
-          Object.prototype.hasOwnProperty.call(i.system.CyberWorkType.ChipSkills, skillName)
-        );
+
+        const chips = this.actor.items.filter((i) => {
+          if (i.type !== "cyberware") return false;
+          if (!cwHasType(i, "Chip")) return false;
+          const map = i.system?.CyberWorkType?.ChipSkills;
+          if (!map) return false;
+
+          // New format: keyed by Skill Item _id
+          if (skillId && Object.prototype.hasOwnProperty.call(map, skillId)) return true;
+
+          // Legacy format: keyed by localized skill name
+          return Object.prototype.hasOwnProperty.call(map, skillName);
+        });
 
         if (chips.length) {
-          const updates = chips.map(ch => ({
-            _id: ch.id,
-            [`system.CyberWorkType.ChipSkills.${skillName}`]: safeValue
-          }));
+          const updates = [];
+          for (const ch of chips) {
+            const map = ch.system?.CyberWorkType?.ChipSkills || {};
+            const key =
+              (skillId && Object.prototype.hasOwnProperty.call(map, skillId)) ? skillId : skillName;
+
+            updates.push({
+              _id: ch.id,
+              [`system.CyberWorkType.ChipSkills.${key}`]: safeValue
+            });
+          }
+
           await this.actor.updateEmbeddedDocuments("Item", updates, { render: false });
 
           for (const ch of chips) if (ch.sheet?.rendered) ch.sheet.render(true);
@@ -384,45 +400,57 @@ export class CyberpunkActorSheet extends ActorSheet {
     });
     // Toggle skill chipped
     html.find(".chip-toggle").click(async ev => {
+      // IMPORTANT: if you clicked on the checkbox inside .chip-toggle — let the change handler below handle it,
+      // otherwise you will get a double toggle and visually “nothing happens”
+      if (ev.target?.closest?.("input")) return;
+
       const skill = this.actor.items.get(ev.currentTarget.dataset.skillId);
       if (!skill) return;
+
       const toggled = !skill.system.isChipped;
+      const skillId = skill.id;
       const skillName = skill.name;
 
-      // Search for all chips that affect this skill
-      const chips = this.actor.items.filter(i =>
-        i.type === "cyberware" &&
-        cwHasType(i, "Chip") &&
-        i.system?.CyberWorkType?.ChipSkills &&
-        Object.prototype.hasOwnProperty.call(i.system.CyberWorkType.ChipSkills, skillName)
-      );
+      // Search for chips by ID (new format) + fallback by name (old format)
+      const chips = this.actor.items.filter(i => {
+        if (i.type !== "cyberware") return false;
+        if (!cwHasType(i, "Chip")) return false;
+        const map = i.system?.CyberWorkType?.ChipSkills;
+        if (!map) return false;
+
+        return (skillId && Object.prototype.hasOwnProperty.call(map, skillId)) ||
+              Object.prototype.hasOwnProperty.call(map, skillName);
+      });
 
       if (chips.length) {
+        // If there are real chips, switch ChipActive for all chips affecting this skill.
         const chipUpdates = chips.map(ch => ({
           _id: ch.id,
           "system.CyberWorkType.ChipActive": toggled
         }));
         await this.actor.updateEmbeddedDocuments("Item", chipUpdates, { render: false });
+
+        // Synchronize flags and skill levels from active chips
+        await this._cp_syncChipLevelsToSkills();
+        await this._cp_syncActiveFlagsToSkills();
+      } else {
+        // If there are no chips, leave manual mode isChipped
+        await this.actor.updateEmbeddedDocuments("Item", [{
+          _id: skill.id,
+          "system.isChipped": toggled
+        }], { render: false });
       }
 
       await this.actor.updateEmbeddedDocuments("Item", [{
         _id: skill.id,
-        "system.isChipped": toggled,
         "system.-=chipped": null
       }], { render: false });
 
-      // If there are no chips, leave the manual chipLevel unchanged
-      if (chips.length) {
-        const agg = Math.max(0, ...chips.map(ch => Number(ch.system?.CyberWorkType?.ChipSkills?.[skillName] || 0)));
-        if (Number(skill.system?.chipLevel || 0) !== agg) {
-          await this.actor.updateEmbeddedDocuments("Item", [
-            { _id: skill.id, "system.chipLevel": agg }
-          ], { render: false });
-        }
-      }
-
       if (this.rendered) this.render(true);
+      for (const ch of chips) if (ch.sheet?.rendered) ch.sheet.render(true);
+      if (skill.sheet?.rendered) skill.sheet.render(true);
     });
+
     
     // Skill sorting
     html.find(".skill-sort > select").change(ev => {
@@ -792,16 +820,15 @@ export class CyberpunkActorSheet extends ActorSheet {
 
       const skillName = skill.name;
 
-      await this.actor.updateEmbeddedDocuments("Item", [
-        { _id: skill.id, "system.isChipped": checked }
-      ], { render: false });
+      const chips = this.actor.items.filter(i => {
+        if (i.type !== "cyberware") return false;
+        if (!cwHasType(i, "Chip")) return false;
+        const map = i.system?.CyberWorkType?.ChipSkills;
+        if (!map) return false;
 
-      const chips = this.actor.items.filter(i =>
-        i.type === "cyberware" &&
-        cwHasType(i, "Chip") &&
-        i.system?.CyberWorkType?.ChipSkills &&
-        Object.prototype.hasOwnProperty.call(i.system.CyberWorkType.ChipSkills, skillName)
-      );
+        return (skillId && Object.prototype.hasOwnProperty.call(map, skillId)) ||
+              Object.prototype.hasOwnProperty.call(map, skillName);
+      });
 
       if (chips.length) {
         const updates = chips.map(ch => ({
@@ -809,21 +836,24 @@ export class CyberpunkActorSheet extends ActorSheet {
           "system.CyberWorkType.ChipActive": checked
         }));
         await this.actor.updateEmbeddedDocuments("Item", updates, { render: false });
+
+        await this._cp_syncChipLevelsToSkills();
+        await this._cp_syncActiveFlagsToSkills();
+      } else {
+        await this.actor.updateEmbeddedDocuments("Item", [
+          { _id: skill.id, "system.isChipped": checked }
+        ], { render: false });
       }
 
-      if (chips.length) {
-        const agg = Math.max(0, ...chips.map(ch => Number(ch.system?.CyberWorkType?.ChipSkills?.[skillName] || 0)));
-        if (Number(skill.system?.chipLevel || 0) !== agg) {
-          await this.actor.updateEmbeddedDocuments("Item", [
-            { _id: skill.id, "system.chipLevel": agg }
-          ], { render: false });
-        }
-      }
+      await this.actor.updateEmbeddedDocuments("Item", [
+        { _id: skill.id, "system.-=chipped": null }
+      ], { render: false });
 
       if (this.rendered) this.render(true);
       for (const ch of chips) if (ch.sheet?.rendered) ch.sheet.render(true);
       if (skill.sheet?.rendered) skill.sheet.render(true);
     });
+
 
     // Drag sources for cyberware
     const makeDraggable = (root) => {
@@ -1084,9 +1114,9 @@ export class CyberpunkActorSheet extends ActorSheet {
     const agg = {};
     for (const ch of activeChips) {
       const skills = ch.system?.CyberWorkType?.ChipSkills || {};
-      for (const [name, lvl] of Object.entries(skills)) {
+      for (const [key, lvl] of Object.entries(skills)) {
         const n = Number(lvl) || 0;
-        agg[name] = Math.max(agg[name] || 0, n);
+        agg[key] = Math.max(agg[key] || 0, n);
       }
     }
 
@@ -1096,7 +1126,7 @@ export class CyberpunkActorSheet extends ActorSheet {
     const updatedMap = {};
 
     for (const s of skills) {
-      const want = Number(agg[s.name] || 0);
+      const want = Number(agg[s.id] ?? agg[s.name] ?? 0);
       const cur  = Number(s.system?.chipLevel || 0);
       if (want !== cur) {
         updates.push({ _id: s.id, "system.chipLevel": want });
@@ -1153,7 +1183,7 @@ export class CyberpunkActorSheet extends ActorSheet {
     const activeMap = {};
     for (const ch of activeChips) {
       const skills = ch.system?.CyberWorkType?.ChipSkills || {};
-      for (const name of Object.keys(skills)) activeMap[name] = true;
+      for (const key of Object.keys(skills)) activeMap[key] = true;
     }
 
     const skills = actor.items.filter(i => i.type === "skill");
@@ -1162,7 +1192,7 @@ export class CyberpunkActorSheet extends ActorSheet {
     const updatedMap = {};
 
     for (const s of skills) {
-      const want = !!activeMap[s.name];
+      const want = !!(activeMap[s.id] ?? activeMap[s.name]);
       const cur  = !!(s.system?.isChipped);
       if (want !== cur) {
         updates.push({ _id: s.id, "system.isChipped": want });
