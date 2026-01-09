@@ -287,6 +287,8 @@ export class CyberpunkActorSheet extends ActorSheet {
     this._cpAvatarCapture = cpAvatarCapture;
 
     super.activateListeners(html);
+    // Life tab (system.notes) autosave
+    this._cpSetupNotesAutosave(root);
     html.find('.item[draggable=true]').on('dragstart', (e) => this._onDragStart(e.originalEvent ?? e));
     html.find('[data-drop-target]').on('dragover', (ev) => ev.preventDefault());
 
@@ -1211,6 +1213,136 @@ export class CyberpunkActorSheet extends ActorSheet {
         if (sk?.sheet?.rendered) sk.sheet.render(true);
       }
     }
+  }
+
+  // Life tab (system.notes) autosave
+
+  _cpSetupNotesAutosave(root) {
+    if (!root) return;
+    if (!this.options?.editable) return;
+
+    // Init state once per sheet instance
+    if (!this._cpNotesAutosaveState) {
+      this._cpNotesAutosaveState = {
+        timer: null,
+        saving: false,
+        pending: false,
+        lastSaved: null
+      };
+      // baseline to reduce unnecessary writes
+      this._cpNotesAutosaveState.lastSaved = String(this.actor.system?.notes ?? "");
+    }
+
+    // Remove previous handler (re-render safe)
+    if (this._cpNotesAutosaveHandler) {
+      try {
+        root.removeEventListener("input", this._cpNotesAutosaveHandler, true);
+        root.removeEventListener("paste", this._cpNotesAutosaveHandler, true);
+        root.removeEventListener("keyup", this._cpNotesAutosaveHandler, true);
+        root.removeEventListener("blur", this._cpNotesAutosaveHandler, true);
+      } catch (_) {}
+    }
+
+    const handler = (ev) => {
+      const t = ev?.target;
+      if (!t?.closest) return;
+
+      // Only life tab editor
+      const inLife = t.closest('.tab.life[data-tab="life"]') || t.closest('.tab.life');
+      if (!inLife) return;
+
+      // Only editor content area (covers v12/v13 variations)
+      const inEditor = t.closest(".editor-content") || t.closest(".ProseMirror") || t.closest('[contenteditable="true"]');
+      if (!inEditor) return;
+
+      this._cpQueueNotesAutosave(root);
+    };
+
+    // Capture=true catches rich-editor events more reliably
+    root.addEventListener("input", handler, true);
+    root.addEventListener("paste", handler, true);
+    root.addEventListener("keyup", handler, true);
+    root.addEventListener("blur", handler, true);
+
+    this._cpNotesAutosaveHandler = handler;
+  }
+
+  _cpQueueNotesAutosave(root) {
+    const st = this._cpNotesAutosaveState;
+    if (!st) return;
+
+    if (st.timer) clearTimeout(st.timer);
+    st.timer = setTimeout(() => {
+      st.timer = null;
+      this._cpFlushNotesAutosave(root);
+    }, 900);
+  }
+
+  _cpReadNotesHTML(root) {
+    const ed = this.editors?.["system.notes"];
+    const inst = ed?.editor;
+
+    if (inst) {
+      try {
+        if (typeof inst.getHTML === "function") return String(inst.getHTML() ?? "");
+        if (typeof inst.getData === "function") return String(inst.getData() ?? "");
+        if (typeof inst.getContent === "function") return String(inst.getContent() ?? "");
+      } catch (_) {}
+    }
+
+    const el =
+      root?.querySelector?.('.tab.life[data-tab="life"] .editor-content') ||
+      root?.querySelector?.('.tab.life .editor-content') ||
+      root?.querySelector?.('.tab.life[data-tab="life"] .ProseMirror') ||
+      root?.querySelector?.('.tab.life .ProseMirror');
+
+    if (!el) return null;
+    return String(el.innerHTML ?? "");
+  }
+
+  async _cpFlushNotesAutosave(root) {
+    const st = this._cpNotesAutosaveState;
+    if (!st) return;
+
+    if (st.saving) {
+      st.pending = true;
+      return;
+    }
+
+    const html = this._cpReadNotesHTML(root);
+    if (html == null) return;
+
+    if (st.lastSaved === html) return;
+
+    st.saving = true;
+    try {
+      await this.actor.update({ "system.notes": html }, { render: false });
+      st.lastSaved = html;
+    } catch (err) {
+      console.warn("CP2020: notes autosave failed", err);
+    } finally {
+      st.saving = false;
+      if (st.pending) {
+        st.pending = false;
+        // If something changed while we were saving, flush once more
+        await this._cpFlushNotesAutosave(root);
+      }
+    }
+  }
+
+  /** @override */
+  async close(options = {}) {
+    // Flush pending autosave before closing sheet
+    try {
+      const root = this.element?.[0] || this.element;
+      if (this._cpNotesAutosaveState?.timer) {
+        clearTimeout(this._cpNotesAutosaveState.timer);
+        this._cpNotesAutosaveState.timer = null;
+      }
+      await this._cpFlushNotesAutosave(root);
+    } catch (_) {}
+
+    return super.close(options);
   }
 
 }
