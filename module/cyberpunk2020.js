@@ -42,16 +42,25 @@ Hooks.once('init', async function () {
 /**
  * Once the entire VTT framework is initialized, check to see if we should perform a data migration (nabbed from Foundry's 5e module and adapted)
  */
-Hooks.once("ready", function() {
-    // Determine whether a system migration is required and feasible
-    if ( !game.user.isGM ) return;
-    const lastMigrateVersion = game.settings.get("cyberpunk2020", "systemMigrationVersion");
-    // We do need to try migrating if we haven't run before - as it stands, previous worlds didn't use this setting, or by default had it set to current version
+Hooks.once("ready", async function () {
+  // Determine whether a system migration is required and feasible
+  if (!game.user.isGM) return;
 
-    // The version migrations need to begin - if you make a change from 0.1 to 0.2, this should be 0.2
-    const NEEDS_MIGRATION_VERSION = "1.1.0";
-    console.log("CYBERPUNK: Last migrated in version: " + lastMigrateVersion);
-    const needsMigration = foundry.utils.isNewerVersion(NEEDS_MIGRATION_VERSION, lastMigrateVersion);
-    if ( !needsMigration ) return;
-    migrations.migrateWorld();
+  // If setting was never written, it will be "" (default). Normalize to "0" for safe compare.
+  const lastMigrateVersion =
+    game.settings.get("cyberpunk2020", "systemMigrationVersion") || "0";
+
+  // The version migrations need to begin - bump this only when you add a new migration step
+  const NEEDS_MIGRATION_VERSION = "1.1.0";
+
+  console.log("CYBERPUNK: Last migrated in version: " + lastMigrateVersion);
+
+  const needsMigration = foundry.utils.isNewerVersion(
+    NEEDS_MIGRATION_VERSION,
+    lastMigrateVersion
+  );
+  if (!needsMigration) return;
+
+  // IMPORTANT: await so we don't exit early and so version write happens deterministically
+  await migrations.migrateWorld(NEEDS_MIGRATION_VERSION);
 });

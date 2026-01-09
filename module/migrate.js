@@ -3,7 +3,7 @@ import { getDefaultSkills, localize, tryLocalize, cwHasType } from "./utils.js";
 /**
  * Migration entrypoint.
  */
-export const migrateWorld = async function () {
+export const migrateWorld = async function (targetVersion = game.system.version) {
   ui.notifications.info(
     localize("CP.Migration.Begin", { version: game.system.version }),
     { permanent: true }
@@ -70,6 +70,10 @@ export const migrateWorld = async function () {
   }
 
   ui.notifications.info(localize("CP.Migration.Complete"), { permanent: true });
+
+  // Mark world as migrated so we don't run again on every restart
+  await game.settings.set("cyberpunk2020", "systemMigrationVersion", targetVersion);
+  console.log(`CYBERPUNK: Migration flag set to ${targetVersion}`);
 };
 
 /* -------------------------------------------- */
