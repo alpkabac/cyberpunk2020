@@ -602,6 +602,16 @@ export class CyberpunkActorSheet extends ActorSheet {
       item.sheet.render(true);
     });
 
+    // Active chips: open chip sheet on click
+    html.find('.chipware-container .chipware[data-item-id]').on('click', (ev) => {
+      if (ev.target.closest('.item-unequip') || ev.target.closest('.item-delete')) return;
+
+      ev.stopPropagation();
+      const item = getEventItem(this, ev);
+      if (!item) return;
+      item.sheet.render(true);
+    });
+
     // Delete item
     html.find('.item-delete').click(deleteItemDialog.bind(this));
     html.find('.rc-item-delete').bind("contextmenu", deleteItemDialog.bind(this)); 
