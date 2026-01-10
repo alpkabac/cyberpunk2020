@@ -79,6 +79,13 @@
       "system": "cyberpunk2020",
       "type": "Item"
     },
+    {
+      "name": "armor-add",
+      "label": "Armor-Add",
+      "path": "./packs/armor-add.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
 
     {
       "name": "melee",
@@ -128,53 +135,76 @@
       "system": "cyberpunk2020",
       "type": "Item"
     },
-
     {
-      "name": "cyberware",
-      "label": "Cyberware",
-      "path": "./packs/cyberware.db",
-      "system": "cyberpunk2020",
-      "type": "Item"
-    },
-
-
-    {
-      "name": "fashonware-cyberware",
-      "label": "Fashonware-Cyberware",
-      "path": "./packs/fashonware-cyberware.db",
+      "name": "cyberware-old",
+      "label": "Cyberware-Old",
+      "path": "./packs/cyberware-old.db",
       "system": "cyberpunk2020",
       "type": "Item"
     },
     {
-      "name": "bioware-cyberware",
-      "label": "Bioware-Cyberware",
-      "path": "./packs/bioware-cyberware.db",
+      "name": "fashonware",
+      "label": "Fashonware",
+      "path": "./packs/fashonware.db",
       "system": "cyberpunk2020",
       "type": "Item"
     },
     {
-      "name": "cyberweapons-cyberware",
-      "label": "Cyberweapons-Cyberware",
-      "path": "./packs/cyberweapons-cyberware.db",
+      "name": "bioware",
+      "label": "Bioware",
+      "path": "./packs/bioware.db",
       "system": "cyberpunk2020",
       "type": "Item"
     },
     {
-      "name": "implants-cyberware",
-      "label": "Implants-Cyberware",
-      "path": "./packs/implants-cyberware.db",
+      "name": "cyberweapons",
+      "label": "CyberWeapons",
+      "path": "./packs/cyberweapons.db",
       "system": "cyberpunk2020",
       "type": "Item"
     },
     {
-      "name": "Neuralware-Cyberware",
-      "label": "neuralware-cyberware",
-      "path": "./packs/neuralware-cyberware.db",
+      "name": "implants",
+      "label": "Implants",
+      "path": "./packs/implants.db",
       "system": "cyberpunk2020",
       "type": "Item"
     },
-
-
+    {
+      "name": "neuralware",
+      "label": "Neuralware",
+      "path": "./packs/neuralware.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
+    {
+      "name": "cyberaudio",
+      "label": "CyberAudio",
+      "path": "./packs/cyberaudio.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
+    {
+      "name": "cyberlimbs",
+      "label": "CyberLimbs",
+      "path": "./packs/cyberlimbs.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
+        {
+      "name": "cyberoptic",
+      "label": "CyberOptic",
+      "path": "./packs/cyberoptic.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
+    {
+      "name": "other-cyberware",
+      "label": "Other-Cyberware",
+      "path": "./packs/other-cyberware.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
     {
       "name": "chipware",
       "label": "Chipware",
@@ -293,6 +323,10 @@
     "name": "Additional Items",
     "sorting": "m",
     "color": "#818f8d",
+    "packs": [
+      "armor-add",
+      "cyberware-old"
+    ],
     "folders": [
       {
         "name": "Weapons-Add",
@@ -317,7 +351,6 @@
         "color": "#4F6E7E",
         "packs": [
           "armor",
-          "cyberware",
           "chipware"
         ],
         "folders": [
@@ -340,11 +373,15 @@
             "sorting": "m",
             "color": "#6B27D3",
             "packs": [
-              "fashonware-cyberware",
-              "bioware-cyberware",
-              "cyberweapons-cyberware",
-              "implants-cyberware",
-              "Neuralware-Cyberware"
+              "fashonware",
+              "bioware",
+              "cyberweapons",
+              "implants",
+              "neuralware",
+              "cyberaudio",
+              "cyberlimbs",
+              "cyberoptic",
+              "other-cyberware"
             ]
           }
         ]
@@ -452,6 +489,6 @@
   "secondaryTokenAttribute": null,
   "url": "https://github.com/SuperCoon666/cyberpunk2020",
   "manifest": "https://raw.githubusercontent.com/SuperCoon666/cyberpunk2020/main/system.json",
-  "download": "https://github.com/SuperCoon666/cyberpunk2020/archive/v1.0.3.zip"
+  "download": "https://github.com/SuperCoon666/cyberpunk2020/releases/download/v1.1.1/cyberpunk2020.zip"
 }
   
