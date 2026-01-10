@@ -13,18 +13,26 @@
     <h2>{{CPLocal "ActiveChipware"}}</h2>
 </header>
 <div class="chip-scroll-wrapper">
-    <div class="chipware-container" data-drop-target="active-chips">
-    {{#each chipsActive as |chip|}}
-    {{#with chip.system}}
-    <div class="chipware field gear full-width" data-full="{{chip.name}}" style="background-image: url('systems/cyberpunk2020/img/chip.png')" data-item-id="{{chip.id}}" draggable="true">
-        <span class="chip-name">
-            <span class="chip-name-text">{{chip.name}}</span>
-        </span>
-        <div class="chipware-slot item-unequip" data-item-id="{{chip.id}}" draggable="false">X</div>
-    </div>
-    {{/with}}
-    {{/each}}
-    </div>
+  <div class="chipware-container {{#unless chipsActive.length}}is-empty{{/unless}}" data-drop-target="active-chips">
+    {{#if chipsActive.length}}
+      {{#each chipsActive as |chip|}}
+        {{#with chip.system}}
+          <div class="chipware field gear full-width"
+               data-full="{{chip.name}}"
+               style="background-image: url('systems/cyberpunk2020/img/chip.png')"
+               data-item-id="{{chip.id}}"
+               draggable="true">
+            <span class="chip-name">
+              <span class="chip-name-text">{{chip.name}}</span>
+            </span>
+            <div class="chipware-slot item-unequip" data-item-id="{{chip.id}}" draggable="false">X</div>
+          </div>
+        {{/with}}
+      {{/each}}
+    {{else}}
+      <div class="chipware-dropzone" data-drop-target="active-chips"></div>
+    {{/if}}
+  </div>
 </div>
 <header class="cyberware-header">
     <h2>{{CPLocal "ActiveCyberware"}}</h2>

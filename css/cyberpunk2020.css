@@ -977,6 +977,16 @@ div.statderive .value.rightborder {
   justify-items: center;
 }
 
+.chipware-container.is-empty {
+  display: block;
+}
+.chipware-container.is-empty .chipware-dropzone {
+  height: 18px;
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px dashed rgba(0, 0, 0, 0.35);
+}
+
 .chipware.field.gear.full-width {
   display: flex;
   flex-direction: row;
