@@ -46,21 +46,29 @@ Hooks.once("ready", async function () {
   // Determine whether a system migration is required and feasible
   if (!game.user.isGM) return;
 
-  // If setting was never written, it will be "" (default). Normalize to "0" for safe compare.
-  const lastMigrateVersion =
-    game.settings.get("cyberpunk2020", "systemMigrationVersion") || "0";
+  const TARGET_VERSION = game.system.version;
 
-  // The version migrations need to begin - bump this only when you add a new migration step
-  const NEEDS_MIGRATION_VERSION = "1.1.0";
+  const stored = game.settings.get("cyberpunk2020", "systemMigrationVersion") || "";
 
-  console.log("CYBERPUNK: Last migrated in version: " + lastMigrateVersion);
+  const worldSystemVersion = game.world?.systemVersion || "";
 
-  const needsMigration = foundry.utils.isNewerVersion(
-    NEEDS_MIGRATION_VERSION,
-    lastMigrateVersion
+  // If we never stored migration version, use worldSystemVersion as baseline (prevents migration on fresh worlds)
+  const baseline = stored || worldSystemVersion || "0";
+
+  console.log(
+    `CYBERPUNK: World systemVersion=${worldSystemVersion || "(none)"}; stored migration=${stored || "(none)"}; baseline=${baseline}`
   );
-  if (!needsMigration) return;
 
-  // IMPORTANT: await so we don't exit early and so version write happens deterministically
-  await migrations.migrateWorld(NEEDS_MIGRATION_VERSION);
+  const needsMigration = foundry.utils.isNewerVersion(TARGET_VERSION, baseline);
+
+  if (!needsMigration) {
+    if (!stored) {
+      await game.settings.set("cyberpunk2020", "systemMigrationVersion", TARGET_VERSION);
+      console.log(`CYBERPUNK: Migration marker initialized to ${TARGET_VERSION}`);
+    }
+    return;
+  }
+
+  // Run migration once per system version upgrade
+  await migrations.migrateWorld(TARGET_VERSION);
 });
