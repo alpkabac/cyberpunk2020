@@ -299,7 +299,12 @@
   {{!-- ===== Weapon ===== --}}
   {{#if (cwHasType system.CyberWorkType "Weapon")}}
     <div class="field span-two-cells">
-      <div class="field-list cw-weapon-grid">
+      <label class="larger">{{CPLocal "CWT_Type_Weapon"}}</label>
+      <span class="flex-pad"></span>
+    </div>
+
+    <div class="field span-two-cells">
+    <div class="field-list cw-weapon-grid">
         {{> (template "fields/select") label="WeaponType" edit="system.CyberWorkType.Weapon.weaponType" choices=weaponTypes}}
         {{> (template "fields/select") label="AttackType" edit="system.CyberWorkType.Weapon.attackType" choices=attackTypes allowBlank=true}}
 
@@ -339,6 +344,11 @@
 
   {{!-- ===== Implant ===== --}}
   {{#if (cwHasType system.CyberWorkType "Implant")}}
+    <div class="field span-two-cells">
+      <label class="larger">{{CPLocal "CWT_Type_Implant"}}</label>
+      <span class="flex-pad"></span>
+    </div>
+
     {{> (template "fields/number") label="CWT_Implant_OptionsAvailable" edit="system.CyberWorkType.OptionsAvailable"}}
 
     <div class="field">
@@ -368,6 +378,11 @@
 
   {{!-- ===== Chip: activation toggle ===== --}}
   {{#if (cwHasType system.CyberWorkType "Chip")}}
+    <div class="field span-two-cells">
+      <label class="larger">{{CPLocal "CWT_Type_Chip"}}</label>
+      <span class="flex-pad"></span>
+    </div>
+
     <div class="field">
       <label>{{CPLocal "CWT_Chip_Active"}}</label>
       <span class="flex-pad"></span>
