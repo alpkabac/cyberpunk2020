@@ -87,17 +87,9 @@
             <img src={{cyber.img}}>
         </div>
         <label class="cyber-name">{{cyber.name}}</label>
-        {{#with cyber.system}}
-            <span class="cyber-hm-loss">{{CPLocal "HumanityLossAbbrev"}}: {{humanityLoss}}</span>
-            {{#if cyberwareType}}
-            <span>
-            <p class="inactive">{{cwTypeLabel}}
-            {{#if cwSubtypeLabel}}
-                ({{cwSubtypeLabel}})
-            {{/if}}</p>
-            </span>
-            {{/if}}
-        {{/with}}
+            {{#with cyber.system}}
+                <span class="cyber-hm-loss">{{CPLocal "HumanityLossAbbrev"}}: {{humanityLoss}}</span>
+            {{/with}}
         <span class="item-delete" data-item-id="{{cyber.id}}">X</span>
     </div>
     {{/each}}
