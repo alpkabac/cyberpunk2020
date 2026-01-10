@@ -2,7 +2,7 @@
   "id": "cyberpunk2020",
   "title": "Cyberpunk 2020",
   "description": "R. Talsorian Games' Cyberpunk 2020 System",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "compatibility": {
     "minimum": "12",
     "verified": "13",
@@ -59,13 +59,55 @@
       "type": "Item"
     },
     {
+      "name": "pistols-add",
+      "label": "Pistols-Add",
+      "path": "./packs/pistols-add.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
+    {
+      "name": "smgs-add",
+      "label": "SMGs-Add",
+      "path": "./packs/smgs-add.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
+    {
+      "name": "rifles-add",
+      "label": "Rifles-Add",
+      "path": "./packs/rifles-add.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
+
+    {
+      "name": "melee",
+      "label": "Melee",
+      "path": "./packs/melee.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
+    {
+      "name": "heavy",
+      "label": "Heavy",
+      "path": "./packs/heavy.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
+    {
+      "name": "exotics",
+      "label": "Exotics",
+      "path": "./packs/exotics.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
+    {
       "name": "pistols",
       "label": "Pistols",
       "path": "./packs/pistols.db",
       "system": "cyberpunk2020",
       "type": "Item"
-    },
-    {
+    },    {
       "name": "rifles",
       "label": "Rifles",
       "path": "./packs/rifles.db",
@@ -73,12 +115,66 @@
       "type": "Item"
     },
     {
+      "name": "shotguns",
+      "label": "Shotguns",
+      "path": "./packs/shotguns.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },    
+    {
+      "name": "submachineguns",
+      "label": "Submachineguns",
+      "path": "./packs/submachineguns.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
+
+    {
       "name": "cyberware",
       "label": "Cyberware",
       "path": "./packs/cyberware.db",
       "system": "cyberpunk2020",
       "type": "Item"
     },
+
+
+    {
+      "name": "fashonware-cyberware",
+      "label": "Fashonware-Cyberware",
+      "path": "./packs/fashonware-cyberware.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
+    {
+      "name": "bioware-cyberware",
+      "label": "Bioware-Cyberware",
+      "path": "./packs/bioware-cyberware.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
+    {
+      "name": "cyberweapons-cyberware",
+      "label": "Cyberweapons-Cyberware",
+      "path": "./packs/cyberweapons-cyberware.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
+    {
+      "name": "implants-cyberware",
+      "label": "Implants-Cyberware",
+      "path": "./packs/implants-cyberware.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
+    {
+      "name": "Neuralware-Cyberware",
+      "label": "neuralware-cyberware",
+      "path": "./packs/neuralware-cyberware.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
+
+
     {
       "name": "chipware",
       "label": "Chipware",
@@ -185,13 +281,6 @@
       "type": "Item"
     },
     {
-      "name": "smgs",
-      "label": "SMGs",
-      "path": "./packs/smgs.db",
-      "system": "cyberpunk2020",
-      "type": "Item"
-    },
-    {
       "name": "programs",
       "label": "Programs",
       "system": "cyberpunk2020",
@@ -200,104 +289,137 @@
     }
   ],
   "packFolders": [
-    {
-      "name": "Items",
-      "sorting": "m",
-      "color": "#345995",
-      "folders": [
-        {
-          "name": "Equipment",
-          "sorting": "m",
-          "color": "#5a7684",
-          "folders": [
-            {
-              "name": "Weapons",
-              "sorting": "m",
-              "color": "#a23b3b",
-              "packs": [
-                "pistols",
-                "rifles",
-                "smgs"
-              ]
-            }
-          ],
-          "packs": [
-            "armor",
-            "cyberware",
-            "chipware"
-          ]
-        },
-        {
-          "name": "Gear",
-          "sorting": "m",
-          "color": "#3b9c9c",
-          "packs": [
-            "medical",
-            "electronics",
-            "communication",
-            "entertainment",
-            "fashion",
-            "furnishing",
-            "security",
-            "surveillance",
-            "tools",
-            "rentalandservices",
-            "vehicles"
-          ]
-        },
-        {
-          "name": "Skills",
-          "sorting": "m",
-          "color": "#2e8b57",
-          "packs": [
-            "default-skills-en",
-            "role-skills-en"
-          ]
-        },
-        {
-          "name": "Netrunning",
-          "sorting": "m",
-          "color": "#6a5acd",
-          "packs": [
-            "netrunningEquipment",
-            "programs"
-          ]
-        },
-        {
-          "name": "Other",
-          "sorting": "m",
-          "color": "#8b5a2b",
-          "packs": [
-            "sellthedead"
-          ]
-        }
-      ]
-    },
-    {
-      "name": "Localization",
-      "sorting": "m",
-      "color": "#444444",
-      "folders": [
-        {
-          "name": "RU",
-          "sorting": "m",
-          "color": "#345995",
-          "packs": [
-            "default-skills-ru",
-            "role-skills-ru"
-          ]
-        }
-      ]
-    },
-    {
-      "name": "Tables",
-      "sorting": "m",
-      "color": "#cd853f",
-      "packs": [
-        "roll-tables"
-      ]
-    }
-  ],
+  {
+    "name": "Additional Items",
+    "sorting": "m",
+    "color": "#818f8d",
+    "folders": [
+      {
+        "name": "Weapons-Add",
+        "sorting": "m",
+        "color": "#B14444",
+        "packs": [
+          "pistols-add",
+          "rifles-add",
+          "smgs-add"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "Items",
+    "sorting": "m",
+    "color": "#E14FE1",
+    "folders": [
+      {
+        "name": "Equipment",
+        "sorting": "m",
+        "color": "#4F6E7E",
+        "packs": [
+          "armor",
+          "cyberware",
+          "chipware"
+        ],
+        "folders": [
+          {
+            "name": "Weapons",
+            "sorting": "m",
+            "color": "#C14A4A",
+            "packs": [
+              "pistols",
+              "submachineguns",
+              "shotguns",
+              "rifles",
+              "heavy",
+              "melee",
+              "exotics"
+            ]
+          },
+          {
+            "name": "Cyberware",
+            "sorting": "m",
+            "color": "#6B27D3",
+            "packs": [
+              "fashonware-cyberware",
+              "bioware-cyberware",
+              "cyberweapons-cyberware",
+              "implants-cyberware",
+              "Neuralware-Cyberware"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Gear",
+        "sorting": "m",
+        "color": "#35A8A8",
+        "packs": [
+          "medical",
+          "electronics",
+          "communication",
+          "entertainment",
+          "fashion",
+          "furnishing",
+          "security",
+          "surveillance",
+          "tools",
+          "rentalandservices",
+          "vehicles"
+        ]
+      },
+      {
+        "name": "Skills",
+        "sorting": "m",
+        "color": "#2FA064",
+        "packs": [
+          "default-skills-en",
+          "role-skills-en"
+        ]
+      },
+      {
+        "name": "Netrunning",
+        "sorting": "m",
+        "color": "#5F4FE1",
+        "packs": [
+          "netrunningEquipment",
+          "programs"
+        ]
+      },
+      {
+        "name": "Other",
+        "sorting": "m",
+        "color": "#A0632F",
+        "packs": [
+          "sellthedead"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "Localization",
+    "sorting": "m",
+    "color": "#4FE1E1",
+    "folders": [
+      {
+        "name": "RU",
+        "sorting": "m",
+        "color": "#4778de",
+        "packs": [
+          "default-skills-ru",
+          "role-skills-ru"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "Tables",
+    "sorting": "m",
+    "color": "#E1E14F",
+    "packs": [
+      "roll-tables"
+    ]
+  }
+],
   "languages": [
     {
       "lang": "en",
