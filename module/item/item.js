@@ -10,6 +10,18 @@ import { CyberpunkActor } from "../actor/actor.js";
 export class CyberpunkItem extends Item {
   // This also has preparedata, but we don't have to worry about that so far
 
+  /**
+   * Cyberpunk 2020: any fractional damage is rounded down
+   * Also clamp at 0 to avoid negative damage showing up in chat
+   * @param {number} total
+   * @returns {number}
+   */
+  static _floorDamageTotal(total) {
+    const n = Number(total);
+    if (!Number.isFinite(n)) return 0;
+    return Math.max(0, Math.floor(n));
+  }
+
   prepareData() {
     super.prepareData();
 
@@ -357,8 +369,10 @@ export class CyberpunkItem extends Item {
               if (!areaDamages[location]) {
                   areaDamages[location] = [];
               }
+              const dmg = CyberpunkItem._floorDamageTotal(damageRoll.total);
+
               areaDamages[location].push({
-                  damage: damageRoll.total
+                damage: dmg
               });
           }
           let templateData = {
@@ -401,8 +415,10 @@ export class CyberpunkItem extends Item {
               if (!areaDamages[location]) {
                   areaDamages[location] = [];
               }
+              const dmg = CyberpunkItem._floorDamageTotal(damageRoll.total);
+
               areaDamages[location].push({
-                  damage: damageRoll.total
+                damage: dmg
               });
           }
       }
@@ -443,7 +459,7 @@ export class CyberpunkItem extends Item {
 
       for (let i = 0; i < hitsRoll.total; i++) {
         const loc = (await rollLocation(mods.targetActor, mods.targetArea)).areaHit;
-        const dmg = (await new Roll(dmgFormula, rollData).evaluate()).total;
+        const dmg = CyberpunkItem._floorDamageTotal((await new Roll(dmgFormula, rollData).evaluate()).total);
         if (!areaDamages[loc]) areaDamages[loc] = [];
         areaDamages[loc].push({ dmg });
       }
@@ -471,6 +487,7 @@ export class CyberpunkItem extends Item {
       let DC = rangeDCs[attackMods.range];
       let attackRoll = await this.attackRoll(attackMods);
       let damageRoll = await new Roll(system.damage).evaluate();
+      const dmg = CyberpunkItem._floorDamageTotal(damageRoll.total);
       let locationRoll = await rollLocation(attackMods.targetActor, attackMods.targetArea);
       let actualRangeBracket = rangeResolve[attackMods.range](system.range);
       let attackHits = attackRoll.total >= DC;
@@ -492,7 +509,7 @@ export class CyberpunkItem extends Item {
               areaDamages[location] = [];
           }
           areaDamages[location].push({
-              damage: damageRoll.total,
+              damage: dmg,
           });
       }
       
@@ -537,9 +554,12 @@ export class CyberpunkItem extends Item {
                   break;
           }
       }
-      let damageRoll = new Roll(damageFormula, {
+      let damageRoll = await new Roll(damageFormula, {
           strengthBonus: strengthDamageBonus(this.actor.system.stats.bt.total)
-      });
+      }).evaluate();
+
+      // CP2020: any fractional damage is rounded down
+      damageRoll._total = CyberpunkItem._floorDamageTotal(damageRoll.total);
 
       let locationRoll = await rollLocation(attackMods.targetActor, attackMods.targetArea);
 
@@ -623,11 +643,16 @@ export class CyberpunkItem extends Item {
     if (damageFormula) {
       const loc = await rollLocation(attackMods.targetArea);
       results.addRoll(loc.roll, { name: localize("Location"), flavor: loc.areaHit });
-      results.addRoll(new Roll(damageFormula, {
+      const damageRoll = await new Roll(damageFormula, {
         strengthBonus: strengthDamageBonus(system.stats.bt.total),
         // Martial arts get a damage bonus
         martialDamageBonus: isMartial ? martialSkillLevel : 0
-      }), { name: localize("Damage") });
+      }).evaluate();
+
+      // CP2020: any fractional damage is rounded down
+      damageRoll._total = CyberpunkItem._floorDamageTotal(damageRoll.total);
+
+      results.addRoll(damageRoll, { name: localize("Damage") });
     }
     results.defaultExecute({img: this.img});
     return results;
