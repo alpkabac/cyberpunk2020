@@ -145,8 +145,17 @@ export async function migrateActor(actor) {
 /*  Item Migration                               */
 /* -------------------------------------------- */
 
-let _cyberwareNameToId = null;
-let _cyberwareDocCache = new Map();
+const CYBERWARE_PACK_NAMES = [
+  "fashonware",
+  "bioware",
+  "cyberweapons",
+  "implants",
+  "neuralware",
+  "cyberaudio",
+  "cyberlimbs",
+  "cyberoptic",
+  "other-cyberware"
+];
 
 function normalizeName(name) {
   return String(name ?? "")
@@ -155,27 +164,88 @@ function normalizeName(name) {
     .replace(/\s+/g, " ");
 }
 
-async function getCyberwareTemplateByName(itemName) {
-  const pack = game.packs.get("cyberpunk2020.cyberware");
+function getCyberwarePacks() {
+  const sysId = game.system?.id || "cyberpunk2020";
+  const packs = [];
+  for (const n of CYBERWARE_PACK_NAMES) {
+    const collection = `${sysId}.${n}`;
+    const pack = game.packs.get(collection);
+    if (pack) packs.push(pack);
+  }
+  return packs;
+}
+
+let _cyberwareIndexPromise = null;
+let _cyberwareIdToRef = new Map();
+let _cyberwareNameToRef = new Map();
+let _cyberwareDocCache = new Map();
+
+async function ensureCyberwareIndex() {
+  if (_cyberwareIndexPromise) return _cyberwareIndexPromise;
+
+  _cyberwareIndexPromise = (async () => {
+    _cyberwareIdToRef = new Map();
+    _cyberwareNameToRef = new Map();
+
+    for (const pack of getCyberwarePacks()) {
+      const index = await pack.getIndex({ fields: ["name", "type"] });
+
+      for (const entry of index) {
+        if (entry.type && entry.type !== "cyberware") continue;
+
+        const id = entry._id ?? entry.id;
+        if (!id) continue;
+
+        if (!_cyberwareIdToRef.has(id)) _cyberwareIdToRef.set(id, { collection: pack.collection, id });
+
+        const nm = normalizeName(entry.name);
+        if (nm && !_cyberwareNameToRef.has(nm)) _cyberwareNameToRef.set(nm, { collection: pack.collection, id });
+      }
+    }
+  })();
+
+  return _cyberwareIndexPromise;
+}
+
+function getIdFromSourceId(sourceId) {
+  if (!sourceId) return null;
+  const s = String(sourceId);
+  const parts = s.split(".");
+  return parts[parts.length - 1] || null;
+}
+
+async function getCyberwareTemplateByRef(ref) {
+  if (!ref?.collection || !ref?.id) return null;
+
+  const cacheKey = `${ref.collection}:${ref.id}`;
+  if (_cyberwareDocCache.has(cacheKey)) return _cyberwareDocCache.get(cacheKey);
+
+  const pack = game.packs.get(ref.collection);
   if (!pack) return null;
 
-  if (_cyberwareNameToId === null) {
-    _cyberwareNameToId = new Map();
-    const index = await pack.getIndex({ fields: ["name"] });
-    for (const entry of index) {
-      const id = entry._id ?? entry.id;
-      _cyberwareNameToId.set(normalizeName(entry.name), id);
-    }
-  }
-
-  const id = _cyberwareNameToId.get(normalizeName(itemName));
-  if (!id) return null;
-
-  if (_cyberwareDocCache.has(id)) return _cyberwareDocCache.get(id);
-
-  const doc = await pack.getDocument(id);
-  if (doc) _cyberwareDocCache.set(id, doc);
+  const doc = await pack.getDocument(ref.id);
+  if (doc) _cyberwareDocCache.set(cacheKey, doc);
   return doc ?? null;
+}
+
+async function getCyberwareTemplateById(docId) {
+  if (!docId) return null;
+  await ensureCyberwareIndex();
+
+  const ref = _cyberwareIdToRef.get(docId);
+  if (!ref) return null;
+
+  return getCyberwareTemplateByRef(ref);
+}
+
+async function getCyberwareTemplateByName(itemName) {
+  if (!itemName) return null;
+  await ensureCyberwareIndex();
+
+  const ref = _cyberwareNameToRef.get(normalizeName(itemName));
+  if (!ref) return null;
+
+  return getCyberwareTemplateByRef(ref);
 }
 
 function transferCyberwareUserValues({ oldSystem, newSystem }) {
@@ -229,7 +299,17 @@ export async function migrateItem(item) {
 
   // CYBERWARE: replace content from compendium template, then transfer user values
   if (item.type === "cyberware") {
-    const template = await getCyberwareTemplateByName(item.name);
+    // Try find template by id first (sourceId / compendiumSource / _id), then by name
+    const src = itemData.flags?.core?.sourceId || itemData._stats?.compendiumSource;
+    const srcId = getIdFromSourceId(src);
+
+    let template = null;
+
+    if (srcId) template = await getCyberwareTemplateById(srcId);
+
+    if (!template && itemData._id) template = await getCyberwareTemplateById(itemData._id);
+
+    if (!template) template = await getCyberwareTemplateByName(item.name);
 
     if (template) {
       const tpl = template.toObject();
