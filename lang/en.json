@@ -562,7 +562,7 @@
     "CYBERPUNK.Fumble.Int.8_10": "8–10. Wow, are you oblivious. You not only don't know what's going on or anything about the subject, but everyone knows how ignorant you are.",
 
     "CYBERPUNK.Fumble.AutoWeaponOnlyJam": "Automatic weapons: fumble table is ignored; only a Reliability jam check is made.",
-    "CYBERPUNK.Fumble.ReliabilityLine": "Reliability: <b>{rel}</b> (threshold {thr} or less).<br>Roll {die} → {result}.",
+    "CYBERPUNK.Fumble.ReliabilityLine": "Reliability: <b>{rel}</b> (threshold {thr} or less).<br>Roll {die} → <b>{result}</b>.",
     "CYBERPUNK.Fumble.ReliabilityResult.Pass": "pass",
     "CYBERPUNK.Fumble.ReliabilityResult.Fail": "fail",
     "CYBERPUNK.Fumble.ReliabilityResult.Jam": "the weapon jammed",

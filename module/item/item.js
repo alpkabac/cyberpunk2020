@@ -25,6 +25,28 @@ export class CyberpunkItem extends Item {
     return Math.max(1, Math.floor(n));
   }
 
+  /**
+   * Build an inline-roll anchor that shows dice results on hover (via cp-inline-roll handler).
+   * Click-to-reroll is disabled globally by the system.
+   * @param {number} value
+   * @param {Roll} roll
+   * @param {string} extraClasses
+  */
+  static _inlineRollHtml(value, roll, extraClasses = "") {
+    const v = Number(value);
+    if (!Number.isFinite(v)) return String(value ?? "");
+    if (!roll || typeof roll !== "object") return String(v);
+
+    try {
+      const data = (typeof roll.toJSON === "function") ? roll.toJSON() : roll;
+      const json = encodeURIComponent(JSON.stringify(data));
+      const cls = String(extraClasses || "").trim();
+      return `<a class="inline-roll inline-result cp-inline-roll roll-result roll ${cls}" data-roll="${json}">${v}</a>`;
+    } catch (e) {
+      return String(v);
+    }
+  }
+
   prepareData() {
     super.prepareData();
 
@@ -402,8 +424,11 @@ export class CyberpunkItem extends Item {
       let targetCount = targetTokens.length || attackMods.targetsCount || 1;
       const rollData = this.actor?.getRollData?.() ?? {};
       const maximizeDamage = this._shouldMaximizePointBlankDamage(attackMods);
+      const maxDamageRoll = maximizeDamage
+        ? await new Roll(system.damage, rollData).evaluate({ maximize: true })
+        : null;
       const maxDamage = maximizeDamage
-        ? CyberpunkItem._floorDamageTotal((await new Roll(system.damage, rollData).evaluate({ maximize: true })).total)
+        ? CyberpunkItem._floorDamageTotal(maxDamageRoll.total)
         : null;
       
       // This is a somewhat flawed multi-target thing - given target tokens, we could calculate distance (& therefore penalty) for each, and apply damage to them
@@ -446,12 +471,17 @@ export class CyberpunkItem extends Item {
               if (!areaDamages[location]) {
                   areaDamages[location] = [];
               }
+              const dmgRoll = maximizeDamage
+                ? maxDamageRoll
+                : await new Roll(system.damage, rollData).evaluate();
+
               const dmg = maximizeDamage
                 ? maxDamage
-                : CyberpunkItem._floorDamageTotal((await new Roll(system.damage, rollData).evaluate()).total);
+                : CyberpunkItem._floorDamageTotal(dmgRoll.total);
 
               areaDamages[location].push({
-                damage: dmg
+                damage: dmg,
+                damageHtml: CyberpunkItem._inlineRollHtml(dmg, dmgRoll, "damage")
               });
           }
           let templateData = {
@@ -484,8 +514,11 @@ export class CyberpunkItem extends Item {
       const rangedFumble = await this._maybeApplyRangedFumble(attackRoll);
       const rollData = this.actor?.getRollData?.() ?? {};
       const maximizeDamage = this._shouldMaximizePointBlankDamage(attackMods);
+      const maxDamageRoll = maximizeDamage
+        ? await new Roll(system.damage, rollData).evaluate({ maximize: true })
+        : null;
       const maxDamage = maximizeDamage
-        ? CyberpunkItem._floorDamageTotal((await new Roll(system.damage, rollData).evaluate({ maximize: true })).total)
+        ? CyberpunkItem._floorDamageTotal(maxDamageRoll.total)
         : null;
 
       let roundsFired = Math.min(system.shotsLeft, system.rof, 3);
@@ -506,12 +539,17 @@ export class CyberpunkItem extends Item {
               if (!areaDamages[location]) {
                   areaDamages[location] = [];
               }
+              const dmgRoll = maximizeDamage
+                ? maxDamageRoll
+                : await new Roll(system.damage, rollData).evaluate();
+
               const dmg = maximizeDamage
                 ? maxDamage
-                : CyberpunkItem._floorDamageTotal((await new Roll(system.damage, rollData).evaluate()).total);
+                : CyberpunkItem._floorDamageTotal(dmgRoll.total);
 
               areaDamages[location].push({
-                damage: dmg
+                damage: dmg,
+                damageHtml: CyberpunkItem._inlineRollHtml(dmg, dmgRoll, "damage")
               });
           }
       }
@@ -555,9 +593,15 @@ export class CyberpunkItem extends Item {
 
       for (let i = 0; i < hitsRoll.total; i++) {
         const loc = (await rollLocation(mods.targetActor, mods.targetArea)).areaHit;
-        const dmg = CyberpunkItem._floorDamageTotal((await new Roll(dmgFormula, rollData).evaluate()).total);
+        const dmgRoll = await new Roll(dmgFormula, rollData).evaluate();
+        const dmg = CyberpunkItem._floorDamageTotal(dmgRoll.total);
+
         if (!areaDamages[loc]) areaDamages[loc] = [];
-        areaDamages[loc].push({ dmg });
+
+        areaDamages[loc].push({
+          dmg,
+          dmgHtml: CyberpunkItem._inlineRollHtml(dmg, dmgRoll, "damage")
+        });
       }
 
       results.push({ hitsRoll, areaDamages });
@@ -601,7 +645,8 @@ export class CyberpunkItem extends Item {
               areaDamages[location] = [];
           }
           areaDamages[location].push({
-              damage: dmg,
+            damage: dmg,
+            damageHtml: CyberpunkItem._inlineRollHtml(dmg, damageRoll, "damage"),
           });
       }
       
