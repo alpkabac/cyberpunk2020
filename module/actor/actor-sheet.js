@@ -562,12 +562,13 @@ export class CyberpunkActorSheet extends ActorSheet {
           modifierGroups: [[
             { localKey: "ExtraModifiers", dataPath: "extraMod", defaultValue: 0 }
           ]],
-          onConfirm: ({ extraMod=0, advantage=false, disadvantage=false }) =>
+          onConfirm: ({ extraMod=0, advantage=false, disadvantage=false, hiddenAdvantage=false }) =>
             this.actor.rollSkill(
               id,
               Number(extraMod) || 0,
-              advantage,
-              disadvantage
+              !!advantage,
+              !!disadvantage,
+              !!hiddenAdvantage
             )
         });
         return dlg.render(true);

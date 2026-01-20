@@ -578,5 +578,12 @@
 
     "CYBERPUNK.Chat.Reload": "<p><b>Перезарядка:</b> {actor} перезаряжает <b>{weapon}</b> Боезапас: {shots}.</p>",
     "CYBERPUNK.Chat.HumanityRollFlavor": "<b>Человечность:</b> {actor} бросает стоимость человечности для «{item}».",
-    "CYBERPUNK.Chat.HumanityLossSet": "<b>Человечность:</b> {actor} устанавливает потерю человечности для «{item}»: <b>{loss}</b>."
+    "CYBERPUNK.Chat.HumanityLossSet": "<b>Человечность:</b> {actor} устанавливает потерю человечности для «{item}»: <b>{loss}</b>.",
+
+    "CYBERPUNK.HiddenAdvantage": "Скрыть преимущество/помеху",
+    "CYBERPUNK.Roll.AdvantageFlavor": "Бросок с преимуществом.",
+    "CYBERPUNK.Roll.DisadvantageFlavor": "Бросок с помехой.",
+    "CYBERPUNK.Roll.BestRoll": "Лучший бросок",
+    "CYBERPUNK.Roll.WorstRoll": "Худший бросок",
+    "CYBERPUNK.Roll.OtherRoll": "Второй бросок"
 }

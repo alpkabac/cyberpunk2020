@@ -26,6 +26,7 @@ import { defaultTargetLocations, fireModes } from "../lookups.js"
         showAdvDis: false,
         advantage: false,
         disadvantage: false,
+        hiddenAdvantage: false,
         closeOnSubmit: false,
 
         onConfirm: (results) => console.log(results)
@@ -96,7 +97,8 @@ import { defaultTargetLocations, fireModes } from "../lookups.js"
         shotsLeft: (this.options.weapon?._getWeaponSystem?.().shotsLeft) ?? (this.options.weapon?.system.shotsLeft) ?? 0,
         showAdvDis: this.options.showAdvDis,
         advantage: this.options.advantage,
-        disadvantage: this.options.disadvantage
+        disadvantage: this.options.disadvantage,
+        isGM: game.user.isGM
       };
     }
 

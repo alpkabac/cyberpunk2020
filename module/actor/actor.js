@@ -521,7 +521,7 @@ export class CyberpunkActor extends Actor {
    * @param {boolean} advantage
    * @param {boolean} disadvantage
    */
-  async rollSkill(skillId, extraMod = 0, advantage = false, disadvantage = false) {
+  async rollSkill(skillId, extraMod = 0, advantage = false, disadvantage = false, hiddenAdvantage = false) {
     const skill = this.items.get(skillId);
     if (!skill) return;
 
@@ -547,19 +547,38 @@ export class CyberpunkActor extends Actor {
       const r1 = makeRoll();
       const r2 = makeRoll();
 
-      Promise.all([
-        r1.evaluate(),
-        r2.evaluate()
-      ]).then(() => {
-        const chosen = advantage
-          ? (r1.total >= r2.total ? r1 : r2) // best
-          : (r1.total <= r2.total ? r1 : r2); // worst
+      await Promise.all([r1.evaluate(), r2.evaluate()]);
 
-        new Multiroll(skill.name)
-          .addRoll(chosen)
-          .defaultExecute();
-      });
-      return;
+      const chosen = advantage
+        ? (r1.total >= r2.total ? r1 : r2)   // best
+        : (r1.total <= r2.total ? r1 : r2);  // worst
+
+      const other = (chosen === r1) ? r2 : r1;
+
+      // Fumble Table
+      let fumble = null;
+      if (game.settings.get("cyberpunk2020", "fumbleTableEnabled") && isFumbleRoll(chosen)) {
+        fumble = await buildSkillFumbleData({ skill, roll: chosen });
+      }
+
+      // Players must always reveal advantage/disadvantage
+      const revealAdvDis = !game.user.isGM || !hiddenAdvantage;
+
+      if (revealAdvDis) {
+        const flavor = localize(advantage ? "Roll.AdvantageFlavor" : "Roll.DisadvantageFlavor");
+        const keptName = localize(advantage ? "Roll.BestRoll" : "Roll.WorstRoll");
+        const otherName = localize("Roll.OtherRoll");
+
+        return new Multiroll(skill.name, flavor)
+          .addRoll(chosen, { name: keptName })
+          .addRoll(other,  { name: otherName })
+          .defaultExecute({ fumble });
+      }
+
+      // Hidden (GM): show as a normal roll, without extra info
+      return new Multiroll(skill.name)
+        .addRoll(chosen)
+        .defaultExecute({ fumble });
     }
 
     // normal roll
