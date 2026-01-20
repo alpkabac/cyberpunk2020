@@ -1,4 +1,4 @@
-import { deepSet, localize } from "../utils.js"
+import { deepSet, localize, localizeParam } from "../utils.js"
 import { defaultTargetLocations, fireModes } from "../lookups.js"
 
 /**
@@ -120,6 +120,33 @@ import { defaultTargetLocations, fireModes } from "../lookups.js"
         }
 
         ui.notifications.info(localize("Reloaded"));
+
+        // GM audit: show reload in chat for player-controlled characters (not NPCs)
+        try {
+          const actor = weapon.actor;
+
+          // Only players (non-GM) and only Characters (not NPC)
+          if (actor && actor.type !== "npc" && !game.user.isGM) {
+            const gmRecipients = ChatMessage.getWhisperRecipients("GM")?.map(u => u.id) ?? [];
+
+            if (gmRecipients.length > 0) {
+              const shotsText = `${shots}/${shots}`;
+
+              await ChatMessage.create({
+                type: CONST.CHAT_MESSAGE_TYPES.OTHER,
+                speaker: ChatMessage.getSpeaker({ actor }),
+                whisper: gmRecipients,
+                content: localizeParam("Chat.Reload", {
+                  actor: actor.name,
+                  weapon: weapon.name,
+                  shots: shotsText
+                })
+              });
+            }
+          }
+        } catch (err) {
+          console.warn("Cyberpunk2020 | reload audit message failed", err);
+        }
 
         if (weapon.type === "weapon") {
           this.options.weapon.system.shotsLeft = shots;

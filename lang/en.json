@@ -573,5 +573,7 @@
 
     "CYBERPUNK.Fumble.ClearJamLine": "Unjam: {die} round(s).",
     "CYBERPUNK.Fumble.LocationLine": "Location: {die} → <b>{location}</b>.",
-    "CYBERPUNK.Fumble.DamageLine": "Damage: <b>{formula}</b> → {die}."
+    "CYBERPUNK.Fumble.DamageLine": "Damage: <b>{formula}</b> → {die}.",
+
+    "CYBERPUNK.Chat.Reload": "<p><b>Reload:</b> {actor} reloads <b>{weapon}</b> Ammo: {shots}.</p>"
 }

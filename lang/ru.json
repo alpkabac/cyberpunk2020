@@ -574,5 +574,7 @@
 
     "CYBERPUNK.Fumble.ClearJamLine": "Расклин: {die} раунд(а).",
     "CYBERPUNK.Fumble.LocationLine": "Локация: {die} → <b>{location}</b>.",
-    "CYBERPUNK.Fumble.DamageLine": "Урон: <b>{formula}</b> → {die}."
+    "CYBERPUNK.Fumble.DamageLine": "Урон: <b>{formula}</b> → {die}.",
+
+    "CYBERPUNK.Chat.Reload": "<p><b>Перезарядка:</b> {actor} перезаряжает <b>{weapon}</b> Боезапас: {shots}.</p>"
 }
