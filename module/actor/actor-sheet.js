@@ -1,7 +1,7 @@
 import { martialOptions, meleeAttackTypes, meleeBonkOptions, rangedModifiers, weaponTypes } from "../lookups.js"
 import { localize, localizeParam, cwHasType, cwIsEnabled } from "../utils.js"
 import { ModifiersDialog } from "../dialog/modifiers.js"
-import { SortOrders } from "./skill-sort.js";
+import { SortOrders, sortSkills } from "./skill-sort.js";
 
 /**
  * Extend the basic ActorSheet with some very simple modifications
@@ -131,38 +131,55 @@ export class CyberpunkActorSheet extends ActorSheet {
   _prepareSkills(sheetData) {
     sheetData.skillsSort = this.actor.system.skillsSortedBy || "Name";
     sheetData.skillsSortChoices = Object.keys(SortOrders);
+
     sheetData.filteredSkillIDs = this._filterSkills(sheetData);
-    sheetData.skillDisplayList = sheetData.filteredSkillIDs.map(id => this.actor.items.get(id));
+
+    sheetData.skillDisplayList = sheetData.filteredSkillIDs
+      .map(id => this.actor.items.get(id))
+      .filter(Boolean);
+  }
+  _getSortedSkillIDs(sheetData) {
+    const system = sheetData?.system ?? this.actor.system;
+    const sortOrder = system.skillsSortedBy || "Name";
+
+    const currentSkills =
+      this.actor.itemTypes?.skill ?? this.actor.items.filter(i => i.type === "skill");
+    const currentIds = currentSkills.map(s => s.id);
+
+    const cached = system.sortedSkillIDs;
+    const cachedOk = Array.isArray(cached)
+      && cached.length === currentIds.length
+      && cached.every(id => currentIds.includes(id));
+
+    if (cachedOk) return cached;
+
+    return sortSkills(currentSkills, SortOrders[sortOrder]).map(s => s.id);
   }
 
   // Handle searching skills
   _filterSkills(sheetData) {
-    let id = sheetData.actor._id;
+    const transient = sheetData.system.transient ??= {};
 
-    if(sheetData.system.transient.skillFilter == null) {
-      sheetData.system.transient.skillFilter = "";
-    }
-    let upperSearch = sheetData.system.transient.skillFilter.toUpperCase();
-    let listToFilter = sheetData.system.sortedSkillIDs || game.actors.get(id).itemTypes.skill.map(skill => skill.id);
+    transient.skillFilter ??= "";
+    const upperSearch = String(transient.skillFilter).toUpperCase();
 
-    // Only filter if we need to
-    if(upperSearch === "") {
-      return listToFilter;
+    let listToFilter = this._getSortedSkillIDs(sheetData);
+
+    if (upperSearch === "") return listToFilter;
+
+    const oldSearch = String(transient.oldSearch ?? "").toUpperCase();
+    if (oldSearch && Array.isArray(sheetData.filteredSkillIDs) && upperSearch.startsWith(oldSearch)) {
+      listToFilter = sheetData.filteredSkillIDs;
     }
-    else {
-      // If we searched previously and the old search had results, we can filter those instead of the whole lot
-      if(sheetData.system.transient.oldSearch != null 
-        && sheetData.filteredSkillIDs != null
-        && upperSearch.startsWith(oldSearch)) {
-        listToFilter = sheetData.filteredSkillIDs; 
-      }
-      return listToFilter.filter(id => {
-        let skill = this.actor.items.get(id);
-        if (!skill) { return false; }
-        let skillName = skill.name;
-        return skillName.toUpperCase().includes(upperSearch);
-      });
-    }
+
+    const result = listToFilter.filter(id => {
+      const skill = this.actor.items.get(id);
+      if (!skill) return false;
+      return String(skill.name).toUpperCase().includes(upperSearch);
+    });
+
+    transient.oldSearch = upperSearch;
+    return result;
   }
 
   _addWoundTrack(sheetData) {
