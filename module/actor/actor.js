@@ -1,4 +1,5 @@
 import { makeD10Roll, Multiroll } from "../dice.js";
+import { isFumbleRoll, buildSkillFumbleData } from "../utils.js";
 import { SortOrders, sortSkills } from "./skill-sort.js";
 import { btmFromBT } from "../lookups.js";
 import { properCase, localize, getDefaultSkills, cwHasType, cwIsEnabled } from "../utils.js"
@@ -520,7 +521,7 @@ export class CyberpunkActor extends Actor {
    * @param {boolean} advantage
    * @param {boolean} disadvantage
    */
-  rollSkill(skillId, extraMod = 0, advantage = false, disadvantage = false) {
+  async rollSkill(skillId, extraMod = 0, advantage = false, disadvantage = false) {
     const skill = this.items.get(skillId);
     if (!skill) return;
 
@@ -562,9 +563,17 @@ export class CyberpunkActor extends Actor {
     }
 
     // normal roll
+    const r = makeRoll();
+    await r.evaluate();
+
+    let fumble = null;
+    if (game.settings.get("cyberpunk2020", "fumbleTableEnabled") && isFumbleRoll(r)) {
+      fumble = await buildSkillFumbleData({ skill, roll: r });
+    }
+
     new Multiroll(skill.name)
-      .addRoll(makeRoll())
-      .defaultExecute();
+      .addRoll(r)
+      .defaultExecute({ fumble });
   }
 
   /**

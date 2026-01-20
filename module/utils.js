@@ -244,3 +244,292 @@ export function cwIsEnabled(obj) {
   if (mode === "Activatable") return !!sys?.EffectActive;
   return true;
 }
+
+// Fumble Table (optional rule)
+
+/**
+ * Extract the first d10 result from a Cyberpunk roll
+ * @param {Roll} roll
+ * @returns {number|null}
+ */
+export function getInitialD10Result(roll) {
+  try {
+    const dieTerm = roll?.terms?.find(t => t instanceof foundry.dice.terms.Die);
+    const res = dieTerm?.results?.find(r => !r.discarded && !r.rerolled);
+    const n = Number(res?.result);
+    return Number.isFinite(n) ? n : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+export function isFumbleRoll(roll) {
+  return getInitialD10Result(roll) === 1;
+}
+
+function _dieSpan(faces, value, roll = null) {
+  const v = Number(value);
+  if (!Number.isFinite(v)) return String(value ?? "");
+
+  if (roll && typeof roll === "object" && (roll.formula || roll.terms)) {
+    try {
+      const data = (typeof roll.toJSON === "function") ? roll.toJSON() : roll;
+      const json = encodeURIComponent(JSON.stringify(data));
+      const formula =
+        foundry?.utils?.escapeHTML?.(String(roll.formula ?? `1d${faces}`)) ??
+        String(roll.formula ?? `1d${faces}`);
+
+      return `<a class="inline-roll inline-result cp-inline-roll roll-result roll die d${faces}" data-roll="${json}">${v}</a>`;
+    } catch (e) {
+    }
+  }
+
+  return `<span class="roll-result roll die d${faces}">${v}</span>`;
+}
+function _inlineRollResult(value, roll, extraClasses = "") {
+  const v = Number(value);
+  if (!Number.isFinite(v)) return String(value ?? "");
+
+  if (roll && typeof roll === "object" && (roll.formula || roll.terms)) {
+    try {
+      const data = (typeof roll.toJSON === "function") ? roll.toJSON() : roll;
+      const json = encodeURIComponent(JSON.stringify(data));
+      const formula =
+        foundry?.utils?.escapeHTML?.(String(roll.formula ?? "")) ??
+        String(roll.formula ?? "");
+
+      const cls = String(extraClasses || "").trim();
+      return `<a class="inline-roll inline-result cp-inline-roll roll-result roll ${cls}" data-roll="${json}">${v}</a>`;
+    } catch (e) {}
+  }
+
+  return `<span class="roll-result roll ${extraClasses}">${v}</span>`;
+}
+
+function _floorDamageTotal(total) {
+  const n = Number(total);
+  if (!Number.isFinite(n)) return 0;
+  if (n <= 0) return 0;
+  return Math.max(1, Math.floor(n));
+}
+
+function _pickTableRow(table, d10) {
+  for (const row of table) {
+    if (d10 >= row.min && d10 <= row.max) return row;
+  }
+  return table[table.length - 1];
+}
+
+const _TABLE_REF_COMBAT = [
+  { min: 1, max: 4, key: "Fumble.ReflexCombat.1_4" },
+  { min: 5, max: 5, key: "Fumble.ReflexCombat.5" },
+  { min: 6, max: 6, key: "Fumble.ReflexCombat.6", needsReliability: "discharge" },
+  { min: 7, max: 7, key: "Fumble.ReflexCombat.7", needsReliability: "jam" },
+  { min: 8, max: 8, key: "Fumble.ReflexCombat.8", needsLocation: true },
+  { min: 9, max: 10, key: "Fumble.ReflexCombat.9_10", needsLocation: true }
+];
+
+const _TABLE_REF_ATH = [
+  { min: 1, max: 4, key: "Fumble.ReflexAthletics.1_4" },
+  { min: 5, max: 7, key: "Fumble.ReflexAthletics.5_7" },
+  { min: 8, max: 10, key: "Fumble.ReflexAthletics.8_10", extraAthleticsDamage: true }
+];
+
+const _TABLE_TECH = [
+  { min: 1, max: 4, key: "Fumble.Tech.1_4" },
+  { min: 5, max: 7, key: "Fumble.Tech.5_7" },
+  { min: 8, max: 10, key: "Fumble.Tech.8_10" }
+];
+
+const _TABLE_EMP = [
+  { min: 1, max: 4, key: "Fumble.Emp.1_4" },
+  { min: 5, max: 6, key: "Fumble.Emp.5_6" },
+  { min: 7, max: 10, key: "Fumble.Emp.7_10", extraEmpathyCheck: true }
+];
+
+const _TABLE_INT = [
+  { min: 1, max: 4, key: "Fumble.Int.1_4" },
+  { min: 5, max: 7, key: "Fumble.Int.5_7" },
+  { min: 8, max: 10, key: "Fumble.Int.8_10" }
+];
+
+function _skillTableByStat(stat) {
+  switch (String(stat || "").toLowerCase()) {
+    case "ref": return { titleKey: "Fumble.ReflexAthletics.Title", table: _TABLE_REF_ATH };
+    case "tech": return { titleKey: "Fumble.Tech.Title", table: _TABLE_TECH };
+    case "emp": return { titleKey: "Fumble.Emp.Title", table: _TABLE_EMP };
+    case "int": return { titleKey: "Fumble.Int.Title", table: _TABLE_INT };
+    default: return { titleKey: "Fumble.ReflexAthletics.Title", table: _TABLE_REF_ATH };
+  }
+}
+
+// Reliability helper (weapon.system.reliability)
+export function reliabilityThreshold(reliabilityKey) {
+  const key = String(reliabilityKey || "").toLowerCase();
+  if (["veryreliable", "very", "vr"].includes(key)) return 3;
+  if (["standard", "st"].includes(key)) return 5;
+  if (["unreliable", "ur"].includes(key)) return 8;
+  return 5;
+}
+
+export function reliabilityLabel(reliabilityKey) {
+  const raw = String(reliabilityKey || "Standard");
+  const k = "CYBERPUNK." + raw;
+  if (game.i18n.has(k)) return game.i18n.localize(k);
+  return raw;
+}
+
+// Build fumble UI payload for a skill roll (by skill stat table)
+export async function buildSkillFumbleData({ skill, roll }) {
+  const stat = skill?.system?.stat;
+  const { titleKey, table } = _skillTableByStat(stat);
+
+  const fRoll = await new Roll("1d10").evaluate();
+  const row = _pickTableRow(table, fRoll.total);
+
+  let html = "";
+  const mainDie = getInitialD10Result(roll) ?? 1;
+  html += localizeParam("Fumble.MainRollLine", { die: _dieSpan(10, mainDie, roll) });
+  html += localizeParam("Fumble.TableRollLine", {
+    table: localize(titleKey),
+    die: _dieSpan(10, fRoll.total, fRoll)
+  });
+  html += `<p>${localize(row.key)}</p>`;
+  
+  if (row.extraAthleticsDamage) {
+    const dmgRoll = await new Roll("1d6").evaluate();
+    html += localizeParam("Fumble.AthleticsDamageLine", {
+      die: _dieSpan(6, dmgRoll.total, dmgRoll)
+    });
+  }
+
+  if (row.extraEmpathyCheck) {
+    const extra = await new Roll("1d10").evaluate();
+    const outcomeKey = (extra.total <= 4)
+      ? "Fumble.EmpExtra.1_4"
+      : "Fumble.EmpExtra.5_10";
+
+    html += localizeParam("Fumble.EmpExtraLine", {
+      die: _dieSpan(10, extra.total, extra),
+      outcome: localize(outcomeKey)
+    });
+  }
+
+  return {
+    title: localize("Fumble.TableTitle"),
+    html
+  };
+}
+
+export async function buildRangedCombatFumbleData({
+  item,
+  attackRoll,
+  isAutoWeapon,
+  autoOnlyJam
+}) {
+  const sys = item?._getWeaponSystem?.() ?? item?.system ?? {};
+  const relKey = sys.reliability;
+  const thr = reliabilityThreshold(relKey);
+  const relName = reliabilityLabel(relKey);
+
+  const outcome = { discharge: false, jam: false, jamRounds: 0 };
+
+  let html = "";
+  const mainDie = getInitialD10Result(attackRoll) ?? 1;
+  html += localizeParam("Fumble.MainRollLine", { die: _dieSpan(10, mainDie, attackRoll) });
+
+  // Auto-only-jam mode: skip combat table
+  if (isAutoWeapon && autoOnlyJam) {
+    const rel = await new Roll("1d10").evaluate();
+    const jam = rel.total <= thr;
+
+    html += `<p>${localize("Fumble.AutoWeaponOnlyJam")}</p>`;
+    html += `<p>${localizeParam("Fumble.ReliabilityLine", {
+      rel: relName,
+      thr,
+      die: _dieSpan(10, rel.total, rel),
+      result: localize(jam ? "Fumble.ReliabilityResult.Jam" : "Fumble.ReliabilityResult.NoJam")
+    })}</p>`;
+
+    if (jam) {
+      const r = await new Roll("1d6").evaluate();
+      outcome.jam = true;
+      outcome.jamRounds = r.total;
+      html += `<p>${localizeParam("Fumble.ClearJamLine", { die: _dieSpan(6, r.total, r) })}</p>`;
+    }
+
+    return { title: localize("Fumble.TableTitle"), html, outcome };
+  }
+
+  // Normal table roll
+  const fRoll = await new Roll("1d10").evaluate();
+  const row = _pickTableRow(_TABLE_REF_COMBAT, fRoll.total);
+
+  html += localizeParam("Fumble.TableRollLine", {
+    table: localize("Fumble.ReflexCombat.Title"),
+    die: _dieSpan(10, fRoll.total, fRoll)
+  });
+  html += `<p>${localize(row.key)}</p>`;
+
+  // Location roll
+  if (row.needsLocation) {
+    const loc = await rollLocation(undefined, undefined);
+    html += `<p>${localizeParam("Fumble.LocationLine", {
+      die: _dieSpan(10, loc.roll.total, loc.roll),
+      location: localize(loc.areaHit)
+    })}</p>`;
+
+    const dmgFormula = sys?.damage || "1d6";
+    const rollData = item?.actor?.getRollData?.() ?? {};
+    const dmgRoll = await new Roll(dmgFormula, rollData).evaluate();
+    const dmg = _floorDamageTotal(dmgRoll.total);
+
+    html += `<p>${localizeParam("Fumble.DamageLine", {
+      formula: dmgFormula,
+      die: _inlineRollResult(dmg, dmgRoll)
+    })}</p>`;
+  }
+
+  // Reliability checks:
+  const needsReliability = row.needsReliability;
+
+  let relRoll = null;
+  if (needsReliability) relRoll = await new Roll("1d10").evaluate();
+
+  if (relRoll) {
+    const fails = relRoll.total <= thr;
+
+    const resultKey =
+      (needsReliability === "jam")
+        ? (fails ? "Fumble.ReliabilityResult.Jam" : "Fumble.ReliabilityResult.NoJam")
+        : (fails ? "Fumble.ReliabilityResult.Fail" : "Fumble.ReliabilityResult.Pass");
+
+    const relLine = localizeParam("Fumble.ReliabilityLine", {
+      rel: relName,
+      thr,
+      die: _dieSpan(10, relRoll.total, relRoll),
+      result: localize(resultKey)
+    });
+    html += `<p>${relLine}</p>`;
+
+    if (needsReliability === "discharge") {
+      if (fails) {
+        outcome.discharge = true;
+        html += `<p>${localize("Fumble.DischargeApplied")}</p>`;
+      } else {
+        html += `<p>${localize("Fumble.DischargeNotApplied")}</p>`;
+      }
+    }
+
+    if (needsReliability === "jam") {
+      if (fails) {
+        const r = await new Roll("1d6").evaluate();
+        outcome.jam = true;
+        outcome.jamRounds = r.total;
+        html += `<p>${localizeParam("Fumble.ClearJamLine", { die: _dieSpan(6, r.total, r) })}</p>`;
+      }
+    }
+  }
+
+  return { title: localize("Fumble.TableTitle"), html, outcome };
+}

@@ -517,5 +517,62 @@
     "CYBERPUNK.CWT_EffectMode_Permanent": "Постоянный",
     "CYBERPUNK.CWT_EffectMode_Activatable": "Активируемый",
     "CYBERPUNK.CWT_EffectActive": "Активен",
-    "CYBERPUNK.CWT_WeaponDisabled": "Кибероружие не активно."
+    "CYBERPUNK.CWT_WeaponDisabled": "Кибероружие не активно.",
+
+    "SETTINGS.FumbleTableEnabled": "Таблица провалов",
+    "SETTINGS.FumbleTableEnabledHint": "Если включено, то при выпадении 1 при проверке навыков дополнительно определяется результат по таблице провалов.",
+    "SETTINGS.AutoFumbleOnlyJam": "Автоматическое оружие при провале только клинит",
+    "SETTINGS.AutoFumbleOnlyJamHint": "Работает только если включена Таблица провалов. Если включено, то автоматическое оружие игнорирует таблицу провалов и проверяет только клин по надёжности.",
+
+    "CYBERPUNK.Fumble.TableTitle": "Таблица провалов",
+
+    "CYBERPUNK.Fumble.MainRollLine": "<p><b>Провал</b>: на основном броске выпало {die}.</p>",
+    "CYBERPUNK.Fumble.TableRollLine": "<p><b>{table}</b>: дополнительный бросок {die}.</p>",
+
+    "CYBERPUNK.Fumble.ReflexCombat.Title": "Рефлексы (Бой)",
+    "CYBERPUNK.Fumble.ReflexCombat.1_4": "1–4. Не сумел. Ты просто облажался.",
+    "CYBERPUNK.Fumble.ReflexCombat.5": "5. Ты роняешь своё оружие.",
+    "CYBERPUNK.Fumble.ReflexCombat.6": "6. Оружие разряжается или попадает во что-то безвредное.",
+    "CYBERPUNK.Fumble.ReflexCombat.7": "7. Оружие заклинило, или опрокинуло тебя на землю на 1 раунд.",
+    "CYBERPUNK.Fumble.ReflexCombat.8": "8. Ты умудрился ранить себя.",
+    "CYBERPUNK.Fumble.ReflexCombat.9_10": "9–10. Ты умудрился ранить участника своей группы.",
+
+    "CYBERPUNK.Fumble.ReflexAthletics.Title": "Рефлексы (Атлетика)",
+    "CYBERPUNK.Fumble.ReflexAthletics.1_4": "1–4. Не сумел. Ты просто запнулся и выставил себя идиотом.",
+    "CYBERPUNK.Fumble.ReflexAthletics.5_7": "5–7. Ты с треском провалился. Получи 1 пункт незначительного урона (растяжение, падение, отступил), а также сделай Спасбросок против оглушения.",
+    "CYBERPUNK.Fumble.ReflexAthletics.8_10": "8–10. Ты терпишь ужасную неудачу. Если задействовано тело, нанеси 1D6 урона от падения или перенапряжения мышц. Также соверши Спасбросок против оглушения с отрицательным модификатором -1.",
+    "CYBERPUNK.Fumble.AthleticsDamageLine": "<p>Урон: {die}.</p>",
+
+    "CYBERPUNK.Fumble.Tech.Title": "Технические навыки (Ремонт или создание)",
+    "CYBERPUNK.Fumble.Tech.1_4": "1–4. Не сумел. Ты просто не можешь соединить это вместе.",
+    "CYBERPUNK.Fumble.Tech.5_7": "5–7. Ты не только терпишь неудачу, ты делаешь ещё хуже! Ты роняешь инструменты, с которыми работал, или теряешь контроль, и ещё больше повреждаешь то, с чем работал. Подними сложность на 5 пунктов и попробуй снова.",
+    "CYBERPUNK.Fumble.Tech.8_10": "8–10. Вау. Ты вовсе взорвал это! Ты повредил устройство или создание без возможности восстановления. Купи новое.",
+
+    "CYBERPUNK.Fumble.Emp.Title": "Эмпатия (Понимание, Быстрый разговор, Соблазнение)",
+    "CYBERPUNK.Fumble.Emp.1_4": "1–4. Не сумел. Они просто не купятся.",
+    "CYBERPUNK.Fumble.Emp.5_6": "5–6. Слишком много для твоих социальных навыков. Ты не только не убедил их, ты оставляешь их совершенно холодными (-4 для следующего броска на Эмпатию к любым предложениям, которые у тебя могут быть).",
+    "CYBERPUNK.Fumble.Emp.7_10": "7–10. Вау! Ты провалил это по-царски. Ты не только не убедил их, но теперь они действительно яростно выступают против всего, что ты хочешь сделать. Соверши бросок 1D10. При результате 1–4, они на самом деле пытаются причинить тебе физический вред.",
+
+    "CYBERPUNK.Fumble.EmpExtraLine": "<p>Доп. бросок {die}: {outcome}</p>",
+    "CYBERPUNK.Fumble.EmpExtra.1_4": "они пытаются причинить тебе физический вред.",
+    "CYBERPUNK.Fumble.EmpExtra.5_10": "они просто в ярости и сопротивляются.",
+
+    "CYBERPUNK.Fumble.Int.Title": "Интеллект (Вычисления, Внимательность, Улавливание сути)",
+    "CYBERPUNK.Fumble.Int.1_4": "1–4. Не сумел. Ты просто не знаешь, как это сделать. Ты не знаешь, что происходит. Ты продолжаешь не замечать значительные проблемы.",
+    "CYBERPUNK.Fumble.Int.5_7": "5–7. Ты ничего не знаешь о том, что происходит, и понятия не имеешь, как с этим что-то сделать. Сделай проверку Понимания с модификатором -2, чтобы увидеть, замечает ли кто-нибудь ещё, насколько ты тупой.",
+    "CYBERPUNK.Fumble.Int.8_10": "8–10. Вау, ты не замечаешь. Ты не только не знаешь, что происходит, но и все знают, насколько ты туп.",
+
+    "CYBERPUNK.Fumble.AutoWeaponOnlyJam": "Автоматическое оружие: таблица провалов игнорируется, проверка клина по надёжности.",
+    "CYBERPUNK.Fumble.ReliabilityLine": "Надёжность: <b>{rel}</b> (порог {thr} или ниже).<br>Бросок {die} → {result}.",
+    "CYBERPUNK.Fumble.ReliabilityResult.Pass": "успех",
+    "CYBERPUNK.Fumble.ReliabilityResult.Fail": "провал",
+    "CYBERPUNK.Fumble.ReliabilityResult.Jam": "оружие заклинило",
+    "CYBERPUNK.Fumble.ReliabilityResult.NoJam": "тебе повезло, оружие не заклинило, просто осечка",
+
+    "CYBERPUNK.Fumble.DischargeApplied": "Результат: оружие разрядилось (боезапас становится 0).",
+    "CYBERPUNK.Fumble.DischargeNotApplied": "Результат: тебе повезло, оружие не разрядилось, просто осечка",
+
+    "CYBERPUNK.Fumble.ClearJamLine": "Расклин: {die} раунд(а).",
+    "CYBERPUNK.Fumble.LocationLine": "Локация: {die} → <b>{location}</b>.",
+    "CYBERPUNK.Fumble.DamageLine": "Урон: <b>{formula}</b> → {die}."
 }

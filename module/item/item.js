@@ -1,6 +1,6 @@
 import { weaponTypes, rangedAttackTypes, meleeAttackTypes, fireModes, rangedModifiers, ranges, rangeDCs, rangeResolve, strengthDamageBonus, getMartialActionBonus, martialActions } from "../lookups.js"
 import { Multiroll, makeD10Roll } from "../dice.js"
-import { clamp, deepLookup, localize, localizeParam, rollLocation, cwHasType, cwIsEnabled } from "../utils.js"
+import { properCase, replaceIn, localize, localizeParam, rollLocation, cwHasType, cwIsEnabled, isFumbleRoll, buildRangedCombatFumbleData, buildSkillFumbleData, clamp} from "../utils.js";
 import { CyberpunkActor } from "../actor/actor.js";
 
 /**
@@ -161,6 +161,33 @@ export class CyberpunkItem extends Item {
       default:
         break;
     }
+  }
+
+    _isAutoWeapon(sys) {
+    const atk = sys?.attackType;
+    return atk === rangedAttackTypes.auto || atk === rangedAttackTypes.autoshotgun;
+  }
+
+  async _maybeApplyRangedFumble(attackRoll) {
+    if (!game.settings.get("cyberpunk2020", "fumbleTableEnabled")) return null;
+    if (!isFumbleRoll(attackRoll)) return null;
+
+    const sys = this._getWeaponSystem();
+    const isAuto = this._isAutoWeapon(sys);
+    const autoOnlyJam = !!game.settings.get("cyberpunk2020", "autoFumbleOnlyJam");
+
+    const data = await buildRangedCombatFumbleData({
+      item: this,
+      attackRoll,
+      isAutoWeapon: isAuto,
+      autoOnlyJam
+    });
+
+    return {
+      fumble: { title: data.title, html: data.html },
+      forceMiss: true,
+      outcome: data.outcome
+    };
   }
 
   // TODO: For 0.8.1, we want to also add flavor text to the different modifiers
@@ -381,13 +408,36 @@ export class CyberpunkItem extends Item {
       
       // This is a somewhat flawed multi-target thing - given target tokens, we could calculate distance (& therefore penalty) for each, and apply damage to them
       let rolls = [];
+      let shotsLeft = Number(system.shotsLeft) || 0;
+      const perTarget = Math.max(1, Math.floor((Number(system.rof) || 0) / targetCount));
       for (let i = 0; i < targetCount; i++) {
           let attackRoll = await this.attackRoll(attackMods);
-          let roundsFired = Math.min(system.shotsLeft, system.rof / targetCount);
-          await this.__setWeaponField("shotsLeft", system.shotsLeft - roundsFired);
+
+          const perTarget = Math.max(1, Math.floor((Number(system.rof) || 0) / targetCount));
+
+          const rangedFumble = await this._maybeApplyRangedFumble(attackRoll);
+
+          let roundsFired = Math.min(shotsLeft, perTarget);
+
+          if (rangedFumble) {
+            roundsFired = Math.min(shotsLeft, 1);
+          }
+
+          if (rangedFumble?.outcome?.discharge) {
+            shotsLeft = 0;
+          } else {
+            shotsLeft = Math.max(0, shotsLeft - roundsFired);
+          }
+
+          await this.__setWeaponField("shotsLeft", shotsLeft);
+
           let roundsHit = Math.min(roundsFired, attackRoll.total - DC);
+          
           if (roundsHit < 0) {
               roundsHit = 0;
+          }
+          if (rangedFumble?.forceMiss) {
+            roundsHit = 0;
           }
           let areaDamages = {};
           // Roll damage for each of the bullets that hit
@@ -415,7 +465,8 @@ export class CyberpunkItem extends Item {
               areaDamages: areaDamages,
               locals: {
                   range: { range: actualRangeBracket }
-              }
+              },
+              fumble: rangedFumble?.fumble ?? null,
           };
           let roll = new Multiroll(`${localize("Autofire")}`, `${localize("Range")}: ${localizeParam(attackMods.range, {range: actualRangeBracket})}`);
           roll.execute(undefined, "systems/cyberpunk2020/templates/chat/multi-hit.hbs", templateData);
@@ -430,6 +481,7 @@ export class CyberpunkItem extends Item {
       let actualRangeBracket = rangeResolve[attackMods.range](system.range);
       let DC = rangeDCs[attackMods.range];
       let attackRoll = await this.attackRoll(attackMods);
+      const rangedFumble = await this._maybeApplyRangedFumble(attackRoll);
       const rollData = this.actor?.getRollData?.() ?? {};
       const maximizeDamage = this._shouldMaximizePointBlankDamage(attackMods);
       const maxDamage = maximizeDamage
@@ -437,7 +489,13 @@ export class CyberpunkItem extends Item {
         : null;
 
       let roundsFired = Math.min(system.shotsLeft, system.rof, 3);
+      if (rangedFumble) {
+        roundsFired = Math.min(system.shotsLeft, 1);
+      }
       let attackHits = attackRoll.total >= DC;
+      if (rangedFumble?.forceMiss) {
+        attackHits = false;
+      }
       let areaDamages = {};
       let roundsHit;
       if (attackHits) {
@@ -465,13 +523,16 @@ export class CyberpunkItem extends Item {
           hits: attackHits ? roundsHit.total : 0,
           hit: attackHits,
           areaDamages: areaDamages,
-          locals: {
-              range: { range: actualRangeBracket }
-          }
+          locals: {range: { range: actualRangeBracket }},
+          fumble: rangedFumble?.fumble ?? null,
       };
       let roll = new Multiroll(localize("ThreeRoundBurst"));
       roll.execute(undefined, "systems/cyberpunk2020/templates/chat/multi-hit.hbs", templateData);
-      await this.__setWeaponField("shotsLeft", system.shotsLeft - roundsFired);
+      if (rangedFumble?.outcome?.discharge) {
+        await this.__setWeaponField("shotsLeft", 0);
+      } else {
+        await this.__setWeaponField("shotsLeft", system.shotsLeft - roundsFired);
+      }
       return roll;
   }
 
@@ -516,11 +577,11 @@ export class CyberpunkItem extends Item {
 
   async __semiAuto(attackMods) {
       const system = this._getWeaponSystem();
-      console.log("System:", system);
       
       // The range we're shooting at
       let DC = rangeDCs[attackMods.range];
       let attackRoll = await this.attackRoll(attackMods);
+      const rangedFumble = await this._maybeApplyRangedFumble(attackRoll);
       const rollData = this.actor?.getRollData?.() ?? {};
       const maximizeDamage = this._shouldMaximizePointBlankDamage(attackMods);
       const damageRoll = await new Roll(system.damage, rollData).evaluate({ maximize: maximizeDamage });
@@ -528,18 +589,12 @@ export class CyberpunkItem extends Item {
       let locationRoll = await rollLocation(attackMods.targetActor, attackMods.targetArea);
       let actualRangeBracket = rangeResolve[attackMods.range](system.range);
       let attackHits = attackRoll.total >= DC;
+      if (rangedFumble?.forceMiss) {
+        attackHits = false;
+      }
       const roundsFired = Math.min(system.shotsLeft, 1);
       let location = locationRoll.areaHit;
       let areaDamages = {};
-
-      // let bigRoll = new Multiroll(this.name, this.system.flavor)
-      //   .addRoll(new Roll(`${DC}`), {name: localize("ToHit")})
-      //   .addRoll(attackRoll, {name: localize("Attack")})
-      //   .addRoll(damageRoll, {name: localize("Damage")})
-      //   .addRoll(locationRoll.roll, {name: localize("Location"), flavor: locationRoll.areaHit });
-      // bigRoll.defaultExecute({img:this.img});
-      // this.update({"system.shotsLeft": system.shotsLeft - 1})
-      // return bigRoll;
       
       if (attackHits) {
           if (!areaDamages[location]) {
@@ -551,22 +606,27 @@ export class CyberpunkItem extends Item {
       }
       
       let templateData = {
-          range: attackMods.range,
-          toHit: DC,
-          attackRoll: attackRoll,
-          fired: roundsFired,
-          hits: attackHits ? 1 : 0,
-          hit: attackHits,
-          areaDamages: areaDamages,
-          locals: {
-              range: { range: actualRangeBracket }
-          }
+        range: attackMods.range,
+        toHit: DC,
+        attackRoll: attackRoll,
+        fired: roundsFired,
+        hits: attackHits ? 1 : 0,
+        hit: attackHits,
+        areaDamages: areaDamages,
+        fumble: rangedFumble?.fumble ?? null,
+        locals: {
+            range: { range: actualRangeBracket }
+        }
       };
 
       let roll = new Multiroll(localize("SemiAuto"));
       roll.execute(undefined, "systems/cyberpunk2020/templates/chat/multi-hit.hbs", templateData);
 
-      await this.__setWeaponField("shotsLeft", system.shotsLeft - roundsFired);
+      if (rangedFumble?.outcome?.discharge) {
+        await this.__setWeaponField("shotsLeft", 0);
+      } else {
+        await this.__setWeaponField("shotsLeft", system.shotsLeft - roundsFired);
+      }
       
       return roll;
   }
@@ -600,11 +660,20 @@ export class CyberpunkItem extends Item {
 
       let locationRoll = await rollLocation(attackMods.targetActor, attackMods.targetArea);
 
+      let fumble = null;
+      if (game.settings.get("cyberpunk2020", "fumbleTableEnabled") && isFumbleRoll(attackRoll)) {
+        fumble = await buildSkillFumbleData({
+          skill: { system: { stat: "ref" } },
+          roll: attackRoll
+        });
+      }
+
       let bigRoll = new Multiroll(this.name, this.system.flavor)
-          .addRoll(attackRoll, {name: localize("Attack")})
-          .addRoll(damageRoll, {name: localize("Damage")})
-          .addRoll(locationRoll.roll, {name: localize("Location"), flavor: locationRoll.areaHit });
-      bigRoll.defaultExecute({img: this.img});
+        .addRoll(attackRoll, { name: localize("Attack") })
+        .addRoll(damageRoll, { name: localize("Damage") })
+        .addRoll(locationRoll.roll, { name: localize("Location"), flavor: locationRoll.areaHit });
+
+      bigRoll.defaultExecute({ img: this.img, fumble });
       return bigRoll;
   }
   async __martialBonk(attackMods) {
@@ -691,7 +760,19 @@ export class CyberpunkItem extends Item {
 
       results.addRoll(damageRoll, { name: localize("Damage") });
     }
-    results.defaultExecute({img: this.img});
+    if (!attackRoll._evaluated) {
+      await attackRoll.evaluate();
+    }
+
+    let fumble = null;
+    if (game.settings.get("cyberpunk2020", "fumbleTableEnabled") && isFumbleRoll(attackRoll)) {
+      fumble = await buildSkillFumbleData({
+        skill: { system: { stat: "ref" } },
+        roll: attackRoll
+      });
+    }
+
+    await results.defaultExecute({ img: this.img, fumble });
     return results;
   }
 
