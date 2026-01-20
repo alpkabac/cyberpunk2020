@@ -19,7 +19,10 @@ export class CyberpunkItem extends Item {
   static _floorDamageTotal(total) {
     const n = Number(total);
     if (!Number.isFinite(n)) return 0;
-    return Math.max(0, Math.floor(n));
+
+    if (n <= 0) return 0;
+
+    return Math.max(1, Math.floor(n));
   }
 
   prepareData() {
