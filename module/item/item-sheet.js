@@ -37,6 +37,7 @@ export class CyberpunkItemSheet extends ItemSheet {
     // This means the handlebars data and the form edit data actually mirror each other
     const data = await super.getData();
     data.system = this.item.system;
+    data.isGM = game.user.isGM;
 
     switch (this.item.type) {
       case "weapon":
@@ -615,20 +616,51 @@ async _prepareCyberware(sheet) {
     // HumanityCost Roll
     html.find('.humanity-cost-roll').click(async ev => {
       ev.stopPropagation();
+
       const cyber = this.object;
       const hc = cyber.system.humanityCost;
       let loss = 0;
+      let roll = null;
+
       // determine if humanity cost is a number or dice
       if (formulaHasDice(hc)) {
-        // roll the humanity cost
-        let r = await new Roll(hc).evaluate();
-        loss = r.total ? r.total : 0;
+        roll = await new Roll(hc).evaluate();
+        loss = roll?.total ? roll.total : 0;
       } else {
         const num = Number(hc);
         loss = (isNaN(num)) ? 0 : num;
       }
-      cyber.system.humanityLoss = loss;
-      cyber.sheet.render(true);
+
+      // Persist loss on the item
+      await cyber.update({ "system.humanityLoss": loss });
+
+      // Public chat message so players can't reroll silently
+      const actor = cyber.actor ?? null;
+      const speaker = ChatMessage.getSpeaker(actor ? { actor } : {});
+      const rollMode = CONST?.DICE_ROLL_MODES?.PUBLIC ?? "roll";
+
+      if (roll) {
+        await roll.toMessage(
+          {
+            speaker,
+            flavor: game.i18n.format("CYBERPUNK.Chat.HumanityRollFlavor", {
+              actor: actor?.name ?? game.user.name,
+              item: cyber.name
+            })
+          },
+          { rollMode }
+        );
+      } else {
+        await ChatMessage.create({
+          type: CONST.CHAT_MESSAGE_TYPES.OTHER,
+          speaker,
+          content: game.i18n.format("CYBERPUNK.Chat.HumanityLossSet", {
+            actor: actor?.name ?? game.user.name,
+            item: cyber.name,
+            loss
+          })
+        });
+      }
     });
 
     // Recalculate available slots when changing “Slots provided”

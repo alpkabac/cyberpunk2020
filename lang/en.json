@@ -575,5 +575,7 @@
     "CYBERPUNK.Fumble.LocationLine": "Location: {die} → <b>{location}</b>.",
     "CYBERPUNK.Fumble.DamageLine": "Damage: <b>{formula}</b> → {die}.",
 
-    "CYBERPUNK.Chat.Reload": "<p><b>Reload:</b> {actor} reloads <b>{weapon}</b> Ammo: {shots}.</p>"
+    "CYBERPUNK.Chat.Reload": "<p><b>Reload:</b> {actor} reloads <b>{weapon}</b> Ammo: {shots}.</p>",
+    "CYBERPUNK.Chat.HumanityRollFlavor": "<b>Humanity:</b> {actor} rolls Humanity Cost for “{item}”.",
+    "CYBERPUNK.Chat.HumanityLossSet": "<b>Humanity:</b> {actor} sets Humanity Loss for “{item}”: <b>{loss}</b>."
 }
