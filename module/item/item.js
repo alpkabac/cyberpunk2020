@@ -66,6 +66,26 @@ export class CyberpunkItem extends Item {
     const isMeleeByAtk  = atk && Object.values(meleeAttackTypes).includes(atk);
     return !(isMeleeByType || isMeleeByAtk);
   }
+
+  /**
+   * Firearms for the “point-blank” rule
+   * We are deliberately excluding Exotic weapons here, as they include lasers, microwaves, etc
+  */
+  _isFirearm() {
+    const sys = this._getWeaponSystem();
+    const wt = sys?.weaponType;
+    return [
+      weaponTypes.pistol,
+      weaponTypes.submachinegun,
+      weaponTypes.shotgun,
+      weaponTypes.rifle,
+      weaponTypes.heavy
+    ].includes(wt);
+  }
+
+  _shouldMaximizePointBlankDamage(attackMods) {
+    return this.isRanged() && this._isFirearm() && attackMods?.range === ranges.pointBlank;
+  }
   
   _prepareWeaponData(data) {
     
@@ -353,6 +373,11 @@ export class CyberpunkItem extends Item {
       let actualRangeBracket = rangeResolve[attackMods.range](system.range);
       let DC = rangeDCs[attackMods.range];
       let targetCount = targetTokens.length || attackMods.targetsCount || 1;
+      const rollData = this.actor?.getRollData?.() ?? {};
+      const maximizeDamage = this._shouldMaximizePointBlankDamage(attackMods);
+      const maxDamage = maximizeDamage
+        ? CyberpunkItem._floorDamageTotal((await new Roll(system.damage, rollData).evaluate({ maximize: true })).total)
+        : null;
       
       // This is a somewhat flawed multi-target thing - given target tokens, we could calculate distance (& therefore penalty) for each, and apply damage to them
       let rolls = [];
@@ -367,12 +392,13 @@ export class CyberpunkItem extends Item {
           let areaDamages = {};
           // Roll damage for each of the bullets that hit
           for (let i = 0; i < roundsHit; i++) {
-              let damageRoll = await new Roll(system.damage).evaluate();
               let location = (await rollLocation(attackMods.targetActor, attackMods.targetArea)).areaHit;
               if (!areaDamages[location]) {
                   areaDamages[location] = [];
               }
-              const dmg = CyberpunkItem._floorDamageTotal(damageRoll.total);
+              const dmg = maximizeDamage
+                ? maxDamage
+                : CyberpunkItem._floorDamageTotal((await new Roll(system.damage, rollData).evaluate()).total);
 
               areaDamages[location].push({
                 damage: dmg
@@ -404,6 +430,11 @@ export class CyberpunkItem extends Item {
       let actualRangeBracket = rangeResolve[attackMods.range](system.range);
       let DC = rangeDCs[attackMods.range];
       let attackRoll = await this.attackRoll(attackMods);
+      const rollData = this.actor?.getRollData?.() ?? {};
+      const maximizeDamage = this._shouldMaximizePointBlankDamage(attackMods);
+      const maxDamage = maximizeDamage
+        ? CyberpunkItem._floorDamageTotal((await new Roll(system.damage, rollData).evaluate({ maximize: true })).total)
+        : null;
 
       let roundsFired = Math.min(system.shotsLeft, system.rof, 3);
       let attackHits = attackRoll.total >= DC;
@@ -413,12 +444,13 @@ export class CyberpunkItem extends Item {
           // In RAW this is 1d6/2, but this is functionally the same
           roundsHit = await new Roll("1d3").evaluate();
           for (let i = 0; i < roundsHit.total; i++) {
-              let damageRoll = await new Roll(system.damage).evaluate();
               let location = (await rollLocation(attackMods.targetActor, attackMods.targetArea)).areaHit;
               if (!areaDamages[location]) {
                   areaDamages[location] = [];
               }
-              const dmg = CyberpunkItem._floorDamageTotal(damageRoll.total);
+              const dmg = maximizeDamage
+                ? maxDamage
+                : CyberpunkItem._floorDamageTotal((await new Roll(system.damage, rollData).evaluate()).total);
 
               areaDamages[location].push({
                 damage: dmg
@@ -489,7 +521,9 @@ export class CyberpunkItem extends Item {
       // The range we're shooting at
       let DC = rangeDCs[attackMods.range];
       let attackRoll = await this.attackRoll(attackMods);
-      let damageRoll = await new Roll(system.damage).evaluate();
+      const rollData = this.actor?.getRollData?.() ?? {};
+      const maximizeDamage = this._shouldMaximizePointBlankDamage(attackMods);
+      const damageRoll = await new Roll(system.damage, rollData).evaluate({ maximize: maximizeDamage });
       const dmg = CyberpunkItem._floorDamageTotal(damageRoll.total);
       let locationRoll = await rollLocation(attackMods.targetActor, attackMods.targetArea);
       let actualRangeBracket = rangeResolve[attackMods.range](system.range);
