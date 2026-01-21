@@ -378,6 +378,7 @@ export class CyberpunkActorSheet extends ActorSheet {
         const chips = this.actor.items.filter((i) => {
           if (i.type !== "cyberware") return false;
           if (!cwHasType(i, "Chip")) return false;
+          if (i.system?.equipped === false) return false;
           const map = i.system?.CyberWorkType?.ChipSkills;
           if (!map) return false;
 
@@ -434,6 +435,7 @@ export class CyberpunkActorSheet extends ActorSheet {
       const chips = this.actor.items.filter(i => {
         if (i.type !== "cyberware") return false;
         if (!cwHasType(i, "Chip")) return false;
+        if (i.system?.equipped === false) return false;
         const map = i.system?.CyberWorkType?.ChipSkills;
         if (!map) return false;
 
@@ -853,6 +855,7 @@ export class CyberpunkActorSheet extends ActorSheet {
       const chips = this.actor.items.filter(i => {
         if (i.type !== "cyberware") return false;
         if (!cwHasType(i, "Chip")) return false;
+        if (i.system?.equipped === false) return false;
         const map = i.system?.CyberWorkType?.ChipSkills;
         if (!map) return false;
 
@@ -1138,6 +1141,7 @@ export class CyberpunkActorSheet extends ActorSheet {
     const activeChips = actor.items.filter(i =>
       i.type === "cyberware" &&
       cwHasType(i, "Chip") &&
+      i.system?.equipped !== false &&
       !!i.system?.CyberWorkType?.ChipActive
     );
 
@@ -1207,6 +1211,7 @@ export class CyberpunkActorSheet extends ActorSheet {
     const activeChips = actor.items.filter(i =>
       i.type === "cyberware" &&
       cwHasType(i, "Chip") &&
+      i.system?.equipped !== false &&
       !!i.system?.CyberWorkType?.ChipActive
     );
 

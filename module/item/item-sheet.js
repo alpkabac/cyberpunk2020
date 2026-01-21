@@ -790,6 +790,7 @@ async _prepareCyberware(sheet) {
         const chips = actor ? actor.items.filter(i => {
           if (i.type !== "cyberware") return false;
           if (!cwHasType(i, "Chip")) return false;
+          if (i.system?.equipped === false) return false;
           const map = i.system?.CyberWorkType?.ChipSkills;
           if (!map) return false;
 
@@ -851,6 +852,7 @@ async _prepareCyberware(sheet) {
       const chips = actor.items.filter(i => {
         if (i.type !== "cyberware") return false;
         if (!cwHasType(i, "Chip")) return false;
+        if (i.system?.equipped === false) return false;
         const map = i.system?.CyberWorkType?.ChipSkills;
         if (!map) return false;
 
@@ -984,7 +986,29 @@ async _prepareCyberware(sheet) {
     // MODULE: toggling equipped should refresh parent implant sheet (slots left)
     html.on("change", "input[name='system.equipped']", async ev => {
       const checked = !!ev.currentTarget.checked;
-      await this.item.update({ "system.equipped": checked }, { render: false });
+
+      const patch = { "system.equipped": checked };
+
+      // Chip cyberware: if it becomes unequipped, it cannot remain active
+      const isChip = this.item.type === "cyberware" && cwHasType(this.item, "Chip");
+      if (!checked && isChip) {
+        patch["system.CyberWorkType.ChipActive"] = false;
+      }
+
+      await this.item.update(patch, { render: false });
+
+      // If we disabled a chip – resync skills (chip levels + active flags)
+      if (!checked && isChip) {
+        if (typeof this._cp_syncChipLevelsToSkills === "function") {
+          await this._cp_syncChipLevelsToSkills();
+        }
+        if (typeof this._cp_syncActiveFlagsToSkills === "function") {
+          await this._cp_syncActiveFlagsToSkills();
+        }
+
+        const actor = this.item.actor;
+        if (actor?.sheet?.rendered) actor.sheet.render(true);
+      }
 
       const parentId = this.item.system?.Module?.ParentId || "";
       const parent = parentId ? this.actor?.items?.get(parentId) : null;
@@ -1082,6 +1106,7 @@ async _prepareCyberware(sheet) {
     const chipItems = actor.items.filter(i =>
       i.type === "cyberware" &&
       cwHasType(i, "Chip") &&
+      i.system?.equipped !== false &&
       !!i.system?.CyberWorkType?.ChipActive
     );
 
@@ -1129,6 +1154,7 @@ async _prepareCyberware(sheet) {
     const activeChips = actor.items.filter(i =>
       i.type === "cyberware" &&
       cwHasType(i, "Chip") &&
+      i.system?.equipped !== false &&
       !!i.system?.CyberWorkType?.ChipActive
     );
 
