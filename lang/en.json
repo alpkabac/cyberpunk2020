@@ -542,6 +542,16 @@
     "CYBERPUNK.Fumble.ReflexAthletics.8_10": "8–10. You fail abysmally. If a physical action, take 1D6 in damage from falling or strained muscles. Also make a roll vs Stun at -1.",
     "CYBERPUNK.Fumble.AthleticsDamageLine": "<p>Damage: {die}.</p>",
 
+    "CYBERPUNK.Fumble.ControlLoss.Title": "Control Loss Table",
+    "CYBERPUNK.Fumble.ControlLoss.1_2": "1–2. Skid or slew; no other result.",
+    "CYBERPUNK.Fumble.ControlLoss.3_4.Ground": "3–4. Major skid; slide 1D10x10 feet sideways in direction of travel.",
+    "CYBERPUNK.Fumble.ControlLoss.3_4.Aircraft": "3–4. Aircraft stalls, losing 1D10x50 feet of altitude.",
+    "CYBERPUNK.Fumble.ControlLoss.5_6.Ground": "5–6. Roll ground vehicle after sliding 1D10x10 feet sideways in direction of travel; take 5D6 damage.",
+    "CYBERPUNK.Fumble.ControlLoss.5_6.Aircraft": "5–6. Aircraft goes into spin, lose 1D10x100 feet of altitude.",
+    "CYBERPUNK.Fumble.ControlLoss.SlideLine": "Slide: {die} → <b>{dist}</b> ft sideways.",
+    "CYBERPUNK.Fumble.ControlLoss.AltitudeLine": "Altitude loss: {die} → <b>{dist}</b> ft.",
+    "CYBERPUNK.Fumble.ControlLoss.VehicleDamageLine": "Vehicle damage: {die}.",
+
     "CYBERPUNK.Fumble.Tech.Title": "Tech (Repair or create)",
     "CYBERPUNK.Fumble.Tech.1_4": "1–4. No fumble. You just can't get it together.",
     "CYBERPUNK.Fumble.Tech.5_7": "5–7. You not only fail, you make it worse! You drop the tools you're working with, or you lose your grip and damage the thing you're working with even more. Raise the Difficulty by 5 points and try again.",
@@ -578,16 +588,6 @@
     "CYBERPUNK.Chat.Reload": "<p><b>Reload:</b> {actor} reloads <b>{weapon}</b> Ammo: {shots}.</p>",
     "CYBERPUNK.Chat.HumanityRollFlavor": "<b>Humanity:</b> {actor} rolls Humanity Cost for “{item}”.",
     "CYBERPUNK.Chat.HumanityLossSet": "<b>Humanity:</b> {actor} sets Humanity Loss for “{item}”: <b>{loss}</b>.",
-
-    "CYBERPUNK.Fumble.ControlLoss.Title": "Control Loss Table",
-    "CYBERPUNK.Fumble.ControlLoss.1_2": "1–2. Skid or slew; no other result.",
-    "CYBERPUNK.Fumble.ControlLoss.3_4.Ground": "3–4. Major skid; slide 1D10x10 feet sideways in direction of travel.",
-    "CYBERPUNK.Fumble.ControlLoss.3_4.Aircraft": "3–4. Aircraft stalls, losing 1D10x50 feet of altitude.",
-    "CYBERPUNK.Fumble.ControlLoss.5_6.Ground": "5–6. Roll ground vehicle after sliding 1D10x10 feet sideways in direction of travel; take 5D6 damage.",
-    "CYBERPUNK.Fumble.ControlLoss.5_6.Aircraft": "5–6. Aircraft goes into spin, lose 1D10x100 feet of altitude.",
-    "CYBERPUNK.Fumble.ControlLoss.SlideLine": "Slide: {die} → <b>{dist}</b> ft sideways.",
-    "CYBERPUNK.Fumble.ControlLoss.AltitudeLine": "Altitude loss: {die} → <b>{dist}</b> ft.",
-    "CYBERPUNK.Fumble.ControlLoss.VehicleDamageLine": "Vehicle damage: {die}.",
 
     "CYBERPUNK.HiddenAdvantage": "Hide advantage/disadvantage",
     "CYBERPUNK.Roll.AdvantageFlavor": "Roll with Advantage.",
