@@ -25,12 +25,12 @@ R. Talsorian Games’ [Cyberpunk 2020](https://talsorianstore.com/products/cyber
 * **Netrunning**: major core functionality — deck builder with configuration, purchased program list, active program panel, automatic RAM usage & total cost, and one-click *Interface* rolls from the Netrunning tab.
 * **Full Russian localisation**.
 * **New icons** styled to match the rest of the system.
+* Active bonuses from cyberware.
+* An expanded melee-weapons library.
 
 ## Planned features
 
-* Stat bonuses from cyberware.
 * Target selection and automatic damage application.
-* An expanded melee-weapons library.
 * Shopping workflow with automatic money deduction.
 * Automatic generation of cinematic finishing moves.
 * **Mech sheet**.
