@@ -2,7 +2,8 @@
 
 First and foremost, huge thanks to the original author — **OctarineSourcerer**. Because of people like them we all get to enjoy our favourite games.
 This system is built on OctarineSourcerer’s work, refining and expanding the available features. In version **1.0.0** I fixed the bugs I could track down and added new functionality, including **netrunning**. I’m planning to keep improving this system because I’m a long-time Cyberpunk 2020 fan.
-Also, [join](https://discord.gg/xPQcDZYDMU) our Discord server.
+
+Also, [join](https://discord.gg/xPQcDZYDMU) our **Discord** server.
 
 R. Talsorian Games’ [Cyberpunk 2020](https://talsorianstore.com/products/cyberpunk-2020) system, now for Foundry VTT.
 
@@ -14,7 +15,6 @@ R. Talsorian Games’ [Cyberpunk 2020](https://talsorianstore.com/products/cyber
 ## Current features
 
 * **Character sheet** with stats, damage tracking, gear, combat tab, searchable skills and cyberware.
-  * Cyberware doesn’t yet modify stats — this is top-priority for the next update — but the total cost of installed implants is calculated automatically.
 * **Consistent UI** inspired by the Core Rulebook, with a strong focus on usability.
 * **Skills as items**, sortable by name or governing stat; full chipped/unchipped tracking, IP, roll-able, etc.
 * **Proportional stopping power & encumbrance** for armour.
