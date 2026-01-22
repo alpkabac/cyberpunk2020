@@ -580,6 +580,16 @@
     "CYBERPUNK.Chat.HumanityRollFlavor": "<b>Человечность:</b> {actor} бросает стоимость человечности для «{item}».",
     "CYBERPUNK.Chat.HumanityLossSet": "<b>Человечность:</b> {actor} устанавливает потерю человечности для «{item}»: <b>{loss}</b>.",
 
+    "CYBERPUNK.Fumble.ControlLoss.Title": "Таблица потери управления",
+    "CYBERPUNK.Fumble.ControlLoss.1_2": "1–2. Занос или скольжение, других последствий нет.",
+    "CYBERPUNK.Fumble.ControlLoss.3_4.Ground": "3–4. Значительный занос: проскальзывание 1D10x3 м боком в направлении движения.",
+    "CYBERPUNK.Fumble.ControlLoss.3_4.Aircraft": "3–4. Летательный аппарат сваливается, теряя 1D10x15 м высоты.",
+    "CYBERPUNK.Fumble.ControlLoss.5_6.Ground": "5–6. Бросок наземного ТС после проскальзывания 1D10x3 м боком в направлении движения; получаете 5D6 урона.",
+    "CYBERPUNK.Fumble.ControlLoss.5_6.Aircraft": "5–6. Летательный аппарат срывается в штопор, потеряв 1D10x30 м высоты.",
+    "CYBERPUNK.Fumble.ControlLoss.SlideLine": "Снос: {die} → <b>{dist}</b> м боком.",
+    "CYBERPUNK.Fumble.ControlLoss.AltitudeLine": "Потеря высоты: {die} → <b>{dist}</b> м.",
+    "CYBERPUNK.Fumble.ControlLoss.VehicleDamageLine": "Урон по ТС: {die}.",
+
     "CYBERPUNK.HiddenAdvantage": "Скрыть преимущество/помеху",
     "CYBERPUNK.Roll.AdvantageFlavor": "Бросок с преимуществом.",
     "CYBERPUNK.Roll.DisadvantageFlavor": "Бросок с помехой.",

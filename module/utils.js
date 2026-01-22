@@ -353,6 +353,102 @@ const _TABLE_INT = [
   { min: 8, max: 10, key: "Fumble.Int.8_10" }
 ];
 
+// Vehicle Control fumbles (Control Loss Table)
+// Determined strictly by Skill _id (and/or sourceId)
+const _VEHICLE_CONTROL_SKILL_IDS = new Set([
+  // Driving / Motorcycle
+  "NppBZfDGn1X1K0r9", // Driving
+  "GqEJ5WAwvYSJ6U0j", // Motorcycle
+  "Uqm8bRDpVh3sSdZt", // Heavy Machinery
+
+  // Pilot skills
+  "HQ4kR8fP3Itquse6", // Pilot: Dirigible
+  "R4dTcTyZSnF7Gph2", // Pilot: Gyro
+  "bwhkDu4H6STAvNVA", // Pilot: Vectored Thrust Vehicle
+  "lEo2rOVOOSIl3np3"  // Pilot: Fixed Wing
+]);
+
+const _AIRCRAFT_CONTROL_SKILL_IDS = new Set([
+  "HQ4kR8fP3Itquse6", // Dirigible
+  "R4dTcTyZSnF7Gph2", // Gyro
+  "bwhkDu4H6STAvNVA", // VTV
+  "lEo2rOVOOSIl3np3"  // Fixed Wing
+]);
+
+// Control Loss Table
+const _TABLE_CONTROL_LOSS = [
+  { min: 1, max: 2, key: "Fumble.ControlLoss.1_2" },
+
+  // 3-4: slide/stall + extra distance roll
+  {
+    min: 3,
+    max: 4,
+    keyGround: "Fumble.ControlLoss.3_4.Ground",
+    keyAircraft: "Fumble.ControlLoss.3_4.Aircraft",
+    slideMultiplierFeet: 10,
+    slideMultiplierMeters: 3,
+    altitudeMultiplierFeet: 50,
+    altitudeMultiplierMeters: 15
+  },
+
+  // 5-6: roll/spin + extra distance roll + extra vehicle damage (ground)
+  {
+    min: 5,
+    max: 6,
+    keyGround: "Fumble.ControlLoss.5_6.Ground",
+    keyAircraft: "Fumble.ControlLoss.5_6.Aircraft",
+    slideMultiplierFeet: 10,
+    slideMultiplierMeters: 3,
+    altitudeMultiplierFeet: 100,
+    altitudeMultiplierMeters: 30,
+    needsVehicleDamage: true
+  }
+];
+
+function _getSkillBaseId(skill) {
+  // Actor-owned / world skill id
+  const direct = skill?.id ?? skill?._id;
+  if (direct) return String(direct);
+
+  // If somehow only sourceId exists
+  const src = skill?.flags?.core?.sourceId;
+  if (src && typeof src === "string") return String(src).split(".").pop();
+
+  return null;
+}
+
+function _isVehicleControlSkillById(skill) {
+  const baseId = _getSkillBaseId(skill);
+  if (!baseId) return false;
+
+  // Direct match by _id
+  if (_VEHICLE_CONTROL_SKILL_IDS.has(baseId)) return true;
+
+  // Fallback: compendium sourceId (still an _id)
+  const src = skill?.flags?.core?.sourceId;
+  if (src && typeof src === "string") {
+    const srcId = src.split(".").pop();
+    if (_VEHICLE_CONTROL_SKILL_IDS.has(srcId)) return true;
+  }
+
+  return false;
+}
+
+function _isAircraftControlSkillById(skill) {
+  const baseId = _getSkillBaseId(skill);
+  if (!baseId) return false;
+
+  if (_AIRCRAFT_CONTROL_SKILL_IDS.has(baseId)) return true;
+
+  const src = skill?.flags?.core?.sourceId;
+  if (src && typeof src === "string") {
+    const srcId = src.split(".").pop();
+    if (_AIRCRAFT_CONTROL_SKILL_IDS.has(srcId)) return true;
+  }
+
+  return false;
+}
+
 function _skillTableByStat(stat) {
   switch (String(stat || "").toLowerCase()) {
     case "ref": return { titleKey: "Fumble.ReflexAthletics.Title", table: _TABLE_REF_ATH };
@@ -379,8 +475,72 @@ export function reliabilityLabel(reliabilityKey) {
   return raw;
 }
 
+async function _buildControlLossSkillFumbleData({ skill, roll }) {
+  const isRu = game.i18n?.lang === "ru";
+  const isAircraft = _isAircraftControlSkillById(skill);
+
+  // 1d6 table roll
+  const fRoll = await new Roll("1d6").evaluate();
+  const row = _pickTableRow(_TABLE_CONTROL_LOSS, fRoll.total);
+
+  const rowKey = isAircraft
+  ? (row.keyAircraft ?? row.key)
+  : (row.keyGround ?? row.key);
+
+  let html = "";
+  const mainDie = getInitialD10Result(roll) ?? 1;
+
+  html += localizeParam("Fumble.MainRollLine", { die: _dieSpan(10, mainDie, roll) });
+  html += localizeParam("Fumble.TableRollLine", {
+    table: localize("Fumble.ControlLoss.Title"),
+    die: _dieSpan(6, fRoll.total, fRoll)
+  });
+
+  html += `<p>${localize(rowKey)}</p>`;
+
+  // Extra rolls for distance / altitude
+  // Ground: slide 1d10 * (10ft or 3m)
+  if (!isAircraft && row.slideMultiplierFeet) {
+    const r = await new Roll("1d10").evaluate();
+    const mult = isRu ? row.slideMultiplierMeters : row.slideMultiplierFeet;
+    const dist = r.total * mult;
+
+    html += `<p>${localizeParam("Fumble.ControlLoss.SlideLine", {
+      die: _dieSpan(10, r.total, r),
+      dist
+    })}</p>`;
+  }
+
+  // Aircraft: altitude loss 1d10 * (50/100ft or 15/30m)
+  if (isAircraft && row.altitudeMultiplierFeet) {
+    const r = await new Roll("1d10").evaluate();
+    const mult = isRu ? row.altitudeMultiplierMeters : row.altitudeMultiplierFeet;
+    const dist = r.total * mult;
+
+    html += `<p>${localizeParam("Fumble.ControlLoss.AltitudeLine", {
+      die: _dieSpan(10, r.total, r),
+      dist
+    })}</p>`;
+  }
+
+  // 5-6 Ground: 5d6 vehicle damage
+  if (!isAircraft && row.needsVehicleDamage) {
+    const dmg = await new Roll("5d6").evaluate();
+    html += `<p>${localizeParam("Fumble.ControlLoss.VehicleDamageLine", {
+      die: _inlineRollResult(dmg.total, dmg)
+    })}</p>`;
+  }
+
+  return { title: localize("Fumble.TableTitle"), html };
+}
+
 // Build fumble UI payload for a skill roll (by skill stat table)
 export async function buildSkillFumbleData({ skill, roll }) {
+  // Vehicle Control skills: use Control Loss Table
+  if (_isVehicleControlSkillById(skill)) {
+    return _buildControlLossSkillFumbleData({ skill, roll });
+  }
+
   const stat = skill?.system?.stat;
   const { titleKey, table } = _skillTableByStat(stat);
 
