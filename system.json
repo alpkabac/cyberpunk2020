@@ -2,7 +2,7 @@
   "id": "cyberpunk2020",
   "title": "Cyberpunk 2020",
   "description": "R. Talsorian Games' Cyberpunk 2020 System",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "compatibility": {
     "minimum": "12",
     "verified": "13",
@@ -59,13 +59,62 @@
       "type": "Item"
     },
     {
+      "name": "pistols-add",
+      "label": "Pistols-Add",
+      "path": "./packs/pistols-add.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
+    {
+      "name": "smgs-add",
+      "label": "SMGs-Add",
+      "path": "./packs/smgs-add.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
+    {
+      "name": "rifles-add",
+      "label": "Rifles-Add",
+      "path": "./packs/rifles-add.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
+    {
+      "name": "armor-add",
+      "label": "Armor-Add",
+      "path": "./packs/armor-add.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
+
+    {
+      "name": "melee",
+      "label": "Melee",
+      "path": "./packs/melee.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
+    {
+      "name": "heavy",
+      "label": "Heavy",
+      "path": "./packs/heavy.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
+    {
+      "name": "exotics",
+      "label": "Exotics",
+      "path": "./packs/exotics.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
+    {
       "name": "pistols",
       "label": "Pistols",
       "path": "./packs/pistols.db",
       "system": "cyberpunk2020",
       "type": "Item"
-    },
-    {
+    },    {
       "name": "rifles",
       "label": "Rifles",
       "path": "./packs/rifles.db",
@@ -73,16 +122,86 @@
       "type": "Item"
     },
     {
-      "name": "cyberware",
-      "label": "Cyberware",
-      "path": "./packs/cyberware.db",
+      "name": "shotguns",
+      "label": "Shotguns",
+      "path": "./packs/shotguns.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },    
+    {
+      "name": "submachineguns",
+      "label": "Submachineguns",
+      "path": "./packs/submachineguns.db",
       "system": "cyberpunk2020",
       "type": "Item"
     },
     {
-      "name": "chipware",
-      "label": "Chipware",
-      "path": "./packs/chipware.db",
+      "name": "cyberware-old",
+      "label": "Cyberware-Old",
+      "path": "./packs/cyberware-old.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
+    {
+      "name": "fashonware",
+      "label": "Fashonware",
+      "path": "./packs/fashonware.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
+    {
+      "name": "bioware",
+      "label": "Bioware",
+      "path": "./packs/bioware.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
+    {
+      "name": "cyberweapons",
+      "label": "CyberWeapons",
+      "path": "./packs/cyberweapons.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
+    {
+      "name": "implants",
+      "label": "Implants",
+      "path": "./packs/implants.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
+    {
+      "name": "neuralware",
+      "label": "Neuralware",
+      "path": "./packs/neuralware.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
+    {
+      "name": "cyberaudio",
+      "label": "CyberAudio",
+      "path": "./packs/cyberaudio.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
+    {
+      "name": "cyberlimbs",
+      "label": "CyberLimbs",
+      "path": "./packs/cyberlimbs.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
+        {
+      "name": "cyberoptic",
+      "label": "CyberOptic",
+      "path": "./packs/cyberoptic.db",
+      "system": "cyberpunk2020",
+      "type": "Item"
+    },
+    {
+      "name": "other-cyberware",
+      "label": "Other-Cyberware",
+      "path": "./packs/other-cyberware.db",
       "system": "cyberpunk2020",
       "type": "Item"
     },
@@ -185,13 +304,6 @@
       "type": "Item"
     },
     {
-      "name": "smgs",
-      "label": "SMGs",
-      "path": "./packs/smgs.db",
-      "system": "cyberpunk2020",
-      "type": "Item"
-    },
-    {
       "name": "programs",
       "label": "Programs",
       "system": "cyberpunk2020",
@@ -199,6 +311,144 @@
       "type": "Item"
     }
   ],
+  "packFolders": [
+  {
+    "name": "Additional Items",
+    "sorting": "m",
+    "color": "#818f8d",
+    "packs": [
+      "armor-add",
+      "cyberware-old"
+    ],
+    "folders": [
+      {
+        "name": "Weapons-Add",
+        "sorting": "m",
+        "color": "#B14444",
+        "packs": [
+          "pistols-add",
+          "rifles-add",
+          "smgs-add"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "Items",
+    "sorting": "m",
+    "color": "#E14FE1",
+    "folders": [
+      {
+        "name": "Equipment",
+        "sorting": "m",
+        "color": "#4F6E7E",
+        "packs": [
+          "armor"
+        ],
+        "folders": [
+          {
+            "name": "Weapons",
+            "sorting": "m",
+            "color": "#C14A4A",
+            "packs": [
+              "pistols",
+              "submachineguns",
+              "shotguns",
+              "rifles",
+              "heavy",
+              "melee",
+              "exotics"
+            ]
+          },
+          {
+            "name": "Cyberware",
+            "sorting": "m",
+            "color": "#6B27D3",
+            "packs": [
+              "fashonware",
+              "bioware",
+              "cyberweapons",
+              "implants",
+              "neuralware",
+              "cyberaudio",
+              "cyberlimbs",
+              "cyberoptic",
+              "other-cyberware"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Gear",
+        "sorting": "m",
+        "color": "#35A8A8",
+        "packs": [
+          "medical",
+          "electronics",
+          "communication",
+          "entertainment",
+          "fashion",
+          "furnishing",
+          "security",
+          "surveillance",
+          "tools",
+          "rentalandservices",
+          "vehicles"
+        ]
+      },
+      {
+        "name": "Skills",
+        "sorting": "m",
+        "color": "#2FA064",
+        "packs": [
+          "default-skills-en",
+          "role-skills-en"
+        ]
+      },
+      {
+        "name": "Netrunning",
+        "sorting": "m",
+        "color": "#5F4FE1",
+        "packs": [
+          "netrunningEquipment",
+          "programs"
+        ]
+      },
+      {
+        "name": "Other",
+        "sorting": "m",
+        "color": "#A0632F",
+        "packs": [
+          "sellthedead"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "Localization",
+    "sorting": "m",
+    "color": "#4FE1E1",
+    "folders": [
+      {
+        "name": "RU",
+        "sorting": "m",
+        "color": "#4778de",
+        "packs": [
+          "default-skills-ru",
+          "role-skills-ru"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "Tables",
+    "sorting": "m",
+    "color": "#E1E14F",
+    "packs": [
+      "roll-tables"
+    ]
+  }
+],
   "languages": [
     {
       "lang": "en",
@@ -222,7 +472,7 @@
     }
   ],
   "socket": false,
-  "initiative": "1d10 + @stats.ref.total + @CombatSenseMod + @initiativeMod",
+  "initiative": "1d10 + @stats.ref.total + @CombatSenseMod + @initiativeMod + @initiativeImplantMod",
   "grid": {
     "distance": 5,
     "units": "m"
@@ -231,6 +481,6 @@
   "secondaryTokenAttribute": null,
   "url": "https://github.com/SuperCoon666/cyberpunk2020",
   "manifest": "https://raw.githubusercontent.com/SuperCoon666/cyberpunk2020/main/system.json",
-  "download": "https://github.com/SuperCoon666/cyberpunk2020/archive/v1.0.3.zip"
+  "download": "https://github.com/SuperCoon666/cyberpunk2020/releases/download/v1.1.0/cyberpunk2020.zip"
 }
   

@@ -148,7 +148,7 @@
 .field-list {
   width: 100%;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr;;
   gap: 3px;
   grid-auto-rows: auto;
   flex-grow: 0;
@@ -224,9 +224,6 @@ details[open] summary ~ * {
   border-style: solid;
   border-color: black;
 }
-.cyberpunk .field select option {
-  background-color: black;
-}
 .cyberpunk .field > * {
   padding: 2px 3px 2px 0px;
 }
@@ -278,18 +275,59 @@ details[open] summary ~ * {
   padding-left: 0px;
   text-align: center;
 }
-.cyberpunk .field > input[type=number].smallnumber {
-  width: 1.5em;
+/* Uniform small numeric inputs used in item sheets (e.g., cyberware modifiers) */
+.cyberpunk .field-list .field input[type=number].smallnumber {
+  flex: 0 0 2.5em;
+  width: 2.5em;
+  min-width: 2.5em;
+  padding-left: 0;
+  text-align: center;
 }
 .cyberpunk .field > input[type=text] {
   width: 6em;
   min-width: 2em;
 }
+/* Selects in .field: stretch to the row height and remove the "gap" under the arrow */
 .cyberpunk .field select {
-  border-radius: 0px;
+  border-radius: 0;
   border: 1px solid rgb(90, 90, 90);
-  width: 50%;
+  box-sizing: border-box;
+  display: block;
+  padding: 0 6px;
+  margin: 0;
+  flex: 1 1 auto;
+  align-self: stretch;
+  height: 100%;
+  line-height: normal;
+  width: auto;
 }
+/* Drop-down lists: both items and group headings are readable on a dark background */
+.cyberpunk .field select option,
+.cyberpunk .field select optgroup {
+  background-color: black !important;
+  color: whitesmoke !important;
+  font-weight: 600;
+}
+/* Text and number inputs — same height as selects */
+.cyberpunk .field input[type="text"],
+.cyberpunk .field input[type="number"] {
+  box-sizing: border-box;
+  height: 24px;
+  line-height: 24px;
+  padding: 0 6px;
+  margin: 0;
+}
+
+.cyberpunk .field input.smallnumber {
+  width: 56px;
+}
+
+.cyberpunk .field .button.danger {
+  height: 24px;
+  line-height: 24px;
+  padding: 0 8px;
+}
+
 .cyberpunk .field p {
   margin: 0px 3px 0px 3px;
 }
@@ -345,6 +383,25 @@ details[open] summary ~ * {
   font-weight: bold;
   border: 0 none;
 }
+/* Compact mini-fields in the stats header */
+.statsrow > div.stat .flexrow { gap: 0; align-items: center; }
+
+.statsrow > div.stat .stat-base,
+.statsrow > div.stat .stat-temp {
+  width: 1.8em;
+  height: 18px;
+  line-height: 18px;
+  padding: 0;
+  box-sizing: border-box;
+  text-align: center;
+}
+
+.statsrow > div.stat .stat-mod {
+  padding: 0 2px;
+  height: 18px;
+  line-height: 18px;
+}
+
 .statsrow > div.stat + .stat {
   margin-left: 3px;
 }
@@ -648,8 +705,76 @@ div.statderive .value.rightborder {
   display: flex;
   flex-flow: column nowrap;
 }
-.combat-tab .combat-rolls .field + .field {
-  margin-left: 5px;
+
+.armor-display {
+  height: auto !important;
+  min-height: 0 !important;
+  grid-auto-rows: minmax(0, max-content);
+  align-content: start;
+  padding-bottom: 8px;
+}
+
+.armor-display .armor-segment {
+  height: auto;
+}
+
+.armor-display .armor-segment .segment-sp,
+.armor-display .armor-segment .segment-sdp-row,
+.armor-display .armor-segment .segment-name {
+  grid-column: 1 / -1 !important;
+}
+
+.armor-display .armor-segment .segment-sdp-row {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+}
+
+.armor-display .armor-segment .segment-sdp-row .smallnumber {
+  width: 2.2em;
+  text-align: center;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+.armor-display .armor-segment .segment-name {
+  display: block;
+}
+
+.armor-display ~ .field {
+  clear: both;
+  margin-top: 10px;
+}
+
+.cyberpunk .armor-display {
+  max-height: none !important;
+  height: auto !important;
+  grid-template-rows: auto auto auto !important;
+}
+
+.combat-tab .combat-rolls .flexrow .field + .field { margin-left: 5px; }
+.combat-tab .combat-rolls .field-list { grid-template-columns: 1fr 1fr; }
+
+.combat-tab .combat-rolls .field-list .field label { min-width: 0; }
+
+.combat-tab .combat-rolls .field-list .field input[type="number"] {
+  flex: 0 0 2.6em;
+  width: 2.6em;
+  min-width: 2.6em;
+  text-align: center;
+}
+.cyberpunk .field.skill input[type="number"] {
+  align-self: center;
+  height: 24px;
+  line-height: 24px;
+}
+
+.cyberpunk .field.skill input[type="number"].smallnumber {
+  flex: 0 0 2.5em;
+  width: 2.5em;
+  min-width: 2.5em;
+  text-align: center;
 }
 .combat-tab .weapons-list {
   grid-area: weapons;
@@ -727,6 +852,384 @@ div.statderive .value.rightborder {
   margin-top: -2px;
 }
 
+/* === Cyberware Types: dropdown-multiselect, styled like <select> === */
+.cyberpunk .field .cw-ms {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Trigger button */
+.cyberpunk .field .cw-ms-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 0 6px;
+  line-height: 24px;
+  border: 1px solid var(--color-border, #444);
+  background: var(--color-bg, #111);
+  color: inherit;
+  cursor: pointer;
+}
+.cyberpunk .field .cw-ms-trigger:focus {
+  outline: 1px solid var(--color-accent, #999);
+}
+.cyberpunk .field .cw-ms-labels {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cyberpunk .field .cw-ms-caret {
+  flex: 0 0 auto;
+  margin-left: 8px;
+}
+
+/* Drop-down menu */
+.cyberpunk .field .cw-ms-menu {
+  position: absolute;
+  left: 0; right: 0; top: calc(100% + 2px);
+  display: none;
+  z-index: 1000;
+  border: 1px solid var(--color-border, #444);
+  background: var(--color-bg, #111);
+  padding: 6px;
+  max-height: 240px;
+  overflow: auto;
+  box-shadow: 0 4px 12px rgba(0,0,0,.35);
+}
+.cyberpunk .field .cw-ms.open .cw-ms-menu { display: block; }
+.cyberpunk .field .cw-ms-opt { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+.cyberpunk .field .cw-ms-opt input { margin: 0; }
+
+.cyberpunk .field select.cw-add-stat,
+.cyberpunk .field select.cw-add-penalty,
+.cyberpunk .field select.cw-add-check,
+.cyberpunk .cw-weapon-grid .field select,
+.cyberpunk .field select[name="system.CyberWorkType.Weapon.attackSkill"],
+.cyberpunk .field select[name="system.MountZone"],
+.cyberpunk .field select[name="system.cyberwareType"],
+.cyberpunk .field select.cw-add-location,
+.cyberpunk .field select[name="system.CyberBodyType.Location"]
+.cyberpunk .field label[for="system.CyberBodyType.Location"]{
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
+  box-sizing: border-box;
+}
+/* --- Align small number inputs in modifier rows (stats / penalties / checks) --- */
+.cyberpunk .field-list .field input.smallnumber {
+  height: 24px;
+  line-height: 24px;
+  padding: 0 4px;
+  margin: 0;
+  box-sizing: border-box;
+  align-self: center;
+}
+.cyberpunk .field-list .field a.button.danger {
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+  height: auto;
+  line-height: 1;
+  padding: 0 6px;
+  box-sizing: border-box;
+}
+/* --- Weapon sheet: make selects shrink properly --- */
+.cyberpunk .field select[name="system.reliability"],
+.cyberpunk .field select[name="system.weaponType"],
+.cyberpunk .field select[name="system.attackType"],
+.cyberpunk .field select[name="system.attackSkill"],
+.cyberpunk .field select[name="system.concealability"],
+.cyberpunk .field select[name="system.availability"] {
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
+  box-sizing: border-box;
+}
+.cyberpunk .field .flex-pad { min-width: 0; }
+
+/* CYBERWARE TAB START*/
+.cyberpunk .cyberware-header {
+  flex: 0 0 auto;
+  margin-top: 10px;
+}
+
+.chip-scroll-wrapper {
+  scrollbar-color: black transparent;
+  overflow-y: auto;
+  min-height: 0px;
+  max-height: 66px;
+  flex: 0 0 auto;
+}
+
+.chipware-container {
+  display: grid;
+  position: relative;
+  grid-template-columns: repeat(auto-fit, minmax(60px, 1fr));
+  gap: 6px;
+  justify-items: center;
+}
+
+.chipware-container.is-empty {
+  display: block;
+}
+.chipware-container.is-empty .chipware-dropzone {
+  height: 18px;
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px dashed rgba(0, 0, 0, 0.35);
+}
+
+.chipware.field.gear.full-width {
+  display: flex;
+  flex-direction: row;
+  flex: 0 0 auto;
+  min-width: 0;
+  width: 60px;
+  height: 60px;
+  aspect-ratio: 1/1;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  color: black;
+  font-weight: bold;
+  font-variant: small-caps;
+  background-color: rgba(255, 219, 61, 0.826);
+  background-size: cover;  
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.chipware-container .chipware .chip-name { 
+  display: block; 
+  font-size: 0.7rem; 
+  min-width: 0px; 
+  max-width: 58px; 
+  white-space: nowrap; 
+  text-overflow: ellipsis; 
+  justify-content: center; 
+  text-align: center; 
+  align-items: center; 
+  color: black; 
+  padding: 0px;
+  padding-left: 0px;
+  padding-right: 0px;
+  background-color: transparent; 
+  overflow: visible;
+}
+
+.chipware-container .chipware .chip-name-text {
+  display: block;
+  font-size: 0.7rem;
+  white-space: nowrap;
+  padding-left: 2px;
+  padding-right: 2px;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  color: black; 
+  background-color: transparent; 
+}
+
+.chip-tooltip {
+  position: fixed;
+  background: #333;
+  color: #fff;
+  font-size: 0.7rem;
+  padding: 4px 6px;
+  border-radius: 4px;
+  white-space: normal;
+  max-width: 200px;
+  z-index: 9999;
+  pointer-events: none;
+  display: none;
+}
+
+.active-cyberware {
+  display: grid;
+  grid-template-columns: 1fr 270px 1fr;
+  flex: 0 0 auto;
+}
+
+.cyberpunk .active-cyberware-right {
+  padding-left: 6px;
+  padding-right: 6px;
+  margin-top: 0px;
+  display: grid;
+  grid-template-rows: auto auto auto auto;
+  grid-template-areas: "nervous" "body" "r-arm" "r-leg";
+  row-gap: 6px;
+  min-width: 232px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-color: black transparent;
+  height: 700px;
+}
+
+.cyberpunk .active-cyberware-left {
+  padding-left: 6px;
+  padding-right: 6px;
+  margin-top: 0px;
+  display: grid;
+  grid-template-rows: auto auto auto;
+  grid-template-areas: "head" "l-arm" "l-leg";
+  row-gap: 6px;
+  min-width: 232px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-color: black transparent;
+  height: 700px;
+}
+
+.active-cyberware .active-cyberware-segment {
+  margin-top: 0px;
+  padding: 6px 6px 6px 6px;
+  position: relative;
+  border: 3px solid black;
+}
+
+.active-cyberware .active-cyberware-segment button {
+  position: sticky;
+  top: -5px;
+  left: -5px;
+  width: 100%;
+  z-index: 2;
+  background-color: black;
+  color: whitesmoke;
+  font-weight: bold;
+  font-variant: small-caps;
+}
+
+.window-content {
+  container-type: inline-size;
+}
+
+.anatomy-container {
+  background-size:auto;
+  min-width: 270px;
+}
+
+#anatomy-img {
+  display: block;
+  width: 100%;
+  height: 700px;
+}
+
+@container (max-width: 760px) {
+  .anatomy-container {
+    display: none;
+  }
+
+  .active-cyberware {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.field-list.cyberware-field-list.active-cyberware-segment .field.gear.item-edit.full-width {
+  font-size: 0.7rem;
+
+}
+
+.field-list.cyberware-field-list.active-cyberware-segment .field.gear.item-edit.full-width label {
+  min-width: 0;
+}
+
+.cyberware-field-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.chipware-container .chipware .item-delete {
+  position: absolute;
+  top: 0px;
+  right: 0px;
+  display: none;
+  background-color: transparent;
+  color: black;
+}
+
+.chipware-container .chipware:hover > .item-delete {
+  display: inline;
+}
+
+.field.gear.item-edit.full-width {
+  position: relative;
+  flex-wrap: wrap;
+  background-color: black;
+  min-width: 180px;
+}
+
+.field-image img {
+  display: block;            
+  width: auto;                  
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.field.gear.item-edit.full-width .item-delete {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  cursor: pointer;
+  display: none;
+  z-index: 1;
+}
+
+.field.gear.item-edit.full-width:hover > .item-delete {
+  display: inline;
+}
+.active-cyberware .active-cyberware-segment .field.gear.item-edit.full-width.item,
+.field-list[data-drop-target="cyber-inventory"] .field.gear.item-edit.full-width.item,
+.chipware-container .chipware {
+  cursor: pointer !important;
+}
+.active-cyberware .active-cyberware-segment > button {
+  cursor: default !important;
+}
+.active-cyberware .active-cyberware-segment > button:hover,
+.active-cyberware .active-cyberware-segment > button:focus,
+.active-cyberware .active-cyberware-segment > button:focus-visible,
+.active-cyberware .active-cyberware-segment > button:active {
+  outline: none !important;
+  box-shadow: none !important;
+  filter: none !important;
+}
+.active-cyberware .active-cyberware-segment:hover {
+  border-color: black !important;
+  box-shadow: none !important;
+}
+.chipware-container .chipware .item-unequip {
+  position: absolute;
+  top: 0px;
+  right: 0px;
+  display: none;
+  background-color: transparent;
+  color: black;
+}
+.chipware-container .chipware:hover > .item-unequip {
+  display: inline;
+}
+.field.gear.item-edit.full-width .item-unequip {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  cursor: pointer;
+  display: none;
+  z-index: 1;
+}
+.field.gear.item-edit.full-width:hover > .item-unequip {
+  display: inline;
+}
+
+/* CYBERWARE TAB END*/
+
 /* The cleanup button in the skill search */
 .field.skill-search-field { position: relative; }
 
@@ -775,6 +1278,63 @@ div.statderive .value.rightborder {
   padding-right: 0 !important;
 }
 
+/* === Cyberware tab row (only) === */
+.cyberpunk .tab[data-tab="cyberware"] .field.gear {
+  display: flex;
+  align-items: stretch;
+}
+
+.cyberpunk .tab[data-tab="cyberware"] .field.gear > * { min-width: 0; }
+
+.cyberpunk .tab[data-tab="cyberware"] .field.gear {
+  background-color: black;
+}
+
+.cyberpunk .tab[data-tab="cyberware"] .field.gear .field-image {
+  flex: 0 0 24px;
+  width: 24px;
+  min-width: 24px;
+  align-self: stretch;
+  height: auto;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+}
+
+.cyberpunk .tab[data-tab="cyberware"] .field.gear label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.cyberpunk .tab[data-tab="cyberware"] .field.gear .flex-pad {
+  flex: 0 0 8px;
+}
+
+.cyberpunk .tab[data-tab="cyberware"] .field.gear > span:nth-last-child(3) {
+  flex: 0 0 auto;
+  margin-left: 8px;
+}
+
+.cyberpunk .tab[data-tab="cyberware"] .field.gear .cw-type {
+  flex: 0 1 40%;
+  min-width: 0;
+  margin-left: 8px;
+}
+
+.cyberpunk .tab[data-tab="cyberware"] .field.gear .cw-type > p {
+  margin: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+  .cyberpunk .tab[data-tab="cyberware"] .field.gear .cw-type > p {
+    white-space: normal;
+    word-break: break-word;
+  }
+}
 /* -- Skill modifier checkbox ------------------------------------ */
 .skill-mod-toggle input[type=checkbox] {
   display: inline-block !important;
@@ -783,18 +1343,79 @@ div.statderive .value.rightborder {
 /* -----------------------------------------------------------------
  *  Weapon‑modifier dialog
  * ----------------------------------------------------------------- */
-#weapon-modifier,
-#weapon-modifier form,
+#weapon-modifier {
+  min-width: 460px;
+  max-width: min(820px, calc(100vw - 60px));
+}
+
 #weapon-modifier .window-content {
   height: auto !important;
-  max-height: none !important;
+  max-height: calc(100vh - 160px) !important;
+  overflow-y: auto !important;
+  padding-right: 8px !important;
 }
 
-#weapon-modifier .window-content {
-  overflow-y: visible !important;
-  padding-right: 8 !important;
+#weapon-modifier .field { min-width: 0; }
+#weapon-modifier .field > * { min-width: 0; }
+
+#weapon-modifier .field select {
+  min-width: 0;
+  max-width: 100%;
 }
 
+#weapon-modifier .field input[type="text"],
+#weapon-modifier .field input[type="number"] {
+  min-width: 0;
+}
+
+@media (max-width: 560px) {
+  #weapon-modifier .field-list { grid-template-columns: 1fr; }
+}
+
+/* Fumble inline roll results: hover shows dice tooltip, click is disabled by system hook */
+.chat-message a.cp-inline-roll {
+  cursor: default;
+  text-decoration: none;
+}
+.chat-message a.cp-inline-roll:hover {
+  text-decoration: underline;
+}
+/* Custom hover dice tooltip for cp-inline-roll (shows only dice faces/results) */
+.cp-dice-tooltip {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+/* Give the tooltip a readable container */
+.cp-dice-tooltip .dice-tooltip {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border-dark, rgba(0, 0, 0, 0.5));
+  background: var(--color-bg, rgba(0, 0, 0, 0.85));
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+
+/* Hide all text/formula/headers/totals inside Foundry tooltip */
+.cp-dice-tooltip .dice-tooltip > header,
+.cp-dice-tooltip .dice-tooltip .dice-formula,
+.cp-dice-tooltip .dice-tooltip .dice-total,
+.cp-dice-tooltip .dice-tooltip .part-header,
+.cp-dice-tooltip .dice-tooltip .part-formula,
+.cp-dice-tooltip .dice-tooltip .part-total {
+  display: none !important;
+}
+
+/* Make dice list compact */
+.cp-dice-tooltip .dice-tooltip .dice-rolls {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.cp-dice-tooltip .dice-tooltip .dice-rolls .roll {
+  margin: 0 !important;
+}
 
 /**********************************************
 

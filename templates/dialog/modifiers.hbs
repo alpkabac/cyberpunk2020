@@ -41,12 +41,20 @@
     <div class="field-list">
         <div class="field full-width">
             <label>{{CPLocal "Advantage"}}</label>
-            <input type="checkbox" name="advantage" class="adv-dis adv">
+            <input type="checkbox" name="advantage" class="adv-dis adv" {{#if advantage}}checked{{/if}}>
         </div>
+
         <div class="field full-width">
             <label>{{CPLocal "Disadvantage"}}</label>
-            <input type="checkbox" name="disadvantage" class="adv-dis dis">
+            <input type="checkbox" name="disadvantage" class="adv-dis dis" {{#if disadvantage}}checked{{/if}}>
         </div>
+
+        {{#if isGM}}
+        <div class="field full-width">
+            <label>{{CPLocal "HiddenAdvantage"}}</label>
+            <input type="checkbox" name="hiddenAdvantage" class="adv-hidden" {{#if hiddenAdvantage}}checked{{/if}}>
+        </div>
+        {{/if}}
     </div>
     {{/if}}
 

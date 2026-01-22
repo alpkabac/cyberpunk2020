@@ -21,10 +21,10 @@
     <div class="damage-tally">
         {{#each t.areaDamages as |damages areaName|}}
         <div>
-            <label>{{CPLocal areaName}}</label>   {{!-- areaName уже “Head”, “Torso”… --}}
+            <label><b>{{CPLocal areaName}}</b></label>
             <ul>
             {{#each damages}}
-                <li>{{CPLocal "Damage"}} {{dmg}}</li>
+                <li>{{CPLocal "Damage"}} {{{dmgHtml}}}</li>
             {{/each}}
             </ul>
         </div>

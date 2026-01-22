@@ -733,6 +733,11 @@
 							10
 						]
 					}
+				},
+				"sdp": {
+					"sum":     { "Head":0, "Torso":0, "lArm":0, "rArm":0, "lLeg":0, "rLeg":0 },
+					"current": { "Head":0, "Torso":0, "lArm":0, "rArm":0, "lLeg":0, "rLeg":0 },
+					"touched": { "Head":false, "Torso":false, "lArm":false, "rArm":false, "lLeg":false, "rLeg":false }
 				}
 			},
 			"gear": {
@@ -875,10 +880,68 @@
 			"humanityCost": "1d6",
 			"cyberwareType": "",
 			"cyberwareSubtype": "",
-			"slots": 0,
-			"spaces": 0,
 			"abbrev": "",
-			"humanityLoss": 0
+			"humanityLoss": 0,
+			"MountZone": "",
+			"EffectMode": "Permanent",
+			"EffectActive": false,
+
+			"Module": {
+				"IsModule": false,
+				"AllowedParentCyberwareType": "",
+				"SlotsTaken": 1,
+				"ParentId": ""
+			},
+
+			"CyberBodyType": {
+				"Type": "",
+				"Location": ""
+			},
+
+			"CyberWorkType": {
+				"Type": "Descriptive",
+
+				"Stat": {},
+				"Skill": {},
+				"Checks": {},
+
+				"Locations": {},
+				"Encumbrance": 0,
+				"Penalties": {},
+
+				"Link": "",
+				"ItemId": "",
+
+				"OptionsAvailable": 0,
+				"SDP": 0,
+
+				"ChipSkills": {},
+				"ChipActive": false,
+				"Types": [],
+
+				"Weapon": {
+					"weaponType": "Pistol",
+					"accuracy": 0,
+					"concealability": "P",
+					"availability": "common",
+					"ammoType": "9mm",
+					"damage": "2d6+1",
+					"rangeDamages": {
+						"pointBlank": "",
+						"close": "",
+						"medium": "",
+						"far": ""
+					},
+					"ap": false,
+					"shotsLeft": 0,
+					"shots": 0,
+					"rof": 0,
+					"reliability": "ST",
+					"range": 0,
+					"attackType": "",
+					"attackSkill": "ref"
+				}
+			}
 		},
 		"vehicle": {
 			"templates": ["common"],

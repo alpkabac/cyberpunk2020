@@ -6,13 +6,18 @@ export const formulaHasDice = function (formula) {
 };
 
 export const makeD10Roll = function(terms, rollData) {
-    if(terms) {
-        terms = [BaseDie, ...terms]
-    }
-    else {
-        terms = [BaseDie]
-    }
-    return new Roll(terms.join(" + "), rollData)
+  const extra = Array.isArray(terms)
+    ? terms
+    : (terms != null ? [terms] : []);
+
+  const cleaned = extra
+    .map(x => String(x ?? "").trim())
+    .filter(s => s && s !== "+" && s !== "-");
+
+  const parts = [BaseDie, ...cleaned];
+  const formula = parts.join(" + ");
+
+  return new Roll(formula, rollData);
 }
 
 // This is lifted from foundry.js so that we can apply the same prettiness, just... in a more sensible order in our own template; it'd be nice if rolls themselves contained this info

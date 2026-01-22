@@ -32,4 +32,12 @@
         </div>
     {{/each}}
     </div>
+    
+    {{#if fumble}}
+        <hr/>
+        <div class="fumble-block">
+            <h3>{{fumble.title}}</h3>
+            {{{fumble.html}}}
+        </div>
+    {{/if}}
 </div>

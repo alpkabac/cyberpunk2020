@@ -3,6 +3,8 @@
 First and foremost, huge thanks to the original author — **OctarineSourcerer**. Because of people like them we all get to enjoy our favourite games.
 This system is built on OctarineSourcerer’s work, refining and expanding the available features. In version **1.0.0** I fixed the bugs I could track down and added new functionality, including **netrunning**. I’m planning to keep improving this system because I’m a long-time Cyberpunk 2020 fan.
 
+Also, [join](https://discord.gg/xPQcDZYDMU) our **Discord** server.
+
 R. Talsorian Games’ [Cyberpunk 2020](https://talsorianstore.com/products/cyberpunk-2020) system, now for Foundry VTT.
 
 ![image](https://github.com/user-attachments/assets/9e3ef043-ebaa-479a-954c-50ed04b20a6f)
@@ -25,12 +27,12 @@ R. Talsorian Games’ [Cyberpunk 2020](https://talsorianstore.com/products/cyber
 * **Netrunning**: major core functionality — deck builder with configuration, purchased program list, active program panel, automatic RAM usage & total cost, and one-click *Interface* rolls from the Netrunning tab.
 * **Full Russian localisation**.
 * **New icons** styled to match the rest of the system.
+* Active bonuses from cyberware.
+* An expanded melee-weapons library.
 
 ## Planned features
 
-* Stat bonuses from cyberware.
 * Target selection and automatic damage application.
-* An expanded melee-weapons library.
 * Shopping workflow with automatic money deduction.
 * Automatic generation of cinematic finishing moves.
 * **Mech sheet**.

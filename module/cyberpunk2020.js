@@ -37,21 +37,124 @@ Hooks.once('init', async function () {
 
     // Register and preload templates with Foundry. See templates.js for usage
     preloadHandlebarsTemplates();
+
+    // Fumble inline results
+    Hooks.on("renderChatMessage", (message, html) => {
+      const root = html?.[0] ?? html;
+      if (!root?.querySelectorAll) return;
+
+      for (const el of root.querySelectorAll("a.cp-inline-roll")) {
+        // avoid double-binding on re-renders
+        if (el.dataset.cpInlineBound === "1") continue;
+        el.dataset.cpInlineBound = "1";
+
+        // Disable click (no reroll)
+        el.addEventListener(
+          "click",
+          (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            ev.stopImmediatePropagation();
+          },
+          { capture: true }
+        );
+
+        let tip = null;
+
+        const hideTip = () => {
+          if (tip) {
+            tip.remove();
+            tip = null;
+          }
+        };
+
+        const positionTip = () => {
+          if (!tip) return;
+
+          const r = el.getBoundingClientRect();
+          const tr = tip.getBoundingClientRect();
+
+          // default: above the number
+          let top = r.top - tr.height - 8;
+          // if not enough space above: place below
+          if (top < 4) top = r.bottom + 8;
+
+          let left = r.left + (r.width / 2) - (tr.width / 2);
+          left = Math.max(8, Math.min(left, window.innerWidth - tr.width - 8));
+
+          tip.style.top = `${top}px`;
+          tip.style.left = `${left}px`;
+        };
+
+        const showTip = async () => {
+          hideTip();
+
+          const raw = el.dataset.roll;
+          if (!raw) return;
+
+          let roll;
+          try {
+            roll = Roll.fromJSON(decodeURIComponent(raw));
+          } catch (e) {
+            return;
+          }
+
+          let tooltipHTML = "";
+          try {
+            tooltipHTML = await roll.getTooltip();
+          } catch (e) {
+            return;
+          }
+
+          if (!tooltipHTML) return;
+
+          tip = document.createElement("div");
+          tip.className = "cp-dice-tooltip";
+          tip.innerHTML = tooltipHTML;
+          document.body.appendChild(tip);
+
+          requestAnimationFrame(() => {
+            positionTip();
+          });
+        };
+
+        el.addEventListener("mouseenter", () => { void showTip(); });
+        el.addEventListener("mouseleave", hideTip);
+        el.addEventListener("mousemove", positionTip);
+      }
+    });
 });
 
 /**
  * Once the entire VTT framework is initialized, check to see if we should perform a data migration (nabbed from Foundry's 5e module and adapted)
  */
-Hooks.once("ready", function() {
-    // Determine whether a system migration is required and feasible
-    if ( !game.user.isGM ) return;
-    const lastMigrateVersion = game.settings.get("cyberpunk2020", "systemMigrationVersion");
-    // We do need to try migrating if we haven't run before - as it stands, previous worlds didn't use this setting, or by default had it set to current version
+Hooks.once("ready", async function () {
+  // Determine whether a system migration is required and feasible
+  if (!game.user.isGM) return;
 
-    // The version migrations need to begin - if you make a change from 0.1 to 0.2, this should be 0.2
-    const NEEDS_MIGRATION_VERSION = "0.3.0";
-    console.log("CYBERPUNK: Last migrated in version: " + lastMigrateVersion);
-    const needsMigration = foundry.utils.isNewerVersion(NEEDS_MIGRATION_VERSION, lastMigrateVersion);
-    if ( !needsMigration ) return;
-    migrations.migrateWorld();
+  const TARGET_VERSION = game.system.version;
+
+  const stored = game.settings.get("cyberpunk2020", "systemMigrationVersion") || "";
+
+  const worldSystemVersion = game.world?.systemVersion || "";
+
+  // If we never stored migration version, use worldSystemVersion as baseline (prevents migration on fresh worlds)
+  const baseline = stored || worldSystemVersion || "0";
+
+  console.log(
+    `CYBERPUNK: World systemVersion=${worldSystemVersion || "(none)"}; stored migration=${stored || "(none)"}; baseline=${baseline}`
+  );
+
+  const needsMigration = foundry.utils.isNewerVersion(TARGET_VERSION, baseline);
+
+  if (!needsMigration) {
+    if (!stored) {
+      await game.settings.set("cyberpunk2020", "systemMigrationVersion", TARGET_VERSION);
+      console.log(`CYBERPUNK: Migration marker initialized to ${TARGET_VERSION}`);
+    }
+    return;
+  }
+
+  // Run migration once per system version upgrade
+  await migrations.migrateWorld(TARGET_VERSION);
 });
