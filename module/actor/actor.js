@@ -13,27 +13,67 @@ export class CyberpunkActor extends Actor {
 
   /** @override */
   async _onCreate(data, options={}) {
-    const updates = {_id: data._id};
-    if (data.type === "character" ) {
+    const updates = { _id: data._id };
+
+    if (data.type === "character") {
       updates["img"] = "systems/cyberpunk2020/img/edgerunner.svg";
       updates["prototypeToken.texture.src"] = "systems/cyberpunk2020/img/edgerunner.svg";
       updates["prototypeToken.actorLink"] = true;
       updates["prototypeToken.sight.enabled"] = true;
       updates["system.icon"] = "systems/cyberpunk2020/img/edgerunner.svg";
     }
-    
-    // Check if we have skills already, don't wipe skill items if we do
-    let firstSkill = data.items.find(item => item.type === 'skill');
+
+    // Build a working items array for initial creation patching
+    updates.items = Array.isArray(data.items) ? data.items.slice() : [];
+
+    // Helper: extract base id either from sourceId or from _id
+    const getBaseId = (it) => {
+      const src = it?.flags?.core?.sourceId;
+      if (src && typeof src === "string") return src.split(".").pop();
+      return it?._id ? String(it._id) : null;
+    };
+
+    const hasItemWithBaseId = (items, baseId) => {
+      return items.some((it) => getBaseId(it) === baseId);
+    };
+
+    // Default skills
+    const firstSkill = updates.items.find((item) => item.type === "skill");
     if (!firstSkill) {
       // Using toObject is important - foundry REALLY doesn't like creating new documents from documents themselves
-      const skillsData = 
-        sortSkills(await getDefaultSkills(), SortOrders.Name)
-        .map(item => item.toObject());
-      updates.items = [];
-      updates.items = data.items.concat(skillsData);
+      const skillsData = sortSkills(await getDefaultSkills(), SortOrders.Name)
+        .map((item) => item.toObject());
+      updates.items = updates.items.concat(skillsData);
       updates["system.skillsSortedBy"] = "Name";
-      this.update(updates);
     }
+
+    // Default unarmed melee weapons: Kick + Strike
+    if (data.type === "character" || data.type === "npc") {
+      const UNARMED_WEAPON_IDS = [
+        "TF0nBrjofPX2RiuG", // Kick
+        "TZoiQuE8fUzJ8Jta"  // Strike
+      ];
+
+      const meleePack = game.packs.get("cyberpunk2020.melee");
+
+      if (meleePack) {
+        for (const wid of UNARMED_WEAPON_IDS) {
+          if (hasItemWithBaseId(updates.items, wid)) continue;
+
+          const doc = await meleePack.getDocument(wid);
+          if (!doc) continue;
+
+          const obj = doc.toObject();
+
+          obj.system = obj.system ?? {};
+          obj.system.equipped = true;
+
+          updates.items.push(obj);
+        }
+      }
+    }
+
+    await this.update(updates);
   }
 
   /**
