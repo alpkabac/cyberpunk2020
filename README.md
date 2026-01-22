@@ -15,7 +15,6 @@ R. Talsorian Games’ [Cyberpunk 2020](https://talsorianstore.com/products/cyber
 ## Current features
 
 * **Character sheet** with stats, damage tracking, gear, combat tab, searchable skills and cyberware.
-  * Cyberware doesn’t yet modify stats — this is top-priority for the next update — but the total cost of installed implants is calculated automatically.
 * **Consistent UI** inspired by the Core Rulebook, with a strong focus on usability.
 * **Skills as items**, sortable by name or governing stat; full chipped/unchipped tracking, IP, roll-able, etc.
 * **Proportional stopping power & encumbrance** for armour.
