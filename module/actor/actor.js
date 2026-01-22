@@ -1,7 +1,8 @@
 import { makeD10Roll, Multiroll } from "../dice.js";
+import { isFumbleRoll, buildSkillFumbleData } from "../utils.js";
 import { SortOrders, sortSkills } from "./skill-sort.js";
 import { btmFromBT } from "../lookups.js";
-import { properCase, localize, getDefaultSkills } from "../utils.js"
+import { properCase, localize, getDefaultSkills, cwHasType, cwIsEnabled } from "../utils.js"
 
 /**
  * Extend the base Actor document by defining a custom roll data structure which is ideal for the Simple system.
@@ -12,27 +13,67 @@ export class CyberpunkActor extends Actor {
 
   /** @override */
   async _onCreate(data, options={}) {
-    const updates = {_id: data._id};
-    if (data.type === "character" ) {
+    const updates = { _id: data._id };
+
+    if (data.type === "character") {
       updates["img"] = "systems/cyberpunk2020/img/edgerunner.svg";
       updates["prototypeToken.texture.src"] = "systems/cyberpunk2020/img/edgerunner.svg";
       updates["prototypeToken.actorLink"] = true;
       updates["prototypeToken.sight.enabled"] = true;
       updates["system.icon"] = "systems/cyberpunk2020/img/edgerunner.svg";
     }
-    
-    // Check if we have skills already, don't wipe skill items if we do
-    let firstSkill = data.items.find(item => item.type === 'skill');
+
+    // Build a working items array for initial creation patching
+    updates.items = Array.isArray(data.items) ? data.items.slice() : [];
+
+    // Helper: extract base id either from sourceId or from _id
+    const getBaseId = (it) => {
+      const src = it?.flags?.core?.sourceId;
+      if (src && typeof src === "string") return src.split(".").pop();
+      return it?._id ? String(it._id) : null;
+    };
+
+    const hasItemWithBaseId = (items, baseId) => {
+      return items.some((it) => getBaseId(it) === baseId);
+    };
+
+    // Default skills
+    const firstSkill = updates.items.find((item) => item.type === "skill");
     if (!firstSkill) {
       // Using toObject is important - foundry REALLY doesn't like creating new documents from documents themselves
-      const skillsData = 
-        sortSkills(await getDefaultSkills(), SortOrders.Name)
-        .map(item => item.toObject());
-      updates.items = [];
-      updates.items = data.items.concat(skillsData);
+      const skillsData = sortSkills(await getDefaultSkills(), SortOrders.Name)
+        .map((item) => item.toObject());
+      updates.items = updates.items.concat(skillsData);
       updates["system.skillsSortedBy"] = "Name";
-      this.update(updates);
     }
+
+    // Default unarmed melee weapons: Kick + Strike
+    if (data.type === "character" || data.type === "npc") {
+      const UNARMED_WEAPON_IDS = [
+        "TF0nBrjofPX2RiuG", // Kick
+        "TZoiQuE8fUzJ8Jta"  // Strike
+      ];
+
+      const meleePack = game.packs.get("cyberpunk2020.melee");
+
+      if (meleePack) {
+        for (const wid of UNARMED_WEAPON_IDS) {
+          if (hasItemWithBaseId(updates.items, wid)) continue;
+
+          const doc = await meleePack.getDocument(wid);
+          if (!doc) continue;
+
+          const obj = doc.toObject();
+
+          obj.system = obj.system ?? {};
+          obj.system.equipped = true;
+
+          updates.items.push(obj);
+        }
+      }
+    }
+
+    await this.update(updates);
   }
 
   /**
@@ -78,64 +119,229 @@ export class CyberpunkActor extends Actor {
         }
       }
     }
+
+    const armorLayersByArea = {};
     
     // Sort through this now so we don't have to later
     let equippedItems = this.items.contents.filter(item => {
       return item.system.equipped;
     });
 
-    // Reflex is affected by encumbrance values too
-    stats.ref.armorMod = 0;
-    equippedItems.filter(i => i.type === "armor").forEach(armor => {
-      let armorData = armor.system;
-      if(armorData.encumbrance != null) {
-        stats.ref.armorMod -= armorData.encumbrance;
+    // SDP per zone (implants + modules)
+    system.sdp = system.sdp || {};
+    system.sdp.sum = { Head:0, Torso:0, lArm:0, rArm:0, lLeg:0, rLeg:0 };
+    system.sdp.current = system.sdp.current || { Head:0, Torso:0, lArm:0, rArm:0, lLeg:0, rLeg:0 };
+
+    const ZONES = ["Head","Torso","lArm","rArm","lLeg","rLeg"];
+    const addSdp = (zoneKey, amount) => {
+      const n = Number(amount) || 0;
+      if (!n) return;
+      if (!ZONES.includes(zoneKey)) return;
+      system.sdp.sum[zoneKey] += n;
+    };
+
+    const allItems = this.items.contents || [];
+    const byId = new Map(allItems.map(i => [i.id, i]));
+    const eqCyber = (equippedItems || []).filter(i => i.type === "cyberware");
+    const eqCyberEnabled = eqCyber.filter(cwIsEnabled);
+
+    for (const it of eqCyberEnabled) {
+      if (!cwHasType(it, "Implant")) continue;
+      const sdp = Number(it.system?.CyberWorkType?.SDP) || 0;
+      if (sdp <= 0) continue;
+
+      const mz = it.system?.MountZone || "";
+      if (mz === "Head") addSdp("Head", sdp);
+      else if (mz === "Torso") addSdp("Torso", sdp);
+      else if (mz === "Arm" || mz === "Leg") {
+        // Define the side: for the implant — from it; for the module — from the parent
+        let side = it.system?.CyberBodyType?.Location || "";
+        if ((!side || side === "") && it.system?.Module?.IsModule) {
+          const pid = it.system?.Module?.ParentId;
+          const parent = pid ? byId.get(pid) : null;
+          side = parent?.system?.CyberBodyType?.Location || "";
+        }
+        if (side === "Left")  addSdp(mz === "Arm" ? "lArm" : "lLeg", sdp);
+        if (side === "Right") addSdp(mz === "Arm" ? "rArm" : "rLeg", sdp);
       }
+      // MountZone “Nervous” is not taken into account in armored zones
+    }
 
-      // While we're looping through armor, might as well modify hit locations' armor
-      // I. Version of the direct addition of armor. In the future, can add it as an additional option in the settings
-      // for(let armorArea in armorData.coverage) {
-      //   let location = system.hitLocations[armorArea];
-      //   if(location !== undefined) {
-      //     armorArea = armorData.coverage[armorArea];
-      //     // Converting both values to numbers before adding
-      //     location.stoppingPower = Number(location.stoppingPower) + Number(armorArea.stoppingPower);
-      //   }
-      // }
-      
-      // II. The version of the addition of armor according to the rule book
-      for(let armorArea in armorData.coverage) {
-        let location = system.hitLocations[armorArea];
-        if(location !== undefined) {
-          let armorValue = armorData.coverage[armorArea].stoppingPower;
-            let locationStoppingPower = Number(location.stoppingPower);
-            let armorStoppingPower = Number(armorValue);
+    // By default, “current” = “sum” if current is not yet specified
+    for (const z of ZONES) {
+      if (system.sdp.current[z] == null) {
+        system.sdp.current[z] = system.sdp.sum[z];
+      }
+    }
 
-            // If there is no armor on one of the zones, just add armor
-            if(locationStoppingPower === 0 || armorStoppingPower === 0) {
-                location.stoppingPower = locationStoppingPower + armorStoppingPower;
-            } else {
-                // If the armor is already on, we count it according to the modification table
-                let difference = Math.abs(locationStoppingPower - armorStoppingPower);
-                let maxValue = Math.max(locationStoppingPower, armorStoppingPower);
-                let modifier = 0;
+    // Cyberware (Characteristic): apply stat bonuses
+    Object.values(stats).forEach(s => { s.cyberMod = 0; });
 
-                if (difference >= 27) modifier = 0;
-                else if (difference >= 21) modifier = 2;
-                else if (difference >= 15) modifier = 3;
-                else if (difference >= 9) modifier = 3;
-                else if (difference >= 5) modifier = 4;
-                else modifier = 5;
+    const charCw = (eqCyberEnabled || []).filter(i => cwHasType(i, "Characteristic"));
 
-                // Adding the modifier to the highest value
-                location.stoppingPower = maxValue + modifier;
-            }
+    for (const cw of charCw) {
+      const add = cw.system?.CyberWorkType?.Stat || {};
+      for (const [key, val] of Object.entries(add)) {
+        const n = Number(val) || 0;
+        if (!n) continue;
+        if (!stats[key]) continue;
+
+        stats[key].cyberMod += n;
+
+        if (key !== "emp") {
+          stats[key].total += n;
         }
       }
+    }
 
+    // Reflex is affected by encumbrance values too
+    stats.ref.armorMod = 0;
+    let totalEncumbrance = 0;
+
+    const combineSP = (curr, add) => {
+      const a = Number(curr) || 0;
+      const b = Number(add) || 0;
+      if (!a) return b;
+      if (!b) return a;
+
+      const diff = Math.abs(a - b);
+      let mod;
+      if (diff >= 27) mod = 0;
+      else if (diff >= 21) mod = 1;
+      else if (diff >= 15) mod = 2;
+      else if (diff >= 9)  mod = 3;
+      else if (diff >= 5)  mod = 4;
+      else                 mod = 5;
+
+      return Math.max(a, b) + mod;
+    };
+
+    // Maximum possible SP for a set of layers
+    // exact O(N * 2^N) up to N=16
+    const maxLayeredSP = (layers) => {
+      if (!layers || !layers.length) return 0;
+
+      const sp = layers
+        .map(v => Number(v) || 0)
+        .filter(v => v > 0);
+
+      const n = sp.length;
+      if (!n) return 0;
+      if (n === 1) return sp[0];
+
+      // I think this number of layers will be more than enough for common sense
+      const MAX_EXACT_LAYERS = 16;
+
+      if (n <= MAX_EXACT_LAYERS) {
+        const size = 1 << n;
+        const dp = new Array(size);
+        dp[0] = 0;
+
+        for (let mask = 1; mask < size; mask++) {
+          let best = 0;
+
+          for (let i = 0; i < n; i++) {
+            const bit = 1 << i;
+            if (!(mask & bit)) continue;
+
+            const prevMask = mask ^ bit;
+            const val = combineSP(dp[prevMask], sp[i]);
+            if (val > best) best = val;
+          }
+          dp[mask] = best;
+        }
+
+        return dp[size - 1];
+      }
+
+      // Fallback for completely crazy cases (too many layers):
+      // each time, we choose the layer that maximizes the current SP
+      let current = 0;
+      const remaining = sp.slice();
+
+      while (remaining.length) {
+        let bestIdx = 0;
+        let bestVal = combineSP(current, remaining[0]);
+
+        for (let i = 1; i < remaining.length; i++) {
+          const val = combineSP(current, remaining[i]);
+          if (val > bestVal) {
+            bestVal = val;
+            bestIdx = i;
+          }
+        }
+
+        current = bestVal;
+        remaining.splice(bestIdx, 1);
+      }
+
+      return current;
+    };
+
+    // Equipped cyber-armor implants (only enabled)
+    const cwArmorItems = (eqCyberEnabled || []).filter(i => cwHasType(i, "Armor"));
+
+    // Inventory armor: accumulate EV and layer SP
+    equippedItems.filter(i => i.type === "armor").forEach(armor => {
+      const armorData = armor.system;
+      totalEncumbrance += Number(armorData.encumbrance || 0);
+
+      for (const armorArea in armorData.coverage) {
+        const location = system.hitLocations[armorArea];
+        if (!location) continue;
+
+        const addSP = Number(armorData.coverage[armorArea].stoppingPower) || 0;
+        if (addSP <= 0) continue;
+
+        if (!armorLayersByArea[armorArea]) armorLayersByArea[armorArea] = [];
+        armorLayersByArea[armorArea].push(addSP);
+      }
     });
-    stats.ref.total = stats.ref.base + stats.ref.tempMod + stats.ref.armorMod;
 
+    // Cyber-armor: collecting SP layers (then we'll calculate them all together)
+    for (const cw of cwArmorItems) {
+      const locs = cw.system?.CyberWorkType?.Locations || {};
+      for (const [areaKey, sp] of Object.entries(locs)) {
+        const loc = system.hitLocations[areaKey];
+        const addSP = Number(sp) || 0;
+        if (!loc || addSP <= 0) continue;
+
+        if (!armorLayersByArea[areaKey]) armorLayersByArea[areaKey] = [];
+        armorLayersByArea[areaKey].push(addSP);
+      }
+    }
+
+    // After collecting all layers, we calculate the maximum SP by zone
+    for (const [areaKey, area] of Object.entries(system.hitLocations)) {
+      const layers = armorLayersByArea[areaKey] || [];
+      area.stoppingPower = maxLayeredSP(layers);
+    }
+
+    // Cyber-armor EV: add to total encumbrance
+    for (const cw of cwArmorItems) {
+      const evImpl = Number(cw.system?.CyberWorkType?.Encumbrance ?? cw.system?.encumbrance ?? 0);
+      totalEncumbrance += evImpl;
+    }
+
+    // Final REF penalty: subtract full total EV
+    stats.ref.armorMod -= totalEncumbrance;
+    stats.ref.total += stats.ref.armorMod;
+
+    // Penalties from cyber-armor to stats
+    for (const s of Object.values(system.stats)) s.armorImplantMod = 0;
+    for (const cw of cwArmorItems) {
+      const pens = cw.system?.CyberWorkType?.Penalties || {};
+      for (const [statKey, val] of Object.entries(pens)) {
+        const n = Number(val) || 0;
+        if (!n || !system.stats[statKey]) continue;
+        system.stats[statKey].armorImplantMod -= n;
+      }
+    }
+    for (const s of Object.values(system.stats)) {
+      s.total += Number(s.armorImplantMod || 0);
+    }
+
+    // Apply wound effects
     const move = stats.ma;
     move.run = move.total * 3;
     move.leap = Math.floor(move.run / 4); 
@@ -144,13 +350,12 @@ export class CyberpunkActor extends Actor {
     body.carry = body.total * 10;
     body.lift = body.total * 40;
     body.modifier = btmFromBT(body.total);
+
     system.carryWeight = 0;
     equippedItems.forEach(item => {
       let weight = item.system.weight || 0;
       system.carryWeight += parseFloat(weight);
     });
-
-    // Apply wound effects
     // Change stat total, but leave a record of the difference in stats.[statName].woundMod
     // Modifies the very-end-total, idk if this'll need to change in the future
     let woundState = this.woundState();
@@ -168,20 +373,94 @@ export class CyberpunkActor extends Actor {
     else if(woundState == 2) {
       woundStat(stats.ref, total => total - 2);
     }
-    // calculate and configure the humanity
+
+    // SDP: current follows sum only when sum itself has changed
+    {
+      const ZONES = ["Head","Torso","lArm","rArm","lLeg","rLeg"];
+      system.sdp = system.sdp || {};
+      system.sdp.sum = system.sdp.sum || { Head:0, Torso:0, lArm:0, rArm:0, lLeg:0, rLeg:0 };
+      system.sdp.current = system.sdp.current || { Head:0, Torso:0, lArm:0, rArm:0, lLeg:0, rLeg:0 };
+      system.sdp._lastSum = system.sdp._lastSum || {};
+
+      for (const z of ZONES) {
+        const sumNow = Number(system.sdp.sum?.[z] || 0);
+        const lastSum = system.sdp._lastSum[z];
+
+        if (lastSum === undefined) {
+          // First calculation pass for zone z
+          // Rules:
+          // If current is empty OR equal to 0 (default start sheet), set current = sumNow
+          // If the player has already entered a non-zero value (e.g., 18), do not overwrite it
+          const curRaw = system.sdp.current?.[z];
+          const curNum = Number(curRaw);
+
+          if (curRaw == null || Number.isNaN(curNum) || curNum === 0) {
+            system.sdp.current[z] = sumNow;
+          }
+          system.sdp._lastSum[z] = sumNow;
+        }
+        else if (lastSum !== sumNow) {
+          // Amount changed (implant/module installed/removed) — resynchronize current
+          system.sdp.current[z] = sumNow;
+          system.sdp._lastSum[z] = sumNow;
+        }
+        else {
+          // The amount has not changed — leave current alone (keep the player's manual entry)
+          if (system.sdp.current[z] == null) system.sdp.current[z] = sumNow;
+        }
+      }
+    }
+
+    // calculate humanity & EMP (include cyberware and temp mods before loss)
     const emp = stats.emp;
-    emp.humanity = {base: emp.base * 10};
-    // calculate total HL from cyberware
+
+    const preLossEmp =
+      (emp.base || 0) +
+      (emp.tempMod || 0) +
+      (emp.cyberMod || 0);
+
+    emp.humanity = { base: preLossEmp * 10 };
+
     let hl = 0;
-    equippedItems.filter(i => i.type === "cyberware").forEach(cyberware => {
-      const cyber = cyberware.system;
-      hl += (cyber.humanityLoss) ? cyber.humanityLoss : 0;
-    });
+    equippedItems
+      .filter(i => i.type === "cyberware")
+      .forEach(cyberware => {
+        hl += Number(cyberware.system?.humanityLoss || 0);
+      });
 
     emp.humanity.loss = hl;
-    // calculate current Humanity and current EMP
-    emp.humanity.total = emp.humanity.base - emp.humanity.loss;
-    emp.total = emp.base + emp.tempMod - Math.floor(emp.humanity.loss/10);
+
+    emp.humanity.total = Math.max(0, emp.humanity.base - emp.humanity.loss);
+    emp.total = preLossEmp - Math.floor(hl / 10);
+
+    const cwCheckMods = this._getCharacteristicChecksMods();
+    system.initiativeImplantMod = Number(cwCheckMods.initiative || 0);
+    system._cwChecks = { saveStun: Number(cwCheckMods.saveStun || 0) };
+
+    // CHIPS: only active ones, auto-switching skills to chip level
+    const activeChipware = (eqCyber || []).filter(i =>
+      cwHasType(i, "Chip") && cwIsEnabled(i) && !!i.system?.CyberWorkType?.ChipActive
+    );
+    // { “Skill Name”: maximum level among active chips }
+    const chipMap = {};
+    for (const cw of activeChipware) {
+      const skills = cw.system?.CyberWorkType?.ChipSkills || {};
+      for (const [skKey, lvl] of Object.entries(skills)) {
+        const n = Number(lvl) || 0;
+        if (!n) continue;
+        chipMap[skKey] = Math.max(chipMap[skKey] ?? 0, n);
+      }
+    }
+    const skillItems = this.items.contents.filter(i => i.type === "skill");
+    for (const si of skillItems) si.system.autoChipped = false;
+
+    for (const si of skillItems) {
+      const chipLvl = chipMap[si.id] ?? chipMap[si.name];
+      if (!chipLvl) continue;
+      si.system.chipLevel = chipLvl;
+      si.system.isChipped = true;
+      si.system.autoChipped = true;
+    }
   }
 
   /**
@@ -243,7 +522,8 @@ export class CyberpunkActor extends Actor {
     if (!skill) return 0;
     const data = skill.system ?? skill;
     let value = Number(data.level) || 0;
-    if (data.isChipped) value = Number(data.chipLevel) || 0;
+    const chipActive = !!(data.isChipped || data.autoChipped);
+    if (chipActive) value = Number(data.chipLevel) || 0;
     return value;
   }
 
@@ -253,11 +533,24 @@ export class CyberpunkActor extends Actor {
     console.log("lang:", game.i18n);
 
     const nameLoc = localize("Skill" + skillName);
-    // Localization may return the original key, so we check both options
-    const targetName = nameLoc.includes("Skill") ? skillName : nameLoc;
+    const prefixLoc = localize("SkillMartialArts");
 
-    const skillItem = this.itemTypes.skill.find(s => s.name === targetName);
-    if (!skillItem) return 0; // ← no skill — return 0 instead of undefined
+    const shortName = nameLoc.includes("Skill") ? null : nameLoc;
+    const candidates = new Set();
+
+    if (shortName) candidates.add(shortName);
+
+    if (shortName && !prefixLoc.includes("Skill")) {
+      candidates.add(`${prefixLoc}: ${shortName}`);
+    }
+
+    candidates.add(skillName);
+
+    const skillItem = this.itemTypes.skill.find(s =>
+      candidates.has(s.name) || (shortName && s.name.endsWith(`: ${shortName}`))
+    );
+
+    if (!skillItem) return 0;
     return CyberpunkActor.realSkillValue(skillItem);
   }
 
@@ -268,7 +561,7 @@ export class CyberpunkActor extends Actor {
    * @param {boolean} advantage
    * @param {boolean} disadvantage
    */
-  rollSkill(skillId, extraMod = 0, advantage = false, disadvantage = false) {
+  async rollSkill(skillId, extraMod = 0, advantage = false, disadvantage = false, hiddenAdvantage = false) {
     const skill = this.items.get(skillId);
     if (!skill) return;
 
@@ -280,7 +573,11 @@ export class CyberpunkActor extends Actor {
       extraMod || null
     ].filter(Boolean);
 
-    const makeRoll = () => makeD10Roll(parts, this.system);   // d10 + parts
+    // Roll modifier from implants (Characteristic)
+    const cMod = this._getCharacteristicSkillMod(skill);
+    if (cMod) parts.push(cMod);
+
+    const makeRoll = () => makeD10Roll(parts, this.system); // d10 + parts
 
     // if both are accidentally marked — ignore
     if (advantage && disadvantage) { advantage = disadvantage = false; }
@@ -290,25 +587,110 @@ export class CyberpunkActor extends Actor {
       const r1 = makeRoll();
       const r2 = makeRoll();
 
-      Promise.all([
-        r1.evaluate(),
-        r2.evaluate()
-      ]).then(() => {
-        const chosen = advantage
-          ? (r1.total >= r2.total ? r1 : r2)   // best
-          : (r1.total <= r2.total ? r1 : r2);  // worst
+      await Promise.all([r1.evaluate(), r2.evaluate()]);
 
-        new Multiroll(skill.name)
-          .addRoll(chosen)
-          .defaultExecute();
-      });
-      return;
+      const chosen = advantage
+        ? (r1.total >= r2.total ? r1 : r2)   // best
+        : (r1.total <= r2.total ? r1 : r2);  // worst
+
+      const other = (chosen === r1) ? r2 : r1;
+
+      // Fumble Table
+      let fumble = null;
+      if (game.settings.get("cyberpunk2020", "fumbleTableEnabled") && isFumbleRoll(chosen)) {
+        fumble = await buildSkillFumbleData({ skill, roll: chosen });
+      }
+
+      // Players must always reveal advantage/disadvantage
+      const revealAdvDis = !game.user.isGM || !hiddenAdvantage;
+
+      if (revealAdvDis) {
+        const flavor = localize(advantage ? "Roll.AdvantageFlavor" : "Roll.DisadvantageFlavor");
+        const keptName = localize(advantage ? "Roll.BestRoll" : "Roll.WorstRoll");
+        const otherName = localize("Roll.OtherRoll");
+
+        return new Multiroll(skill.name, flavor)
+          .addRoll(chosen, { name: keptName })
+          .addRoll(other,  { name: otherName })
+          .defaultExecute({ fumble });
+      }
+
+      // Hidden (GM): show as a normal roll, without extra info
+      return new Multiroll(skill.name)
+        .addRoll(chosen)
+        .defaultExecute({ fumble });
     }
 
     // normal roll
+    const r = makeRoll();
+    await r.evaluate();
+
+    let fumble = null;
+    if (game.settings.get("cyberpunk2020", "fumbleTableEnabled") && isFumbleRoll(r)) {
+      fumble = await buildSkillFumbleData({ skill, roll: r });
+    }
+
     new Multiroll(skill.name)
-      .addRoll(makeRoll())
-      .defaultExecute();
+      .addRoll(r)
+      .defaultExecute({ fumble });
+  }
+
+  /**
+   * Sum of skill roll modifiers from equipped implants of type Characteristic.
+   * Keys in the implant are the displayed (localized) skill names, same as skill.name.
+   * @param {string} skillName
+   * @returns {number}
+  */
+  _getCharacteristicSkillMod(skill) {
+    const skillId = skill?.id;
+    const skillName = skill?.name;
+    let total = 0;
+
+    for (const it of this.items) {
+      if (it.type !== "cyberware") continue;
+
+      const sys = it.system;
+      if (!sys?.equipped) continue;
+      if (!cwIsEnabled(sys)) continue;
+
+      const cwt = sys.CyberWorkType;
+      if (!cwt || !cwHasType(cwt, "Characteristic")) continue;
+
+      // Preferred format: keys are Skill Item _id (stable across localizations).
+      // Legacy fallback: keys are localized skill names.
+      const table = cwt.Skill || {};
+      const v = Number(
+        (skillId && table[skillId] != null) ? table[skillId] :
+        (skillName && table[skillName] != null) ? table[skillName] :
+        0
+      ) || 0;
+
+      if (!Number.isNaN(v)) total += v;
+    }
+
+    return total;
+  }
+
+  /**
+   * Sum check modifiers from equipped implants of type "Characteristic".
+   * Returns { initiative, saves, stun }.
+  */
+  _getCharacteristicChecksMods() {
+    const mods = { initiative: 0, saveStun: 0 };
+
+    for (const it of this.items) {
+      if (it.type !== "cyberware") continue;
+      const sys = it.system || {};
+      if (!sys.equipped) continue;
+      if (!cwHasType(sys, "Characteristic")) continue;
+      if (!cwIsEnabled(sys)) continue;
+
+      const checks = sys.CyberWorkType?.Checks || {};
+      mods.initiative += Number(checks.Initiative || 0) || 0;
+      mods.saveStun += Number(checks.SaveStun || 0) || 0;
+    }
+
+    return mods;
   }
 
   rollStat(statName) {
@@ -358,8 +740,15 @@ export class CyberpunkActor extends Actor {
       return
     }
 
-    const rollType = "1d10"
-    rolls.addRoll(new Roll(modificator ? `${rollType} + ${modificator}` : rollType), {
+    const fromImplants = Number(this.system?._cwChecks?.saveStun || 0);
+
+    const userMod = modificator ? parseInt(modificator, 10) : 0;
+    const totalMod = userMod + fromImplants;
+
+    const rollType = "1d10";
+    const formula = totalMod ? `${rollType} + ${totalMod}` : rollType;
+
+    rolls.addRoll(new Roll(formula), {
       name: localize("Save")
     });
     rolls.addRoll(new Roll(`${this.stunThreshold()}`), {
@@ -369,5 +758,23 @@ export class CyberpunkActor extends Actor {
       name: "Death Threshold"
     });
     rolls.defaultExecute();
+  }
+
+  async _preUpdate(changes, options, user) {
+    // If the actor's portrait changes and no explicit image change is specified for the prototype token
+    // synchronize it, but only if the token currently shows the actor's old portrait
+    const newImg = changes?.img;
+    if (typeof newImg === "string" && newImg.trim() &&
+        !foundry.utils.getProperty(changes, "prototypeToken.texture.src")) {
+
+      const oldImg = this._source?.img ?? this.img;
+      const currentTokenSrc = this.prototypeToken?.texture?.src;
+
+      if (!currentTokenSrc || currentTokenSrc === oldImg) {
+        foundry.utils.setProperty(changes, "prototypeToken.texture.src", newImg);
+      }
+    }
+
+    return await super._preUpdate(changes, options, user);
   }
 }

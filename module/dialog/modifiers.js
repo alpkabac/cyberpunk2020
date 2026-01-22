@@ -1,4 +1,4 @@
-import { deepSet, localize } from "../utils.js"
+import { deepSet, localize, localizeParam } from "../utils.js"
 import { defaultTargetLocations, fireModes } from "../lookups.js"
 
 /**
@@ -26,6 +26,7 @@ import { defaultTargetLocations, fireModes } from "../lookups.js"
         showAdvDis: false,
         advantage: false,
         disadvantage: false,
+        hiddenAdvantage: false,
         closeOnSubmit: false,
 
         onConfirm: (results) => console.log(results)
@@ -51,6 +52,21 @@ import { defaultTargetLocations, fireModes } from "../lookups.js"
 
       const groups = JSON.parse(JSON.stringify(this.options.modifierGroups || []));
 
+      if (this.options.weapon) {
+        const sys = this.options.weapon._getWeaponSystem ? this.options.weapon._getWeaponSystem() : this.options.weapon.system;
+        const rof = Number(sys?.rof) || 0;
+        const shotsLeft = Number(sys?.shotsLeft) || 0;
+        groups.forEach(group => {
+          group.forEach(mod => {
+            if (mod.dataPath === "roundsFired" && (mod.defaultValue === undefined || mod.defaultValue === null || mod.defaultValue === "")) {
+              mod.defaultValue = rof;
+              if (mod.min === undefined) mod.min = 1;
+              if (mod.max === undefined) mod.max = shotsLeft;
+            }
+          });
+        });
+      }
+
       if (this.options.extraMod) {
         const already = groups.some(g =>
           g.some(m => m.dataPath === "extraMod"));
@@ -66,10 +82,9 @@ import { defaultTargetLocations, fireModes } from "../lookups.js"
       const defaultValues = {};
       groups.forEach(group => {
         group.forEach(mod => {
-          // path towards modifier's field template
-          mod.fieldPath = `fields/${mod.choices ? "select" : typeof mod.defaultValue}`;
-          deepSet(defaultValues, mod.dataPath,
-            mod.defaultValue !== undefined ? mod.defaultValue : "");
+          const t = mod.choices ? "select" : (["string","number","boolean"].includes(typeof mod.defaultValue) ? typeof mod.defaultValue : "string");
+          mod.fieldPath = `fields/${t}`;
+          deepSet(defaultValues, mod.dataPath, mod.defaultValue !== undefined ? mod.defaultValue : "");
         });
       });
 
@@ -79,10 +94,11 @@ import { defaultTargetLocations, fireModes } from "../lookups.js"
         // You can't refer to indices in FormApplication form entries as far as I know, so let's give them a place to live
         defaultValues,
         isRanged: this.options.weapon?.isRanged?.() ?? false,
-        shotsLeft: this.options.weapon?.system.shotsLeft ?? 0,
+        shotsLeft: (this.options.weapon?._getWeaponSystem?.().shotsLeft) ?? (this.options.weapon?.system.shotsLeft) ?? 0,
         showAdvDis: this.options.showAdvDis,
         advantage: this.options.advantage,
-        disadvantage: this.options.disadvantage
+        disadvantage: this.options.disadvantage,
+        isGM: game.user.isGM
       };
     }
 
@@ -96,11 +112,49 @@ import { defaultTargetLocations, fireModes } from "../lookups.js"
         const weapon = this.options.weapon;
         if (!weapon) return;
 
-        await weapon.update({ "system.shotsLeft": weapon.system.shots });
+        const sys = weapon._getWeaponSystem?.() ?? weapon.system;
+        const shots = sys.shots ?? 0;
+
+        if (weapon.__setWeaponField) {
+          await weapon.__setWeaponField("shotsLeft", shots);
+        } else {
+          await weapon.update({ "system.shotsLeft": shots });
+        }
+
         ui.notifications.info(localize("Reloaded"));
 
-        const shots = weapon.system.shots;
-        this.options.weapon.system.shotsLeft = shots;
+        // GM audit: show reload in chat for player-controlled characters (not NPCs)
+        try {
+          const actor = weapon.actor;
+
+          // Only players (non-GM) and only Characters (not NPC)
+          if (actor && actor.type !== "npc" && !game.user.isGM) {
+            const gmRecipients = ChatMessage.getWhisperRecipients("GM")?.map(u => u.id) ?? [];
+
+            if (gmRecipients.length > 0) {
+              const shotsText = `${shots}/${shots}`;
+
+              await ChatMessage.create({
+                type: CONST.CHAT_MESSAGE_TYPES.OTHER,
+                speaker: ChatMessage.getSpeaker({ actor }),
+                whisper: gmRecipients,
+                content: localizeParam("Chat.Reload", {
+                  actor: actor.name,
+                  weapon: weapon.name,
+                  shots: shotsText
+                })
+              });
+            }
+          }
+        } catch (err) {
+          console.warn("Cyberpunk2020 | reload audit message failed", err);
+        }
+
+        if (weapon.type === "weapon") {
+          this.options.weapon.system.shotsLeft = shots;
+        } else if (weapon.type === "cyberware" && weapon.system?.CyberWorkType?.Weapon) {
+          this.options.weapon.system.CyberWorkType.Weapon.shotsLeft = shots;
+        }
 
         html.find('input.number[readonly]').val(shots);
       });

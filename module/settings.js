@@ -18,4 +18,23 @@ export function registerSystemSettings() {
     type: Boolean,
     default: true
   });
+
+    // --- Optional rules: Fumble Table ---
+  game.settings.register("cyberpunk2020", "fumbleTableEnabled", {
+    name: "SETTINGS.FumbleTableEnabled",
+    hint: "SETTINGS.FumbleTableEnabledHint",
+    scope: "world",
+    config: true,
+    type: Boolean,
+    default: true
+  });
+
+  game.settings.register("cyberpunk2020", "autoFumbleOnlyJam", {
+    name: "SETTINGS.AutoFumbleOnlyJam",
+    hint: "SETTINGS.AutoFumbleOnlyJamHint",
+    scope: "world",
+    config: true,
+    type: Boolean,
+    default: false
+  });
 }

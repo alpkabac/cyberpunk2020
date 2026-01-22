@@ -1,4 +1,4 @@
-import { deepLookup, localize, properCase, replaceIn, shortLocalize } from "./utils.js"
+import { deepLookup, localize, properCase, replaceIn, shortLocalize, cwIsEnabled as cwIsEnabledFn } from "./utils.js"
 
 const templatePath = "systems/cyberpunk2020/templates/";
 export function registerHandlebarsHelpers() {
@@ -29,6 +29,10 @@ export function registerHandlebarsHelpers() {
     });
     Handlebars.registerHelper('equals', function(x, y) {
         return x === y;
+    });
+    Handlebars.registerHelper('cwHasType', function(cwt, type) {
+    const types = Array.isArray(cwt?.Types) ? cwt.Types : [];
+    return types.includes(type) || cwt?.Type === type;
     });
     Handlebars.registerHelper('compare', function(x, operator, y) {
         switch (operator) {
@@ -204,5 +208,9 @@ export function registerHandlebarsHelpers() {
             return String(rangeArray[0]);
         }
         return "";
+    });
+    
+    Handlebars.registerHelper('cwIsEnabled', function(obj) {
+        return cwIsEnabledFn(obj);
     });
 }

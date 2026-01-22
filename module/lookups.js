@@ -131,6 +131,71 @@ export let martialActions = {
     throw: "Throw",
     escape: "Escape"
 }
+// lookups.js
+export const martialActionBonuses = {
+  "Martial Arts: Karate": {
+    Strike: 2,
+    Kick: 2,
+    BlockParry: 2
+  },
+  "Martial Arts: Judo": {
+    Throw: 3,
+    Hold: 3,
+    Escape: 3
+  },
+  "Martial Arts: Boxing": {
+    Strike: 3,
+    BlockParry: 3,
+    Dodge: 1,
+    Grapple: 2
+  },
+  "Martial Arts: ThaiKickBoxing": {
+    Strike: 3,
+    Kick: 3
+  },
+  "Martial Arts: ChoiLiFut": {
+    Strike: 2,
+    Kick: 2,
+    BlockParry: 2
+  },
+  "Martial Arts: Aikido": {
+    BlockParry: 4,
+    Throw: 3,
+    Hold: 3,
+    Escape: 3,
+    Choke: 1
+  },
+  "Martial Arts: AnimalKungFu": {
+    Strike: 2,
+    Kick: 2,
+    Grapple: 2
+  },
+  "Martial Arts: TaeKwonDo": {
+    Strike: 3,
+    Kick: 3,
+    BlockParry: 1
+  },
+  "Martial Arts: Savate": {
+    Strike: 3,
+    Kick: 4
+  },
+  "Martial Arts: Wrestling": {
+    Grapple: 3,
+    Hold: 4,
+    Choke: 3
+  },
+  "Martial Arts: Capoeira": {
+    Strike: 1,
+    Kick: 2,
+    Dodge: 2,
+    SweepTrip: 3
+  },
+  "Brawling": {}
+};
+export function getMartialActionBonus(martialKey, actionKey) {
+  const style = martialActionBonuses[martialKey] || {};
+  return Number(style[actionKey] || 0);
+}
 
 // Be warned that the localisations of these take a range parameter
 export let ranges = {
@@ -250,6 +315,7 @@ export function martialOptions(actor) {
         [{
             localKey: "Action",
             dataPath: "action",
+            defaultValue: "Strike",
             choices: [
                 {groupName: "Defensive", choices: [
                     "Dodge",
@@ -273,9 +339,14 @@ export function martialOptions(actor) {
         {
             localKey: "MartialArt",
             dataPath: "martialArt",
-            choices: [{value: game.i18n.localize("CYBERPUNK.SkillBrawling"), localKey: "SkillBrawling"}, ...(actor.trainedMartials().map(martialName => {
-                return {value: martialName, localKey: "Skill" + getMartialKeyByName(martialName)}
-            }))]
+            choices: [
+            { value: "Brawling", localKey: "SkillBrawling" },
+
+            ...(actor.trainedMartials().map(name => {
+                const key = getMartialKeyByName(name);
+                return { value: key, localKey: "Skill" + key };
+            }))
+            ]
         },
         {
             localKey: "CyberTerminus",
@@ -350,7 +421,7 @@ export function strengthDamageBonus(bt) {
         case 11:
         case 12: return 4 
         case 13:
-        case 14: return 5
+        case 14: return 6
         default: return 8
     }
 }
