@@ -791,7 +791,7 @@
 		}
 	},
 	"Item": {
-		"types": ["skill", "weapon", "armor", "cyberware", "vehicle", "misc", "program"],
+		"types": ["skill", "weapon", "ammo", "armor", "cyberware", "vehicle", "misc", "program"],
 		"templates": {
 			"common": {
 				"flavor": "",
@@ -843,6 +843,13 @@
 			"range": 50,
 			"attackType": "",
 			"attackSkill": "ref"
+		},
+		"ammo": {
+			"templates": ["common"],
+			"equipped": true,
+			"ammoType": "",
+			"ammunitionType": "",
+			"quantity": 0
 		},
 		"armor": {
 			"templates": ["common"],

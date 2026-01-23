@@ -55,6 +55,10 @@ export class CyberpunkItemSheet extends ItemSheet {
       case "cyberware": 
         await this._prepareCyberware(data); 
         break;
+      
+      case "ammo":
+          this._prepareAmmo(data);
+          break;
 
       default:
         break;
@@ -64,6 +68,210 @@ export class CyberpunkItemSheet extends ItemSheet {
 
   _prepareSkill(sheet) {
     sheet.stats = getStatNames();
+  }
+
+  _prepareAmmo(sheet) {
+    // Weapon type (category of weapon for which the ammunition is intended)
+    sheet.ammoReloadTypes = [
+      // Bullet weapons.
+      "AmmoReloadLightPistolSMG",
+      "AmmoReloadMediumPistolSMG",
+      "AmmoReloadHeavyPistolSMG",
+      "AmmoReloadVeryHeavyPistol",
+      "AmmoReloadAssaultRifle",
+      "AmmoReloadShotgun",
+
+      // Individual categories
+      "AmmoWeaponArrows",
+      "AmmoWeaponCrossbowQuarrels",
+      "AmmoWeaponAirguns",
+      "AmmoWeaponPaintloads",
+      "AmmoReloadNeedlegunRounds",
+      "AmmoReload20mmCannonRound",
+      "AmmoWeaponGauss",
+      "AmmoReloadFlamethrower",
+
+      "AmmoReloadGrenades",
+      "AmmoReloadRockets",
+      "AmmoReloadOther"
+    ];
+
+    // Ammunition type (what the selected weapon category fires)
+
+    // Bullets (variants)
+    const bullets = [
+      "AmmoBulletStandard",
+      "AmmoBulletSealedCaseless",
+      "AmmoBulletBrassCased",
+      "AmmoBulletPlasticase",
+      "AmmoBulletArmorPiercing",
+      "AmmoBulletHollowpoints",
+      "AmmoBulletAPIncendiary",
+      "AmmoBulletDualPurpose",
+      "AmmoBulletFragFlechettes",
+      "AmmoBulletElectrothermal",
+      "AmmoBulletRubber",
+      "AmmoBulletWaspFlechette",
+      "AmmoBullet12mmAntiPersonnel",
+      "AmmoBulletElectricFire",
+      "AmmoBulletSmart",
+      "AmmoBulletSilver",
+      "AmmoBulletSafety",
+      "AmmoBulletSkyMarshalSafety",
+      "AmmoBulletKill",
+      "AmmoBulletCapture",
+      "AmmoBulletAcid",
+      "AmmoBulletHeartbreaker"
+    ];
+
+    // Arrows / bolts (variants)
+    const arrows = [
+      "AmmoArrowTarget",
+      "AmmoArrowBroadhead",
+      "AmmoArrowStun",
+      "AmmoArrowSpinner",
+      "AmmoArrowWarhead"
+    ];
+
+    const quarrels = [
+      "AmmoQuarrelTarget",
+      "AmmoQuarrelBroadhead",
+      "AmmoQuarrelStun",
+      "AmmoQuarrelSpinner",
+      "AmmoQuarrelWarhead",
+      "AmmoQuarrelSilver"
+    ];
+
+    // Needle thrower (variants)
+    const needlegun = [
+      "AmmoNeedleNormal",
+      "AmmoNeedleDrugged",
+      "AmmoNeedleAntiArmor",
+      "AmmoNeedleHEImpact",
+      "AmmoNeedleHETimerLiquid"
+    ];
+
+    // Pneumatics
+    const airguns = [
+      "AmmoReloadAirgunPellets",
+      "AmmoReloadAcidDrugPellets"
+    ];
+
+    // Paintlaunchers
+    const paintloads = [
+      "AmmoReloadPaintloads",
+      "AmmoReloadAcidDrugPoisonLoads",
+      "AmmoReloadGlassCeramicSteelBalls"
+    ];
+
+    // Gauss
+    const gauss = [
+      "AmmoReloadGaussRounds",
+      "AmmoReloadGaussBatteryCharge"
+    ];
+
+    const allGroups = [
+      { groupName: "AmmoGroupBullets", choices: bullets },
+      { groupName: "AmmoWeaponArrows", choices: arrows },
+      { groupName: "AmmoWeaponCrossbowQuarrels", choices: quarrels },
+      { groupName: "AmmoWeaponAirguns", choices: airguns },
+      { groupName: "AmmoWeaponPaintloads", choices: paintloads },
+      { groupName: "AmmoReloadNeedlegunRounds", choices: needlegun },
+      { groupName: "AmmoWeaponGauss", choices: gauss },
+      "AmmoOther"
+    ];
+
+    // Filter by selected weapon type
+    let ammoType = sheet.system?.ammoType ?? "";
+
+    const legacyToNewWeaponType = new Map([
+      ["AmmoReloadAirgunPellets", "AmmoWeaponAirguns"],
+      ["AmmoReloadAcidDrugPellets", "AmmoWeaponAirguns"],
+
+      ["AmmoReloadPaintloads", "AmmoWeaponPaintloads"],
+      ["AmmoReloadAcidDrugPoisonLoads", "AmmoWeaponPaintloads"],
+      ["AmmoReloadGlassCeramicSteelBalls", "AmmoWeaponPaintloads"],
+
+      ["AmmoReloadGaussRounds", "AmmoWeaponGauss"],
+      ["AmmoReloadGaussBatteryCharge", "AmmoWeaponGauss"]
+    ]);
+
+    ammoType = legacyToNewWeaponType.get(ammoType) ?? ammoType;
+
+    // Needlegun
+    if (ammoType === "AmmoReloadNeedlegunRounds") {
+      sheet.ammunitionTypes = [
+        { groupName: "AmmoReloadNeedlegunRounds", choices: needlegun },
+        "AmmoOther"
+      ];
+      return;
+    }
+
+    // Arrows / Crossbow
+    if (ammoType === "AmmoWeaponArrows") {
+      sheet.ammunitionTypes = [
+        { groupName: "AmmoWeaponArrows", choices: arrows },
+        "AmmoOther"
+      ];
+      return;
+    }
+
+    if (ammoType === "AmmoWeaponCrossbowQuarrels") {
+      sheet.ammunitionTypes = [
+        { groupName: "AmmoWeaponCrossbowQuarrels", choices: quarrels },
+        "AmmoOther"
+      ];
+      return;
+    }
+
+    // Airguns / Paintloads / Gauss
+    if (ammoType === "AmmoWeaponAirguns") {
+      sheet.ammunitionTypes = [
+        { groupName: "AmmoWeaponAirguns", choices: airguns },
+        "AmmoOther"
+      ];
+      return;
+    }
+
+    if (ammoType === "AmmoWeaponPaintloads") {
+      sheet.ammunitionTypes = [
+        { groupName: "AmmoWeaponPaintloads", choices: paintloads },
+        "AmmoOther"
+      ];
+      return;
+    }
+
+    if (ammoType === "AmmoWeaponGauss") {
+      sheet.ammunitionTypes = [
+        { groupName: "AmmoWeaponGauss", choices: gauss },
+        "AmmoOther"
+      ];
+      return;
+    }
+
+    // Categories without ammunition “varieties” (leave only Other)
+    const noAmmoVariants = new Set([
+      "AmmoReload20mmCannonRound",
+      "AmmoReloadFlamethrower",
+      "AmmoReloadGrenades",
+      "AmmoReloadRockets",
+      "AmmoReloadOther"
+    ]);
+
+    if (noAmmoVariants.has(ammoType)) {
+      sheet.ammunitionTypes = ["AmmoOther"];
+      return;
+    }
+
+    if (ammoType) {
+      sheet.ammunitionTypes = [
+        { groupName: "AmmoGroupBullets", choices: bullets },
+        "AmmoOther"
+      ];
+      return;
+    }
+
+    sheet.ammunitionTypes = allGroups;
   }
 
   _prepareWeapon(sheet) {
