@@ -1,0 +1,20 @@
+<div class="field-list">
+    {{> (template "fields/select")
+        label="WeaponType"
+        edit="system.ammoType"
+        choices=ammoReloadTypes
+        allowBlank=true
+    }}
+
+    {{> (template "fields/select")
+        label="AmmoType"
+        edit="system.ammunitionType"
+        choices=ammunitionTypes
+        allowBlank=true
+    }}
+
+    {{> (template "fields/number")
+        label="AmmoQuantity"
+        edit="system.quantity"
+    }}
+</div>
