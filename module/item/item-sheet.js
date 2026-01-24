@@ -224,10 +224,30 @@ export class CyberpunkItemSheet extends ItemSheet {
   _prepareWeapon(sheet) {
     sheet.weaponTypes = Object.values(weaponTypes).sort();
     const isMelee = this.item.system.weaponType === weaponTypes.melee;
+    sheet.isMelee = isMelee;
     sheet.attackTypes = isMelee ? Object.values(meleeAttackTypes).sort() : Object.values(rangedAttackTypes).sort();
     sheet.concealabilities = Object.values(concealability);
     sheet.availabilities = Object.values(availability);
     sheet.reliabilities = Object.values(reliability);
+
+    if (this.item.system?.ammoItemId == null) {
+      this.item.updateSource({ "system.ammoItemId": "" });
+    }
+
+    sheet.ammoChoices = [];
+    const ammoOwner = this.item?.parent;
+
+    if (ammoOwner) {
+      const ammoItems = ammoOwner.itemTypes?.ammo ?? ammoOwner.items.filter(i => i.type === "ammo");
+      sheet.ammoChoices = [...ammoItems]
+        .sort((a, b) => String(a.name).localeCompare(String(b.name)))
+        .map(a => {
+          const ammoType = String(a.system?.ammoType ?? "");
+          const typeLabel = ammoType ? ammoType : "";
+          const label = typeLabel ? `${a.name} (${typeLabel})` : a.name;
+          return { value: a.id, localKey: label };
+        });
+    }
 
     const actor = this.item?.parent;
     const wType = this.item.system.weaponType || weaponTypes.pistol;
@@ -409,10 +429,30 @@ async _prepareCyberware(sheet) {
   sheet.weaponTypes = Object.values(weaponTypes).sort();
   const cwW = this.item.system?.CyberWorkType?.Weapon || {};
   const isMelee = cwW.weaponType === weaponTypes.melee;
+  sheet.cwWeaponIsMelee = isMelee;
   sheet.attackTypes = isMelee ? Object.values(meleeAttackTypes).sort() : Object.values(rangedAttackTypes).sort();
   sheet.concealabilities = Object.values(concealability);
   sheet.availabilities = Object.values(availability);
   sheet.reliabilities = Object.values(reliability);
+
+  if (this.item.system?.CyberWorkType?.Weapon?.ammoItemId == null) {
+    this.item.updateSource({ "system.CyberWorkType.Weapon.ammoItemId": "" });
+  }
+
+  sheet.cwAmmoChoices = [];
+  const ammoOwner = this.actor;
+
+  if (ammoOwner) {
+    const ammoItems = ammoOwner.itemTypes?.ammo ?? ammoOwner.items.filter(i => i.type === "ammo");
+
+    sheet.cwAmmoChoices = [...ammoItems]
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)))
+      .map(a => {
+        const ammoType = String(a.system?.ammoType ?? "");
+        const label = ammoType ? `${a.name} (${ammoType})` : a.name;
+        return { value: a.id, localKey: label };
+      });
+  }
 
   const actor = this.item?.parent;
   const baseKeys = attackSkills[cwW.weaponType || weaponTypes.pistol] || [];
@@ -704,6 +744,19 @@ async _prepareCyberware(sheet) {
       if (typeof this._cp_syncActiveFlagsToSkills === "function") {
         await this._cp_syncActiveFlagsToSkills();
       }
+    });
+
+    html.on("change", "select[name='system.ammoItemId']", async (ev) => {
+      if (this.item.type !== "weapon") return;
+
+      const value = String(ev.currentTarget.value ?? "");
+      await this.item.update({ "system.ammoItemId": value }, { render: false });
+    });
+    html.on("change", "select[name='system.CyberWorkType.Weapon.ammoItemId']", async (ev) => {
+      if (this.item.type !== "cyberware") return;
+
+      const value = String(ev.currentTarget.value ?? "");
+      await this.item.update({ "system.CyberWorkType.Weapon.ammoItemId": value }, { render: false });
     });
 
     // Allow comma decimal separator in numeric inputs (convert to dot)

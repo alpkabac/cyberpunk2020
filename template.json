@@ -828,6 +828,7 @@
 			"concealability": "P",
 			"availability": "common",
 			"ammoType": "9mm",
+			"ammoItemId": "",
 			"damage": "2d6+1",
 			"rangeDamages": {
 				"pointBlank": "",
@@ -962,6 +963,7 @@
 					"concealability": "P",
 					"availability": "common",
 					"ammoType": "9mm",
+					"ammoItemId": "",
 					"damage": "2d6+1",
 					"rangeDamages": {
 						"pointBlank": "",

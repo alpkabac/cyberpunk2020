@@ -316,13 +316,17 @@
         {{> (template "fields/number") label="Accuracy" edit="system.CyberWorkType.Weapon.accuracy"}}
 
         {{> (template "fields/number") label="Range" edit="system.CyberWorkType.Weapon.range"}}
-        {{> (template "fields/boolean") label="AP" edit="system.CyberWorkType.Weapon.ap"}}
 
-        {{> (template "fields/number") label="ShotsLeft" edit="system.CyberWorkType.Weapon.shotsLeft"}}
-        {{> (template "fields/number") label="Shots" edit="system.CyberWorkType.Weapon.shots"}}
-
-        {{> (template "fields/number") label="RoF" edit="system.CyberWorkType.Weapon.rof"}}
         {{> (template "fields/select") label="Reliability" edit="system.CyberWorkType.Weapon.reliability" choices=reliabilities}}
+
+        {{#unless cwWeaponIsMelee}}
+          {{> (template "fields/number") label="ShotsLeft" edit="system.CyberWorkType.Weapon.shotsLeft"}}
+          {{> (template "fields/number") label="Shots" edit="system.CyberWorkType.Weapon.shots"}}
+
+          {{> (template "fields/number") label="RoF" edit="system.CyberWorkType.Weapon.rof"}}
+
+          {{> (template "fields/select") label="Ammo" edit="system.CyberWorkType.Weapon.ammoItemId" choices=cwAmmoChoices allowBlank=true}}
+        {{/unless}}
 
         <div class="field">
           <label for="system.CyberWorkType.Weapon.attackSkill">{{CPLocal "AttackSkill"}}</label>
@@ -341,7 +345,11 @@
           {{/if}}
         </div>
 
-        {{> (template "fields/string") label="AmmoType" edit="system.CyberWorkType.Weapon.ammoType"}}
+        {{#if cwWeaponIsMelee}}
+            {{> (template "fields/boolean") label="AP" edit="system.CyberWorkType.Weapon.ap"}}
+        {{else}}
+            {{> (template "fields/string") label="AmmoType" edit="system.CyberWorkType.Weapon.ammoType"}}
+        {{/if}}
       </div>
     </div>
   {{/if}}
