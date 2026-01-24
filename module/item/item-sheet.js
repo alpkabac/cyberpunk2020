@@ -71,6 +71,89 @@ export class CyberpunkItemSheet extends ItemSheet {
   }
 
   _prepareAmmo(sheet) {
+    const sys = this.item?.system ?? {};
+    const updates = {};
+    const setIfMissing = (key, value) => {
+      if (sys[key] === null || sys[key] === undefined) updates[`system.${key}`] = value;
+    };
+
+    setIfMissing("armorMultSoft", 1);
+    setIfMissing("armorMultHard", 1);
+    setIfMissing("rawDamageMult", 1);
+    setIfMissing("penDamageMult", 1);
+    setIfMissing("bonusDamageFormula", "");
+    setIfMissing("accuracyMod", 0);
+
+    setIfMissing("stunSaveOnHit", false);
+    setIfMissing("stunSaveMod", 0);
+
+    setIfMissing("dotEnabled", false);
+    setIfMissing("dotTurns", 0);
+    setIfMissing("dotDamageFormula", "");
+
+    setIfMissing("blastRadius", 0);
+    setIfMissing("blastZones", 4);
+    setIfMissing("blastShrapnel", false);
+    setIfMissing("blastFullDamageWithin", 1);
+
+    const zones = Math.max(1, Math.min(10, Number(sys.blastZones ?? 4)));
+
+    const defaultMult = (i) => 1 / (2 ** (i + 1));
+    if (Array.isArray(sys.blastMultipliers) && sys.blastMultipliers.length && Number(sys.blastMultipliers[0]) === 1) {
+      const fixed = sys.blastMultipliers.slice(1);
+
+      while (fixed.length < zones) fixed.push(defaultMult(fixed.length));
+      fixed.length = zones;
+
+      updates["system.blastMultipliers"] = fixed;
+    }
+
+    if (!sys.blastMultipliers) {
+      updates["system.blastMultipliers"] = Array.from({ length: zones }, (_, i) => defaultMult(i));
+    } else if (!Array.isArray(sys.blastMultipliers)) {
+      const obj = sys.blastMultipliers;
+      const arr = Array.from({ length: zones }, (_, i) => {
+        const raw = obj[i] ?? obj[String(i)];
+        const n = Number(String(raw ?? "").replace(",", "."));
+        return Number.isFinite(n) ? n : defaultMult(i);
+      });
+      updates["system.blastMultipliers"] = arr;
+    } else {
+      let cur = sys.blastMultipliers.slice();
+
+      if (cur.length && Number(cur[0]) === 1) cur.shift();
+
+      cur = cur.slice(0, zones).map((v, i) => {
+        const n = Number(String(v ?? "").replace(",", "."));
+        return Number.isFinite(n) ? n : defaultMult(i);
+      });
+
+      while (cur.length < zones) cur.push(defaultMult(cur.length));
+
+      const prev = sys.blastMultipliers;
+      const changed =
+        cur.length !== prev.length ||
+        cur.some((v, i) => v !== prev[i]);
+
+      if (changed) {
+        updates["system.blastMultipliers"] = cur;
+      }
+    }
+
+    setIfMissing("spreadMode", "single");
+    setIfMissing("spreadDistance", 0);
+    setIfMissing("spreadDamageShort", "");
+    setIfMissing("spreadDamageMedium", "");
+    setIfMissing("spreadDamageLong", "");
+    setIfMissing("spreadWidthShort", 1);
+    setIfMissing("spreadWidthMedium", 2);
+    setIfMissing("spreadWidthLong", 3);
+
+    if (Object.keys(updates).length) {
+      this.item.updateSource(updates);
+      sheet.system = this.item.system;
+    }
+
     // Weapon type (category of weapon for which the ammunition is intended)
     sheet.ammoReloadTypes = [
       // Bullet weapons.
@@ -96,182 +179,46 @@ export class CyberpunkItemSheet extends ItemSheet {
       "AmmoReloadOther"
     ];
 
-    // Ammunition type (what the selected weapon category fires)
+    // Blast zones selector options
+    sheet.blastZonesOptions = Object.fromEntries(
+      Array.from({ length: 10 }, (_, i) => {
+        const n = i + 1;
+        return [n, n];
+      })
+    );
 
-    // Bullets (variants)
-    const bullets = [
-      "AmmoBulletStandard",
-      "AmmoBulletSealedCaseless",
-      "AmmoBulletBrassCased",
-      "AmmoBulletPlasticase",
-      "AmmoBulletArmorPiercing",
-      "AmmoBulletHollowpoints",
-      "AmmoBulletAPIncendiary",
-      "AmmoBulletDualPurpose",
-      "AmmoBulletFragFlechettes",
-      "AmmoBulletElectrothermal",
-      "AmmoBulletRubber",
-      "AmmoBulletWaspFlechette",
-      "AmmoBullet12mmAntiPersonnel",
-      "AmmoBulletElectricFire",
-      "AmmoBulletSmart",
-      "AmmoBulletSilver",
-      "AmmoBulletSafety",
-      "AmmoBulletSkyMarshalSafety",
-      "AmmoBulletKill",
-      "AmmoBulletCapture",
-      "AmmoBulletAcid",
-      "AmmoBulletHeartbreaker"
+    // Indices for rendering multiplier inputs dynamically
+    sheet.blastMultiplierIndices = Array.from(
+      { length: Math.max(1, Math.min(10, Number(this.item.system?.blastZones ?? 4))) },
+      (_, i) => i
+    );
+
+    // Spread mode selector (Single / Spread)
+    sheet.ammoSpreadModes = [
+      { value: "single", localKey: "AmmoSpreadModeSingle" },
+      { value: "spread", localKey: "AmmoSpreadModeSpread" }
     ];
 
-    // Arrows / bolts (variants)
-    const arrows = [
-      "AmmoArrowTarget",
-      "AmmoArrowBroadhead",
-      "AmmoArrowStun",
-      "AmmoArrowSpinner",
-      "AmmoArrowWarhead"
-    ];
-
-    const quarrels = [
-      "AmmoQuarrelTarget",
-      "AmmoQuarrelBroadhead",
-      "AmmoQuarrelStun",
-      "AmmoQuarrelSpinner",
-      "AmmoQuarrelWarhead",
-      "AmmoQuarrelSilver"
-    ];
-
-    // Needle thrower (variants)
-    const needlegun = [
-      "AmmoNeedleNormal",
-      "AmmoNeedleDrugged",
-      "AmmoNeedleAntiArmor",
-      "AmmoNeedleHEImpact",
-      "AmmoNeedleHETimerLiquid"
-    ];
-
-    // Pneumatics
-    const airguns = [
-      "AmmoReloadAirgunPellets",
-      "AmmoReloadAcidDrugPellets"
-    ];
-
-    // Paintlaunchers
-    const paintloads = [
-      "AmmoReloadPaintloads",
-      "AmmoReloadAcidDrugPoisonLoads",
-      "AmmoReloadGlassCeramicSteelBalls"
-    ];
-
-    // Gauss
-    const gauss = [
-      "AmmoReloadGaussRounds",
-      "AmmoReloadGaussBatteryCharge"
-    ];
-
-    const allGroups = [
-      { groupName: "AmmoGroupBullets", choices: bullets },
-      { groupName: "AmmoWeaponArrows", choices: arrows },
-      { groupName: "AmmoWeaponCrossbowQuarrels", choices: quarrels },
-      { groupName: "AmmoWeaponAirguns", choices: airguns },
-      { groupName: "AmmoWeaponPaintloads", choices: paintloads },
-      { groupName: "AmmoReloadNeedlegunRounds", choices: needlegun },
-      { groupName: "AmmoWeaponGauss", choices: gauss },
-      "AmmoOther"
-    ];
-
-    // Filter by selected weapon type
-    let ammoType = sheet.system?.ammoType ?? "";
-
-    const legacyToNewWeaponType = new Map([
-      ["AmmoReloadAirgunPellets", "AmmoWeaponAirguns"],
-      ["AmmoReloadAcidDrugPellets", "AmmoWeaponAirguns"],
-
-      ["AmmoReloadPaintloads", "AmmoWeaponPaintloads"],
-      ["AmmoReloadAcidDrugPoisonLoads", "AmmoWeaponPaintloads"],
-      ["AmmoReloadGlassCeramicSteelBalls", "AmmoWeaponPaintloads"],
-
-      ["AmmoReloadGaussRounds", "AmmoWeaponGauss"],
-      ["AmmoReloadGaussBatteryCharge", "AmmoWeaponGauss"]
-    ]);
-
-    ammoType = legacyToNewWeaponType.get(ammoType) ?? ammoType;
-
-    // Needlegun
-    if (ammoType === "AmmoReloadNeedlegunRounds") {
-      sheet.ammunitionTypes = [
-        { groupName: "AmmoReloadNeedlegunRounds", choices: needlegun },
-        "AmmoOther"
-      ];
-      return;
+    if (!Array.isArray(sys.effectTypes) && !sys.effectTypes) {
+      sys.effectTypes = ["None"];
+    }
+    if (!Array.isArray(sys.effectTypes) && sys.effectTypes) {
+      sys.effectTypes = [sys.effectTypes];
     }
 
-    // Arrows / Crossbow
-    if (ammoType === "AmmoWeaponArrows") {
-      sheet.ammunitionTypes = [
-        { groupName: "AmmoWeaponArrows", choices: arrows },
-        "AmmoOther"
-      ];
-      return;
-    }
+    const effectKeyMap = {
+      None: "AmmoEffect_None",
+      CoreMods: "AmmoEffect_CoreMods",
+      Stun: "AmmoEffect_Stun",
+      DoT: "AmmoEffect_DoT",
+      Blast: "AmmoEffect_Blast",
+      Spread: "AmmoEffect_Spread"
+    };
 
-    if (ammoType === "AmmoWeaponCrossbowQuarrels") {
-      sheet.ammunitionTypes = [
-        { groupName: "AmmoWeaponCrossbowQuarrels", choices: quarrels },
-        "AmmoOther"
-      ];
-      return;
-    }
-
-    // Airguns / Paintloads / Gauss
-    if (ammoType === "AmmoWeaponAirguns") {
-      sheet.ammunitionTypes = [
-        { groupName: "AmmoWeaponAirguns", choices: airguns },
-        "AmmoOther"
-      ];
-      return;
-    }
-
-    if (ammoType === "AmmoWeaponPaintloads") {
-      sheet.ammunitionTypes = [
-        { groupName: "AmmoWeaponPaintloads", choices: paintloads },
-        "AmmoOther"
-      ];
-      return;
-    }
-
-    if (ammoType === "AmmoWeaponGauss") {
-      sheet.ammunitionTypes = [
-        { groupName: "AmmoWeaponGauss", choices: gauss },
-        "AmmoOther"
-      ];
-      return;
-    }
-
-    // Categories without ammunition “varieties” (leave only Other)
-    const noAmmoVariants = new Set([
-      "AmmoReload20mmCannonRound",
-      "AmmoReloadFlamethrower",
-      "AmmoReloadGrenades",
-      "AmmoReloadRockets",
-      "AmmoReloadOther"
-    ]);
-
-    if (noAmmoVariants.has(ammoType)) {
-      sheet.ammunitionTypes = ["AmmoOther"];
-      return;
-    }
-
-    if (ammoType) {
-      sheet.ammunitionTypes = [
-        { groupName: "AmmoGroupBullets", choices: bullets },
-        "AmmoOther"
-      ];
-      return;
-    }
-
-    sheet.ammunitionTypes = allGroups;
+    sheet.ammoFx = {
+      typeLabels: (sys.effectTypes?.length ? sys.effectTypes : ["None"])
+        .map(t => localize(effectKeyMap[t] ?? "AmmoEffect_None"))
+    };
   }
 
   _prepareWeapon(sheet) {
@@ -614,6 +561,12 @@ async _prepareCyberware(sheet) {
     await this.item.update(update);
     this.render(false);
   }
+  async _ammoSet(path, value) {
+    const update = {};
+    foundry.utils.setProperty(update, path, value);
+    await this.item.update(update);
+    this.render(false);
+  }
   async _cwDelete(objPath, key) {
     const update = {};
     update[`${objPath}.-=${key}`] = null;
@@ -751,6 +704,46 @@ async _prepareCyberware(sheet) {
       if (typeof this._cp_syncActiveFlagsToSkills === "function") {
         await this._cp_syncActiveFlagsToSkills();
       }
+    });
+
+    // Allow comma decimal separator in numeric inputs (convert to dot)
+    html.on("change", 'input[type="number"]', (ev) => {
+      const el = ev.currentTarget;
+      if (typeof el.value === "string" && el.value.includes(",")) {
+        el.value = el.value.replace(",", ".");
+      }
+    });
+
+    // Ammo Blast Multipliers
+    html.on("change", "input.ammo-blast-mult", async (ev) => {
+      if (this.item.type !== "ammo") return;
+
+      ev.preventDefault();
+      ev.stopPropagation();
+
+      const el = ev.currentTarget;
+      const idx = Number(el.dataset.index);
+      if (!Number.isFinite(idx)) return;
+
+      const raw = String(el.value ?? "").replace(",", ".");
+      const val = Number(raw);
+
+      const zones = Math.max(1, Math.min(10, Number(this.item.system?.blastZones ?? 4)));
+
+      const defaultMult = (i) => 1 / (2 ** (i + 1));
+
+      let cur = this.item.system?.blastMultipliers;
+      if (!Array.isArray(cur)) {
+        cur = Array.from({ length: zones }, (_, i) => defaultMult(i));
+      } else {
+        cur = cur.slice(0, zones);
+        while (cur.length < zones) cur.push(defaultMult(cur.length));
+      }
+
+      cur[idx] = Number.isFinite(val) ? val : cur[idx];
+
+      await this.item.update({ "system.blastMultipliers": cur }, { render: false });
+      this.render(false);
     });
 
     html.on("mousedown", "input[name='cw-skill-search'], input[name='cw-chip-skill-search']", ev => {
@@ -1141,6 +1134,51 @@ async _prepareCyberware(sheet) {
       }
 
       await this._cwSet("system.CyberWorkType.Types", next);
+    });
+
+    html.on("click", ".ammo-ms-trigger", ev => {
+      if (this.item.type !== "ammo") return;
+      ev.preventDefault();
+      const root = ev.currentTarget.closest(".ammo-ms");
+      if (!root) return;
+      root.classList.toggle("open");
+    });
+
+    html.on("click", ev => {
+      if (this.item.type !== "ammo") return;
+      if ($(ev.target).closest(".ammo-ms").length) return;
+      html.find(".ammo-ms.open").removeClass("open");
+    });
+
+    html.on("change", ".ammo-ms-menu input[type=checkbox]", async ev => {
+      if (this.item.type !== "ammo") return;
+      const root = ev.currentTarget.closest(".ammo-ms");
+      if (!root) return;
+
+      const menu = root.querySelector(".ammo-ms-menu");
+      let next = Array.from(menu.querySelectorAll("input[type=checkbox]:checked")).map(i => i.value);
+
+      const changed = ev.currentTarget.value;
+      const turnedOn = ev.currentTarget.checked;
+
+      if (changed === "None" && turnedOn) {
+        next = ["None"];
+        menu.querySelectorAll("input[type=checkbox]").forEach(i => {
+          i.checked = (i.value === "None");
+        });
+      } else if (turnedOn) {
+        const none = menu.querySelector('input[value="None"]');
+        if (none) none.checked = false;
+        next = next.filter(v => v !== "None");
+      }
+
+      if (!next.length) {
+        next = ["None"];
+        const none = menu.querySelector('input[value="None"]');
+        if (none) none.checked = true;
+      }
+
+      await this._ammoSet("system.effectTypes", next);
     });
 
     // Auto-refresh on related Item updates (keeps module/implant sheets in sync)

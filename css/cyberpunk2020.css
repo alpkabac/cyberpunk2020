@@ -1348,6 +1348,93 @@ div.statderive .value.rightborder {
   max-width: min(820px, calc(100vw - 60px));
 }
 
+/* Ammo Effects: dropdown-multiselect */
+.cyberpunk .field .ammo-ms {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Item sheets: slightly wider number inputs */
+.cyberpunk.sheet.item .field > input[type="number"]:not(.smallnumber) {
+  width: 3.6em;
+  min-width: 3.6em;
+  padding: 0 4px;
+  text-align: center;
+}
+
+.cyberpunk.sheet.item .field-list {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+/* Important: allow grid children to shrink instead of pushing the column */
+.cyberpunk.sheet.item .field-list .field {
+  min-width: 0;
+}
+.cyberpunk.sheet.item .field-list .field label {
+  min-width: 0;
+}
+
+/* Trigger button */
+.cyberpunk .field .ammo-ms-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 0 6px;
+  line-height: 24px;
+  border: 1px solid var(--color-border, #444);
+  background: var(--color-bg, #111);
+  color: inherit;
+  cursor: pointer;
+}
+.cyberpunk .field .ammo-ms-trigger:focus {
+  outline: 1px solid var(--color-accent, #999);
+}
+.cyberpunk .field .ammo-ms-labels {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cyberpunk .field .ammo-ms-caret {
+  flex: 0 0 auto;
+  margin-left: 8px;
+}
+
+/* Drop-down menu */
+.cyberpunk .field .ammo-ms-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 2px);
+  display: none;
+  z-index: 1000;
+  border: 1px solid var(--color-border, #444);
+  background: var(--color-bg, #111);
+  padding: 6px;
+  max-height: 240px;
+  overflow: auto;
+  box-shadow: 0 4px 12px rgba(0,0,0,.35);
+}
+.cyberpunk .field .ammo-ms.open .ammo-ms-menu {
+  display: block;
+}
+.cyberpunk .field .ammo-ms-opt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+}
+.cyberpunk .field .ammo-ms-opt input {
+  margin: 0;
+}
+
 #weapon-modifier .window-content {
   height: auto !important;
   max-height: calc(100vh - 160px) !important;

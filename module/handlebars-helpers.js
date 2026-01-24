@@ -34,6 +34,14 @@ export function registerHandlebarsHelpers() {
     const types = Array.isArray(cwt?.Types) ? cwt.Types : [];
     return types.includes(type) || cwt?.Type === type;
     });
+    Handlebars.registerHelper("inc", function (v) {
+        return Number(v) + 1;
+    });
+    // Ammo effect selector (multi-select)
+    Handlebars.registerHelper('ammoHasEffect', function(sys, effect) {
+    const list = Array.isArray(sys?.effectTypes) ? sys.effectTypes : (sys?.effectTypes ? [sys.effectTypes] : ["None"]);
+    return list.includes(effect);
+    });
     Handlebars.registerHelper('compare', function(x, operator, y) {
         switch (operator) {
             case "===":
