@@ -326,21 +326,21 @@ export class CyberpunkItem extends Item {
     let owner = this.actor;
     const system = this._getWeaponSystem();
 
+    if (owner === null) {
+      throw new Error("This item isn't owned by anyone.");
+    }
 
-    if (system.shotsLeft <= 0) {
+    const isRanged = this.isRanged();
+
+    if (isRanged && Number(system?.shotsLeft ?? 0) <= 0) {
       ui.notifications.warn(localize("NoAmmo"));
       return false;
     }
 
-    if (owner === null) {
-      throw new Error("This item isn't owned by anyone.");
-    }
-    let isRanged = this.isRanged();
-    if(!isRanged) {
+    if (!isRanged) {
       if (system.attackType === meleeAttackTypes.martial) {
         return this.__martialBonk(attackMods);
-      }
-      else {
+      } else {
         return this.__meleeBonk(attackMods);
       }
     }

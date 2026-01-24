@@ -76,6 +76,7 @@ export class CyberpunkItemSheet extends ItemSheet {
     const setIfMissing = (key, value) => {
       if (sys[key] === null || sys[key] === undefined) updates[`system.${key}`] = value;
     };
+    setIfMissing("quantity", 0);
 
     setIfMissing("armorMultSoft", 1);
     setIfMissing("armorMultHard", 1);
@@ -238,7 +239,8 @@ export class CyberpunkItemSheet extends ItemSheet {
     const ammoOwner = this.item?.parent;
 
     if (ammoOwner) {
-      const ammoItems = ammoOwner.itemTypes?.ammo ?? ammoOwner.items.filter(i => i.type === "ammo");
+      const ammoItemsRaw = ammoOwner.itemTypes?.ammo ?? ammoOwner.items.filter(i => i.type === "ammo");
+      const ammoItems = ammoItemsRaw.filter(a => a.system?.equipped !== false);
       sheet.ammoChoices = [...ammoItems]
         .sort((a, b) => String(a.name).localeCompare(String(b.name)))
         .map(a => {
@@ -443,7 +445,8 @@ async _prepareCyberware(sheet) {
   const ammoOwner = this.actor;
 
   if (ammoOwner) {
-    const ammoItems = ammoOwner.itemTypes?.ammo ?? ammoOwner.items.filter(i => i.type === "ammo");
+    const ammoItemsRaw = ammoOwner.itemTypes?.ammo ?? ammoOwner.items.filter(i => i.type === "ammo");
+    const ammoItems = ammoItemsRaw.filter(a => a.system?.equipped !== false);
 
     sheet.cwAmmoChoices = [...ammoItems]
       .sort((a, b) => String(a.name).localeCompare(String(b.name)))

@@ -55,6 +55,8 @@
         </div>
     </div>
 
+    {{> (template "fields/number") label="AmmoQuantity" edit="system.quantity"}}
+
     {{> (template "fields/select")
         label="WeaponType"
         edit="system.weaponType"

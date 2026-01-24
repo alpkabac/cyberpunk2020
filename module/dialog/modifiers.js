@@ -106,58 +106,132 @@ import { defaultTargetLocations, fireModes } from "../lookups.js"
     activateListeners(html) {
       super.activateListeners(html);
 
-      // RELOAD
-      html.find(".reload").on("click", async (ev) => {
-        ev.preventDefault();
-        const weapon = this.options.weapon;
-        if (!weapon) return;
+    // RELOAD
+    html.find(".reload").on("click", async (ev) => {
+      ev.preventDefault();
 
-        const sys = weapon._getWeaponSystem?.() ?? weapon.system;
-        const shots = sys.shots ?? 0;
+      const weapon = this.options.weapon;
+      if (!weapon) return;
 
+      const sys = weapon._getWeaponSystem?.() ?? weapon.system ?? {};
+      const capacity = Number(sys.shots ?? 0);
+      const currentLeft = Number(sys.shotsLeft ?? 0);
+
+      const updateWeaponShotsLeft = async (value) => {
         if (weapon.__setWeaponField) {
-          await weapon.__setWeaponField("shotsLeft", shots);
-        } else {
-          await weapon.update({ "system.shotsLeft": shots });
+          await weapon.__setWeaponField("shotsLeft", value);
+          return;
         }
 
-        ui.notifications.info(localize("Reloaded"));
+        if (weapon.type === "cyberware") {
+          await weapon.update({ "system.CyberWorkType.Weapon.shotsLeft": value });
+        } else {
+          await weapon.update({ "system.shotsLeft": value });
+        }
+      };
 
-        // GM audit: show reload in chat for player-controlled characters (not NPCs)
+      // GM audit: show reload in chat for player-controlled characters (not NPCs)
+      const gmReloadAudit = async (shotsLeftAfter) => {
         try {
           const actor = weapon.actor;
 
           // Only players (non-GM) and only Characters (not NPC)
           if (actor && actor.type !== "npc" && !game.user.isGM) {
             const gmRecipients = ChatMessage.getWhisperRecipients("GM")?.map(u => u.id) ?? [];
+            if (!gmRecipients.length) return;
 
-            if (gmRecipients.length > 0) {
-              const shotsText = `${shots}/${shots}`;
+            const shotsText = `${shotsLeftAfter}/${capacity}`;
 
-              await ChatMessage.create({
-                type: CONST.CHAT_MESSAGE_TYPES.OTHER,
-                speaker: ChatMessage.getSpeaker({ actor }),
-                whisper: gmRecipients,
-                content: localizeParam("Chat.Reload", {
-                  actor: actor.name,
-                  weapon: weapon.name,
-                  shots: shotsText
-                })
-              });
-            }
+            await ChatMessage.create({
+              type: CONST.CHAT_MESSAGE_TYPES.OTHER,
+              speaker: ChatMessage.getSpeaker({ actor }),
+              whisper: gmRecipients,
+              content: localizeParam("Chat.Reload", {
+                actor: actor.name,
+                weapon: weapon.name,
+                shots: shotsText
+              })
+            });
           }
         } catch (err) {
           console.warn("Cyberpunk2020 | reload audit message failed", err);
         }
+      };
 
+      const applyLocalState = (shotsLeftAfter) => {
         if (weapon.type === "weapon") {
-          this.options.weapon.system.shotsLeft = shots;
+          this.options.weapon.system.shotsLeft = shotsLeftAfter;
         } else if (weapon.type === "cyberware" && weapon.system?.CyberWorkType?.Weapon) {
-          this.options.weapon.system.CyberWorkType.Weapon.shotsLeft = shots;
+          this.options.weapon.system.CyberWorkType.Weapon.shotsLeft = shotsLeftAfter;
         }
+        html.find('input.number[readonly]').val(shotsLeftAfter);
+      };
 
-        html.find('input.number[readonly]').val(shots);
-      });
+      // If the player has not selected ammunition for the weapon -> reload as before (infinite)
+      const ammoItemId = String(sys.ammoItemId ?? "");
+      if (!ammoItemId) {
+        await updateWeaponShotsLeft(capacity);
+        ui.notifications.info(localize("Reloaded"));
+        await gmReloadAudit(capacity);
+        applyLocalState(capacity);
+        return;
+      }
+
+      // If cartridges are selected -> we write off the quantity from Ammo
+      const actor = weapon.actor;
+      const ammoItem = actor?.items?.get(ammoItemId);
+
+      if (!ammoItem || ammoItem.type !== "ammo") {
+        ui.notifications.warn(localize("AmmoItemNotFoundReloadedLegacy"));
+        await updateWeaponShotsLeft(capacity);
+        ui.notifications.info(localize("Reloaded"));
+        await gmReloadAudit(capacity);
+        applyLocalState(capacity);
+        return;
+      }
+
+      const ammoQty = Number(ammoItem.system?.quantity ?? 0);
+
+      if (!Number.isFinite(ammoQty) || ammoQty <= 0) {
+        ui.notifications.warn(localize("NotEnoughAmmoToReload"));
+        return;
+      }
+
+      if (!Number.isFinite(capacity) || capacity <= 0) {
+        ui.notifications.warn("This weapon cannot be reloaded.");
+        return;
+      }
+
+      const reloadByMagazines = !!game.settings.get("cyberpunk2020", "reloadByMagazines");
+
+      let ammoToLoad = 0;
+      let shotsLeftAfter = currentLeft;
+
+      if (reloadByMagazines) {
+        ammoToLoad = Math.min(capacity, ammoQty);
+        shotsLeftAfter = Math.min(capacity, ammoToLoad);
+      } else {
+        const missing = Math.max(0, capacity - currentLeft);
+        ammoToLoad = Math.min(missing, ammoQty);
+        shotsLeftAfter = Math.min(capacity, currentLeft + ammoToLoad);
+      }
+
+      if (ammoToLoad <= 0) {
+        ui.notifications.warn(localize("NotEnoughAmmoToReload"));
+        return;
+      }
+
+      await ammoItem.update(
+        { "system.quantity": Math.max(0, ammoQty - ammoToLoad) },
+        { render: false }
+      );
+
+      await updateWeaponShotsLeft(shotsLeftAfter);
+
+      ui.notifications.info(localize("Reloaded"));
+      await gmReloadAudit(shotsLeftAfter);
+      applyLocalState(shotsLeftAfter);
+    });
 
       // Advantage/Disadvantage
       html.find('input.adv, input.dis').on("change", ev => {

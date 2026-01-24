@@ -668,5 +668,10 @@
     "CYBERPUNK.AmmoSpreadDamageLong": "Урон (Long)",
     "CYBERPUNK.AmmoSpreadMode": "Режим Целей",
     "CYBERPUNK.AmmoSpreadModeSingle": "Одна",
-    "CYBERPUNK.AmmoSpreadModeSpread": "Область"
+    "CYBERPUNK.AmmoSpreadModeSpread": "Область",
+
+    "SETTINGS.ReloadByMagazines": "Перезаряжать по магазинам",
+    "SETTINGS.ReloadByMagazinesHint": "Если включено — перезарядка всегда списывает полный магазин (вместимость оружия). Если выключено — списываются только недостающие патроны.",
+    "CYBERPUNK.NotEnoughAmmoToReload": "Недостаточно патронов для перезарядки.",
+    "CYBERPUNK.AmmoItemNotFoundReloadedLegacy": "Патроны не найдены. Перезарядка выполнена без учёта БК."
 }

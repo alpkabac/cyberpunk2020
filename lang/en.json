@@ -667,5 +667,10 @@
     "CYBERPUNK.AmmoSpreadDamageLong": "Damage (Long)",
     "CYBERPUNK.AmmoSpreadMode": "Targets Mode",
     "CYBERPUNK.AmmoSpreadModeSingle": "Single",
-    "CYBERPUNK.AmmoSpreadModeSpread": "Spread"
+    "CYBERPUNK.AmmoSpreadModeSpread": "Spread",
+
+    "SETTINGS.ReloadByMagazines": "Reload by magazines",
+    "SETTINGS.ReloadByMagazinesHint": "If enabled, reloading always consumes a full magazine (weapon capacity). If disabled, only missing rounds are consumed.",
+    "CYBERPUNK.NotEnoughAmmoToReload": "Not enough ammo to reload.",
+    "CYBERPUNK.AmmoItemNotFoundReloadedLegacy": "Ammo item not found. Reloaded without ammo tracking."
 }

@@ -37,4 +37,14 @@ export function registerSystemSettings() {
     type: Boolean,
     default: false
   });
+
+  // --- Optional rules: Reload ---
+  game.settings.register("cyberpunk2020", "reloadByMagazines", {
+    name: "SETTINGS.ReloadByMagazines",
+    hint: "SETTINGS.ReloadByMagazinesHint",
+    scope: "world",
+    config: true,
+    type: Boolean,
+    default: false
+  });
 }
