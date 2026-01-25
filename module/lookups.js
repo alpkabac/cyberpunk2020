@@ -120,81 +120,219 @@ export let fireModes = {
 }
 
 export let martialActions = {
-    dodge: "Dodge",
-    blockParry: "BlockParry",
-    strike: "Strike",
-    kick: "Kick",
-    disarm: "Disarm",
-    sweepTrip: "SweepTrip",
-    grapple: "Grapple",
-    hold: "Hold",
-    choke: "Choke",
-    throw: "Throw",
-    escape: "Escape"
+  dodge: "Dodge",
+  blockParry: "BlockParry",
+
+  // FNFF2 defensive variants
+  allOutParry: "AllOutParry",
+  allOutDodge: "AllOutDodge",
+
+  // Attacks
+  strike: "Strike",
+  punch: "Punch",
+  kick: "Kick",
+  disarm: "Disarm",
+  sweepTrip: "SweepTrip",
+  ram: "Ram",
+  jumpKick: "JumpKick",
+  cast: "Cast",
+
+  // Grapple chain
+  grapple: "Grapple",
+  hold: "Hold",
+  choke: "Choke",
+  throw: "Throw",
+  escape: "Escape"
+};
+
+export const MARTIAL_ART_ID_BY_KEY = {
+  "Martial Arts: Aikido": "oeXfrhKtdtuxn5dx",
+  "Martial Arts: AnimalKungFu": "x5mxWMFyRWHg5lEV",
+  "Martial Arts: ArasakaTe": "nBVSZDIj1QOmd3nL",
+  "Martial Arts: Boxing": "g75H0sMFUSaRIXfe",
+  "Martial Arts: Capoeira": "hJsbE1MGbFpY4lyi",
+  "Martial Arts: ChoiLiFut": "4DcaO3UAAv2wJE50",
+  "Martial Arts: GunFu": "tdIiYYtLLF3HjO8Y",
+  "Martial Arts: JeetKunDo": "abOBXqkPPrGfG3vs",
+  "Martial Arts: Judo": "U7lhKboDQnnytPIe",
+  "Martial Arts: Jujitsu": "i5D9nmQQf7bLTjgv",
+  "Martial Arts: Karate": "JtA82aiEfaiKgkt4",
+  "Martial Arts: Koppo": "fEBnTz80vz4hwuhd",
+  "Martial Arts: Ninjutsu": "dDLyPjr39EQY6UwZ",
+  "Martial Arts: PanzerFaust": "ONsXdXJVyBYGYgjH",
+  "Martial Arts: Sambo": "sj9crrcjhlkhWIk9",
+  "Martial Arts: Savate": "ZCnRa590mHEV6UBX",
+  "Martial Arts: Sumo": "ZrVsKBYGxY56jnMb",
+  "Martial Arts: TaeKwonDo": "E8XJt0vAzvlOspLU",
+  "Martial Arts: TaiChiChuan": "3MsLf8ixMyBGG7je",
+  "Martial Arts: Te": "v0W0oqDBHY2yqqt3",
+  "Martial Arts: ThaiKickBoxing": "jgvFY5BWVsanP0md",
+  "Martial Arts: Thamoc": "ZyMZ6C7r9V2TXmV9",
+  "Martial Arts: WingChung": "WsPa5ZiNIjLhCIxH",
+  "Martial Arts: Wrestling": "GZtVOGgtxv8CCuuz"
+};
+
+export const MARTIAL_ART_KEY_BY_ID = Object.fromEntries(
+  Object.entries(MARTIAL_ART_ID_BY_KEY).map(([k, id]) => [id, k])
+);
+
+export const FNFF2_ONLY_MARTIAL_ART_KEYS = new Set([
+  "Martial Arts: ArasakaTe",
+  "Martial Arts: GunFu",
+  "Martial Arts: JeetKunDo",
+  "Martial Arts: Jujitsu",
+  "Martial Arts: Koppo",
+  "Martial Arts: Ninjutsu",
+  "Martial Arts: PanzerFaust",
+  "Martial Arts: Sambo",
+  "Martial Arts: Sumo",
+  "Martial Arts: TaiChiChuan",
+  "Martial Arts: Te",
+  "Martial Arts: Thamoc",
+  "Martial Arts: WingChung"
+]);
+
+export const FNFF2_ONLY_MARTIAL_ART_IDS = new Set(
+  [...FNFF2_ONLY_MARTIAL_ART_KEYS]
+    .map(k => MARTIAL_ART_ID_BY_KEY[k])
+    .filter(Boolean)
+);
+
+export function isFnff2OnlyMartialArtKey(key) {
+  return FNFF2_ONLY_MARTIAL_ART_KEYS.has(key);
 }
-// lookups.js
-export const martialActionBonuses = {
-  "Martial Arts: Karate": {
-    Strike: 2,
-    Kick: 2,
-    BlockParry: 2
-  },
-  "Martial Arts: Judo": {
-    Throw: 3,
-    Hold: 3,
-    Escape: 3
-  },
-  "Martial Arts: Boxing": {
-    Strike: 3,
-    BlockParry: 3,
-    Dodge: 1,
-    Grapple: 2
-  },
-  "Martial Arts: ThaiKickBoxing": {
-    Strike: 3,
-    Kick: 3
-  },
-  "Martial Arts: ChoiLiFut": {
-    Strike: 2,
-    Kick: 2,
-    BlockParry: 2
-  },
-  "Martial Arts: Aikido": {
-    BlockParry: 4,
-    Throw: 3,
-    Hold: 3,
-    Escape: 3,
-    Choke: 1
-  },
-  "Martial Arts: AnimalKungFu": {
-    Strike: 2,
-    Kick: 2,
-    Grapple: 2
-  },
-  "Martial Arts: TaeKwonDo": {
-    Strike: 3,
-    Kick: 3,
-    BlockParry: 1
-  },
-  "Martial Arts: Savate": {
-    Strike: 3,
-    Kick: 4
-  },
-  "Martial Arts: Wrestling": {
-    Grapple: 3,
-    Hold: 4,
-    Choke: 3
-  },
-  "Martial Arts: Capoeira": {
-    Strike: 1,
-    Kick: 2,
-    Dodge: 2,
-    SweepTrip: 3
-  },
+
+export function isFnff2OnlyMartialArtId(id) {
+  return FNFF2_ONLY_MARTIAL_ART_IDS.has(id);
+}
+
+export function isFnff2Enabled() {
+  return Boolean(game?.settings?.get("cyberpunk2020", "fnff2Enabled"));
+}
+
+// CORE set rules martial action bonuses
+export const martialActionBonusesCore = {
+  "Martial Arts: Karate": { Strike: 2, Kick: 2, BlockParry: 2 },
+  "Martial Arts: Judo": { Throw: 3, Hold: 3, Escape: 3 },
+  "Martial Arts: Boxing": { Strike: 3, BlockParry: 3, Dodge: 1, Grapple: 2 },
+  "Martial Arts: ThaiKickBoxing": { Strike: 3, Kick: 3, BlockParry: 2, Dodge: 1, Grapple: 1 },
+  "Martial Arts: ChoiLiFut": { Strike: 2, Kick: 2, BlockParry: 2, Dodge: 1, Throw: 1 },
+  "Martial Arts: Aikido": { BlockParry: 4, Dodge: 3, Throw: 3, Hold: 3, Escape: 3 },
+  "Martial Arts: AnimalKungFu": { Strike: 2, Kick: 2, BlockParry: 2, SweepTrip: 1 },
+  "Martial Arts: TaeKwonDo": { Strike: 3, Kick: 3, BlockParry: 2, Dodge: 1, SweepTrip: 2 },
+  "Martial Arts: Savate": { Kick: 4, BlockParry: 1, Dodge: 1 },
+  "Martial Arts: Wrestling": { Throw: 3, Hold: 4, Escape: 4, Choke: 2, SweepTrip: 2, Grapple: 4 },
+  "Martial Arts: Capoeira": { Strike: 1, Kick: 2, Dodge: 2, SweepTrip: 3 },
   "Brawling": {}
 };
+
+// FNFF2 set rules martial action bonuses
+export const martialActionBonusesFNFF2 = {
+  "Martial Arts: Aikido": {
+    Disarm: 3, SweepTrip: 3, BlockParry: 4, Dodge: 3, Grapple: 2, Throw: 3, Hold: 2, Choke: 1, Escape: 2
+  },
+  "Martial Arts: AnimalKungFu": {
+    Strike: 2, Punch: 2, Kick: 2, Disarm: 1, SweepTrip: 1, BlockParry: 2
+  },
+  "Martial Arts: ArasakaTe": {
+    Strike: 1, Punch: 1, Kick: 1, BlockParry: 1, Dodge: 1, Grapple: 1, Throw: 1, Hold: 1, Choke: 2, Escape: 1
+  },
+  "Martial Arts: Boxing": {
+    Strike: 1, Punch: 2, Kick: 3, SweepTrip: 3, Dodge: 1, Throw: 1, Escape: 2
+  },
+  "Martial Arts: Capoeira": {
+    Punch: 1, Kick: 2, SweepTrip: 3, BlockParry: 2, Dodge: 2
+  },
+  "Martial Arts: ChoiLiFut": {
+    Strike: 2, Punch: 2, Kick: 2, Disarm: 1, SweepTrip: 2, BlockParry: 2, Dodge: 1, Grapple: 1, Throw: 1
+  },
+  "Martial Arts: GunFu": {
+    SweepTrip: 3, BlockParry: 2, Dodge: 4, Grapple: 4, Escape: 2
+  },
+  "Martial Arts: JeetKunDo": {
+    Strike: 3, Punch: 3, Kick: 2, Disarm: 1, SweepTrip: 1, BlockParry: 2
+  },
+  "Martial Arts: Judo": {
+    SweepTrip: 2, Dodge: 1, Grapple: 2, Throw: 3, Hold: 2, Choke: 1, Escape: 2
+  },
+  "Martial Arts: Jujitsu": {
+    SweepTrip: 2, BlockParry: 3, Dodge: 2, Throw: 2, Hold: 4, Choke: 3
+  },
+  "Martial Arts: Karate": {
+    Punch: 2, Kick: 2, Disarm: 1, BlockParry: 2
+  },
+  "Martial Arts: Koppo": {
+    Punch: 4, Kick: 2, SweepTrip: 3, BlockParry: 3, Grapple: 2, Hold: 2, Choke: 1, Escape: 2
+  },
+  "Martial Arts: Ninjutsu": {
+    Strike: 3, Punch: 3, Kick: 1, Disarm: 2, SweepTrip: 2, BlockParry: 1, Dodge: 2, Grapple: 1, Throw: 1, Hold: 1, Choke: 1, Escape: 1
+  },
+  "Martial Arts: PanzerFaust": {
+    Punch: 3, Kick: 3, SweepTrip: 1, Dodge: 3, Grapple: 3, Throw: 1, Escape: 4, Ram: 3
+  },
+  "Martial Arts: Sambo": {
+    Strike: 2, Punch: 2, Kick: 2, Disarm: 2, SweepTrip: 2, Grapple: 2, Throw: 3, Hold: 2, Escape: 2
+  },
+  "Martial Arts: Savate": {
+    Kick: 4, BlockParry: 1, Dodge: 1
+  },
+  "Martial Arts: Sumo": {
+    Punch: 2, SweepTrip: 2, Dodge: 2, Grapple: 2, Throw: 3, Hold: 1, Escape: 1, Ram: 4
+  },
+  "Martial Arts: TaeKwonDo": {
+    Punch: 3, Kick: 3, SweepTrip: 2, BlockParry: 2, Dodge: 1
+  },
+  "Martial Arts: TaiChiChuan": {
+    Strike: 2, Punch: 2, Kick: 1, Disarm: 1, BlockParry: 2, Dodge: 1, Grapple: 1
+  },
+  "Martial Arts: Te": {
+    Strike: 2, Punch: 2, Kick: 1, Disarm: 1, SweepTrip: 2, Dodge: 1
+  },
+  "Martial Arts: ThaiKickBoxing": {
+    Punch: 3, Kick: 4, BlockParry: 2, Grapple: 1
+  },
+  "Martial Arts: Thamoc": {
+    Strike: 1, Disarm: 4, SweepTrip: 1, BlockParry: 1, Dodge: 2, Grapple: 1, Escape: 2
+  },
+  "Martial Arts: WingChung": {
+    Punch: 4, Kick: 2, SweepTrip: 1, BlockParry: 3, Dodge: 1, Hold: 2
+  },
+  "Martial Arts: Wrestling": {
+    SweepTrip: 2, Grapple: 4, Throw: 3, Hold: 4, Choke: 2, Escape: 4
+  },
+
+  "Brawling": {}
+};
+
+export const fnff2DamageBonusSymbols = {
+  Strike: "*",
+  Punch: "*",
+  Kick: "*",
+  Disarm: "%",
+  SweepTrip: "$",
+  BlockParry: "@",
+  Dodge: "@",
+  Grapple: "%",
+  Throw: "*",
+  Hold: "$",
+  Choke: "*",
+  Escape: "@",
+  Ram: "*"
+};
+
+export function getFnff2DamageBonusSymbol(actionKey) {
+  return fnff2DamageBonusSymbols[actionKey] ?? "*";
+}
+
 export function getMartialActionBonus(martialKey, actionKey) {
-  const style = martialActionBonuses[martialKey] || {};
+  const fnff2 = isFnff2Enabled();
+
+  if (!fnff2 && FNFF2_ONLY_MARTIAL_ART_KEYS.has(martialKey)) {
+    return 0;
+  }
+
+  const table = fnff2 ? martialActionBonusesFNFF2 : martialActionBonusesCore;
+  const style = table[martialKey] || {};
   return Number(style[actionKey] || 0);
 }
 
@@ -317,25 +455,35 @@ export function martialOptions(actor) {
             localKey: "Action",
             dataPath: "action",
             defaultValue: "Strike",
-            choices: [
-                {groupName: "Defensive", choices: [
-                    "Dodge",
-                    "BlockParry"
+            choices: (() => {
+              const base = [
+                { groupName: "Defensive", choices: [
+                  "Dodge",
+                  "BlockParry"
                 ]},
-                {groupName: "Attacks", choices: [
-                    "Strike",
-                    "Kick",
-                    "Disarm",
-                    "SweepTrip"
+                { groupName: "Attacks", choices: [
+                  "Strike",
+                  "Kick",
+                  "Disarm",
+                  "SweepTrip"
                 ]},
-                {groupName: "Grapple", choices: [
-                    "Grapple",
-                    "Hold",
-                    "Choke",
-                    "Throw",
-                    "Escape"
+                { groupName: "Grapple", choices: [
+                  "Grapple",
+                  "Hold",
+                  "Choke",
+                  "Throw",
+                  "Escape"
                 ]}
-            ]
+              ];
+
+              if (isFnff2Enabled()) {
+                base[0].choices.unshift("AllOutParry", "AllOutDodge");
+                base[1].choices.splice(1, 0, "Punch");
+                base[1].choices.push("Ram", "JumpKick", "Cast");
+              }
+
+              return base;
+            })(),
         },
         {
             localKey: "MartialArt",
@@ -343,10 +491,9 @@ export function martialOptions(actor) {
             choices: [
             { value: "Brawling", localKey: "SkillBrawling" },
 
-            ...(actor.trainedMartials().map(name => {
-                const key = getMartialKeyByName(name);
+              ...(actor.trainedMartials().map(key => {
                 return { value: key, localKey: "Skill" + key };
-            }))
+              }))
             ]
         },
         {

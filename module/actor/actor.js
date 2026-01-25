@@ -1,7 +1,7 @@
 import { makeD10Roll, Multiroll } from "../dice.js";
 import { isFumbleRoll, buildSkillFumbleData } from "../utils.js";
 import { SortOrders, sortSkills } from "./skill-sort.js";
-import { btmFromBT } from "../lookups.js";
+import { btmFromBT, MARTIAL_ART_KEY_BY_ID, MARTIAL_ART_ID_BY_KEY, FNFF2_ONLY_MARTIAL_ART_IDS, isFnff2Enabled } from "../lookups.js";
 import { properCase, localize, getDefaultSkills, cwHasType, cwIsEnabled } from "../utils.js"
 
 /**
@@ -510,10 +510,13 @@ export class CyberpunkActor extends Actor {
   }
 
   trainedMartials() {
+    const fnff2 = isFnff2Enabled();
+
     return this.itemTypes.skill
-      .filter(skill => skill.name.startsWith(localize("Martial")))
-      .filter(martial => martial.system.level > 0)
-      .map(martial => martial.name);
+      .filter(skill => (MARTIAL_ART_KEY_BY_ID[skill._id] || null))
+      .filter(skill => (skill.system?.level ?? 0) > 0)
+      .filter(skill => fnff2 || !FNFF2_ONLY_MARTIAL_ART_IDS.has(skill._id))
+      .map(skill => MARTIAL_ART_KEY_BY_ID[skill._id]);
   }
 
   // TODO: Make this doable with just skill name
@@ -528,9 +531,17 @@ export class CyberpunkActor extends Actor {
   }
 
   getSkillVal(skillName) {
-    console.log("SkillName:", skillName);
-    console.log("SkillName_localize:", localize("Skill"+skillName));
-    console.log("lang:", game.i18n);
+    const martialId = MARTIAL_ART_ID_BY_KEY?.[skillName];
+    if (martialId) {
+      const byId = this.itemTypes.skill.find(s => s._id === martialId);
+      return byId ? CyberpunkActor.realSkillValue(byId) : 0;
+    }
+
+    const normalize = (s) => String(s ?? "")
+      .replace(/\s*~\s*/g, "")
+      .replace(/\s*\(\d+\)\s*$/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
 
     const nameLoc = localize("Skill" + skillName);
     const prefixLoc = localize("SkillMartialArts");
@@ -538,19 +549,13 @@ export class CyberpunkActor extends Actor {
     const shortName = nameLoc.includes("Skill") ? null : nameLoc;
     const candidates = new Set();
 
-    if (shortName) candidates.add(shortName);
+    if (shortName) candidates.add(normalize(shortName));
+    if (shortName && !prefixLoc.includes("Skill")) candidates.add(normalize(`${prefixLoc}: ${shortName}`));
+    candidates.add(normalize(skillName));
 
-    if (shortName && !prefixLoc.includes("Skill")) {
-      candidates.add(`${prefixLoc}: ${shortName}`);
-    }
-
-    candidates.add(skillName);
-
-    const skillItem = this.itemTypes.skill.find(s =>
-      candidates.has(s.name) || (shortName && s.name.endsWith(`: ${shortName}`))
-    );
-
+    const skillItem = this.itemTypes.skill.find(s => candidates.has(normalize(s.name)));
     if (!skillItem) return 0;
+
     return CyberpunkActor.realSkillValue(skillItem);
   }
 

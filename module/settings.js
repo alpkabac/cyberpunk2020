@@ -47,4 +47,14 @@ export function registerSystemSettings() {
     type: Boolean,
     default: false
   });
+
+  // --- Optional rules: Friday Night Fistfight 2 ---
+  game.settings.register("cyberpunk2020", "fnff2Enabled", {
+    name: "SETTINGS.FNFF2Enabled",
+    hint: "SETTINGS.FNFF2EnabledHint",
+    scope: "world",
+    config: true,
+    type: Boolean,
+    default: false
+  });
 }

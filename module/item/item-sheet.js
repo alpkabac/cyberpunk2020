@@ -255,7 +255,7 @@ export class CyberpunkItemSheet extends ItemSheet {
     const wType = this.item.system.weaponType || weaponTypes.pistol;
     const baseKeys = attackSkills[wType] || [];
     const includeMartials = (wType === weaponTypes.melee) && (this.item.system.attackType === meleeAttackTypes.martial);
-    const martialKeys = includeMartials ? (actor?.trainedMartials?.() || []).map(getMartialKeyByName) : [];
+    const martialKeys = includeMartials ? (actor?.trainedMartials?.() || []) : [];
     sheet.attackSkills = [...baseKeys, ...martialKeys].map(k => localize("Skill"+k));
 
     // TODO: Be not so inefficient for this
@@ -460,7 +460,7 @@ async _prepareCyberware(sheet) {
   const actor = this.item?.parent;
   const baseKeys = attackSkills[cwW.weaponType || weaponTypes.pistol] || [];
   const includeMartials = isMelee && (cwW.attackType === meleeAttackTypes.martial);
-  const martialKeys = includeMartials ? (actor?.trainedMartials?.() || []).map(getMartialKeyByName) : [];
+  const martialKeys = includeMartials ? (actor?.trainedMartials?.() || []) : [];
   sheet.attackSkills = [...baseKeys, ...martialKeys].map(k => localize("Skill"+k));
   
   if (!sheet.attackSkills.length && this.actor) {

@@ -1,4 +1,4 @@
-import { weaponTypes, rangedAttackTypes, meleeAttackTypes, fireModes, rangedModifiers, ranges, rangeDCs, rangeResolve, strengthDamageBonus, getMartialActionBonus, martialActions } from "../lookups.js"
+import { weaponTypes, rangedAttackTypes, meleeAttackTypes, fireModes, rangedModifiers, ranges, rangeDCs, rangeResolve, strengthDamageBonus, getMartialActionBonus, martialActions, isFnff2Enabled, getFnff2DamageBonusSymbol, FNFF2_ONLY_MARTIAL_ART_IDS } from "../lookups.js"
 import { Multiroll, makeD10Roll } from "../dice.js"
 import { properCase, replaceIn, localize, localizeParam, rollLocation, cwHasType, cwIsEnabled, isFumbleRoll, buildRangedCombatFumbleData, buildSkillFumbleData, clamp} from "../utils.js";
 import { CyberpunkActor } from "../actor/actor.js";
@@ -44,6 +44,23 @@ export class CyberpunkItem extends Item {
       return `<a class="inline-roll inline-result cp-inline-roll roll-result roll ${cls}" data-roll="${json}">${v}</a>`;
     } catch (e) {
       return String(v);
+    }
+  }
+
+  /** @override */
+  async _preCreate(data, options, user) {
+    await super._preCreate(data, options, user);
+
+    try {
+      if (this.type === "skill") {
+        const id = data?._id || this._id;
+        if (id && FNFF2_ONLY_MARTIAL_ART_IDS.has(id) && !isFnff2Enabled()) {
+          ui?.notifications?.warn(game.i18n.localize("CYBERPUNK.FNFF2SkillDisabledWarn"));
+          throw new Error("FNFF2-only Martial Arts skill cannot be added while FNFF2 is disabled.");
+        }
+      }
+    } catch (e) {
+      throw e;
     }
   }
 
@@ -744,6 +761,34 @@ export class CyberpunkItem extends Item {
     // Additional modifier from the dialog
     const extraMod = Number(attackMods.extraMod || 0);
 
+    // FNFF2: Martial Damage Bonus rules
+    const fnff2 = isFnff2Enabled();
+
+    let martialDamageBonusValue = 0;
+
+    if (isMartial) {
+      if (!fnff2) {
+        martialDamageBonusValue = martialSkillLevel;
+      } else {
+        const symbol = getFnff2DamageBonusSymbol(action);
+
+        const isKeyVariant = actionBonus > 0;
+
+        const levelForDamage =
+          (martialArt === "Martial Arts: PanzerFaust")
+            ? Math.floor(martialSkillLevel * 1.5)
+            : martialSkillLevel;
+
+        // * — damage bonus works (if Key Variant)
+        // $ — works only if Key Variant
+        // % / ‘@’ — do not give damage bonus from MA level
+        if ((symbol === "*" || symbol === "$") && isKeyVariant) {
+          martialDamageBonusValue = levelForDamage;
+        } else {
+          martialDamageBonusValue = 0;
+        }
+      }
+    }
     // Martial arts throw formula: reflex + skill level + special technique + action bonus + additional mod
     // If the reception is performed through a weapon item (including cyber weapons), we take its WA
     const sysForAcc = this._getWeaponSystem ? this._getWeaponSystem() : this.system;
@@ -796,8 +841,7 @@ export class CyberpunkItem extends Item {
       results.addRoll(loc.roll, { name: localize("Location"), flavor: loc.areaHit });
       const damageRoll = await new Roll(damageFormula, {
         strengthBonus: strengthDamageBonus(system.stats.bt.total),
-        // Martial arts get a damage bonus
-        martialDamageBonus: isMartial ? martialSkillLevel : 0
+        martialDamageBonus: martialDamageBonusValue
       }).evaluate();
 
       // CP2020: any fractional damage is rounded down
