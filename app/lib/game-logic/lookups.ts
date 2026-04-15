@@ -324,6 +324,55 @@ export const meleeFumbleTable: Record<number, string> = {
   6: 'Hit friend! Roll normal damage to nearest ally',
 };
 
+/**
+ * FNFF Reflex (Combat) fumble table — roll 1d10 after a natural 1 on the attack d10.
+ * Reliability: roll 1d10; fail if result ≤ threshold (VR 3 / ST 5 / UR 8), same as Foundry.
+ */
+export type ReflexCombatFumbleRow = {
+  min: number;
+  max: number;
+  description: string;
+  needsReliability?: 'discharge' | 'jam';
+  needsLocation?: boolean;
+};
+
+export const reflexCombatFumbleRows: ReflexCombatFumbleRow[] = [
+  { min: 1, max: 4, description: 'No extra weapon effect. You just screw up.' },
+  { min: 5, max: 5, description: 'Drop your weapon.' },
+  {
+    min: 6,
+    max: 6,
+    description: 'Weapon discharges or strikes something harmless — make reliability roll.',
+    needsReliability: 'discharge',
+  },
+  {
+    min: 7,
+    max: 7,
+    description: 'Weapon jams or embeds — make reliability roll.',
+    needsReliability: 'jam',
+  },
+  {
+    min: 8,
+    max: 8,
+    description: 'You wound yourself. Roll hit location and damage.',
+    needsLocation: true,
+  },
+  {
+    min: 9,
+    max: 10,
+    description: 'You wound a member of your party. Roll location and damage for nearest ally.',
+    needsLocation: true,
+  },
+];
+
+export function pickReflexCombatFumbleRow(d10: number): ReflexCombatFumbleRow {
+  const n = Math.min(10, Math.max(1, Math.floor(d10)));
+  for (const row of reflexCombatFumbleRows) {
+    if (n >= row.min && n <= row.max) return row;
+  }
+  return reflexCombatFumbleRows[reflexCombatFumbleRows.length - 1];
+}
+
 // ============================================================================
 // Skill Categories and Master Skill List
 // ============================================================================

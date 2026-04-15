@@ -10,6 +10,7 @@ import {
   Cyberware as DataCyberware,
   Vehicle as DataVehicle,
   Program as DataProgram,
+  resolveCyberwareHumanityLoss,
 } from '@/lib/data/game-data';
 import {
   Item,
@@ -130,7 +131,7 @@ function convertCyberware(src: DataCyberware): Cyberware {
     source: src.source || 'Reference',
     surgCode: src.surg_code || '',
     humanityCost: src.humanity_cost || '0',
-    humanityLoss: src.humanity_loss || 0,
+    humanityLoss: resolveCyberwareHumanityLoss(src.humanity_loss, src.humanity_cost || ''),
     cyberwareType: src.cyberware_type || '',
   };
 }
@@ -211,10 +212,16 @@ export function ItemBrowser({ characterId, onClose }: ItemBrowserProps) {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedType, setSelectedType] = useState<string>('all');
+  const [banner, setBanner] = useState<{ msg: string; kind: 'ok' | 'bad' } | null>(null);
 
   const addItem = useGameStore((state) => state.addItem);
   const deductMoney = useGameStore((state) => state.deductMoney);
   const character = useGameStore((state) => state.characters.byId[characterId]);
+
+  const showBanner = (msg: string, kind: 'ok' | 'bad') => {
+    setBanner({ msg, kind });
+    window.setTimeout(() => setBanner(null), 3500);
+  };
 
   useEffect(() => {
     if (searchQuery.length < 2) {
@@ -246,13 +253,29 @@ export function ItemBrowser({ characterId, onClose }: ItemBrowserProps) {
     const converted = convertSearchResult(result);
 
     if (purchase && character) {
-      if (character.eurobucks >= converted.cost) {
-        deductMoney(characterId, converted.cost);
-        addItem(characterId, converted);
+      if (converted.cost > 0 && character.eurobucks < converted.cost) {
+        const short = converted.cost - character.eurobucks;
+        showBanner(
+          `Not enough eurobucks — need €${converted.cost.toLocaleString()}, have €${character.eurobucks.toLocaleString()} (short €${short.toLocaleString()})`,
+          'bad',
+        );
+        return;
       }
-    } else {
+      if (converted.cost > 0) {
+        deductMoney(characterId, converted.cost);
+      }
       addItem(characterId, converted);
+      showBanner(
+        converted.cost > 0
+          ? `Purchased: ${converted.name} (−€${converted.cost.toLocaleString()})`
+          : `Added: ${converted.name} (€0)`,
+        'ok',
+      );
+      return;
     }
+
+    addItem(characterId, converted);
+    showBanner(`Added to inventory: ${converted.name} (no charge)`, 'ok');
   };
 
   const canAfford = (cost: number) => {
@@ -262,12 +285,36 @@ export function ItemBrowser({ characterId, onClose }: ItemBrowserProps) {
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white border-4 border-black w-full max-w-4xl max-h-[80vh] flex flex-col">
-        <div className="border-b-4 border-black p-4 flex justify-between items-center">
-          <h2 className="text-2xl font-bold uppercase">Item Browser</h2>
-          <button onClick={onClose} className="text-3xl font-bold hover:text-red-600">
+        <div className="border-b-4 border-black p-4 flex justify-between items-center gap-4 flex-wrap">
+          <div>
+            <h2 className="text-2xl font-bold uppercase">Item Browser</h2>
+            {character != null && (
+              <p
+                className="text-sm font-mono mt-1 text-gray-700"
+                title="Current wallet balance. Purchase deducts from this."
+              >
+                Balance:{' '}
+                <span className="font-bold text-black">€{character.eurobucks.toLocaleString()}</span>
+              </p>
+            )}
+          </div>
+          <button onClick={onClose} className="text-3xl font-bold hover:text-red-600" type="button">
             ×
           </button>
         </div>
+
+        {banner && (
+          <div
+            className={`mx-4 mt-3 px-3 py-2 border-2 text-sm font-bold ${
+              banner.kind === 'ok'
+                ? 'bg-green-100 border-green-700 text-green-900'
+                : 'bg-red-100 border-red-700 text-red-900'
+            }`}
+            role="status"
+          >
+            {banner.msg}
+          </div>
+        )}
 
         <div className="border-b-2 border-black p-4 space-y-3">
           <input
@@ -315,6 +362,10 @@ export function ItemBrowser({ characterId, onClose }: ItemBrowserProps) {
                 const itemWeight = Number(raw.weight) || 0;
                 const itemFlavor = String(raw.flavor || raw.description || '');
                 const affordable = canAfford(itemCost);
+                const shortfall =
+                  character && itemCost > 0 && character.eurobucks < itemCost
+                    ? itemCost - character.eurobucks
+                    : 0;
 
                 const detailParts: string[] = [result.type.toUpperCase()];
                 if (result.type === 'weapon') {
@@ -343,9 +394,23 @@ export function ItemBrowser({ characterId, onClose }: ItemBrowserProps) {
                           <p className="text-xs text-gray-600">{detailParts.join(' • ')}</p>
                         </div>
                         <div className="text-right">
-                          <div className={`font-bold ${affordable ? '' : 'text-red-600'}`}>
+                          <div
+                            className={`font-bold ${affordable || itemCost === 0 ? '' : 'text-red-600'}`}
+                            title={
+                              itemCost === 0
+                                ? 'No cost listed'
+                                : affordable
+                                  ? 'You can afford this'
+                                  : `Need €${shortfall.toLocaleString()} more`
+                            }
+                          >
                             €{itemCost.toLocaleString()}
                           </div>
+                          {!affordable && itemCost > 0 && character && (
+                            <div className="text-xs text-red-600 font-bold" title="Not enough eurobucks">
+                              Short €{shortfall.toLocaleString()}
+                            </div>
+                          )}
                           {itemWeight > 0 && (
                             <div className="text-xs text-gray-600">{itemWeight}kg</div>
                           )}
@@ -358,15 +423,24 @@ export function ItemBrowser({ characterId, onClose }: ItemBrowserProps) {
 
                       <div className="flex gap-2 mt-2">
                         <button
+                          type="button"
                           onClick={() => handleAddItem(result, true)}
-                          disabled={!affordable}
                           className={`flex-1 px-4 py-1 border-2 border-black font-bold uppercase text-sm ${
-                            affordable
+                            affordable || itemCost === 0
                               ? 'bg-blue-500 hover:bg-blue-600 text-white'
-                              : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                              : 'bg-gray-200 text-red-700 hover:bg-red-100'
                           }`}
+                          title={
+                            affordable || itemCost === 0
+                              ? 'Buy and add to inventory'
+                              : 'Click to see why you cannot afford this'
+                          }
                         >
-                          {affordable ? `Purchase €${itemCost.toLocaleString()}` : 'Cannot Afford'}
+                          {itemCost === 0
+                            ? 'Add (€0)'
+                            : affordable
+                              ? `Purchase €${itemCost.toLocaleString()}`
+                              : `Cannot afford (short €${shortfall.toLocaleString()})`}
                         </button>
 
                         <button

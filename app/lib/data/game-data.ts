@@ -144,6 +144,48 @@ export interface Program {
  * Normalize Foundry VTT export format items into flat data-layer format.
  * Foundry items have nested { _id, name, data: { ... } } structure.
  */
+/**
+ * Foundry exports usually set humanityLoss to null and put dice in humanityCost ("2d6", "1d6/2").
+ * CP2020 rolls at install; for automation we use the average roll (rounded).
+ */
+export function estimateHumanityLossFromHumanityCost(humanityCost: string): number {
+  const s = humanityCost.trim().toLowerCase().replace(/\s/g, '');
+  if (!s || s === '0') return 0;
+
+  const divMatch = s.match(/^(\d+)d(\d+)([+-]\d+)?\/(\d+)$/);
+  if (divMatch) {
+    const count = parseInt(divMatch[1], 10);
+    const sides = parseInt(divMatch[2], 10);
+    const mod = divMatch[3] ? parseInt(divMatch[3], 10) : 0;
+    const div = parseInt(divMatch[4], 10);
+    const mean = count * ((sides + 1) / 2) + mod;
+    return Math.max(0, Math.round(mean / div));
+  }
+
+  const stdMatch = s.match(/^(\d+)d(\d+)([+-]\d+)?$/);
+  if (stdMatch) {
+    const count = parseInt(stdMatch[1], 10);
+    const sides = parseInt(stdMatch[2], 10);
+    const mod = stdMatch[3] ? parseInt(stdMatch[3], 10) : 0;
+    return Math.round(count * ((sides + 1) / 2) + mod);
+  }
+
+  const n = Number(s);
+  if (!Number.isNaN(n) && n > 0) return Math.round(n);
+
+  return 0;
+}
+
+/** Prefer numeric humanityLoss from data; otherwise derive average from humanityCost dice string. */
+export function resolveCyberwareHumanityLoss(
+  humanityLoss: number | null | undefined,
+  humanityCost: string,
+): number {
+  const hl = Number(humanityLoss);
+  if (!Number.isNaN(hl) && hl > 0) return hl;
+  return estimateHumanityLossFromHumanityCost(humanityCost || '');
+}
+
 function normalizeFoundryItem(raw: Record<string, unknown>): Record<string, unknown> {
   const data = (raw.data || raw.system || {}) as Record<string, unknown>;
   return {
@@ -223,12 +265,16 @@ function normalizeLocalArmor(): Armor[] {
 function normalizeLocalCyberware(): Cyberware[] {
   return (localCyberware as Record<string, unknown>[]).map((raw) => {
     const n = normalizeFoundryItem(raw);
+    const hc = String(n.humanityCost || n.humanity_cost || '');
     return {
       id: String(n.id),
       name: String(n.name),
       surg_code: String(n.surgCode || n.surg_code || ''),
-      humanity_cost: String(n.humanityCost || n.humanity_cost || '0'),
-      humanity_loss: Number(n.humanityLoss || n.humanity_loss) || 0,
+      humanity_cost: hc || '0',
+      humanity_loss: resolveCyberwareHumanityLoss(
+        Number(n.humanityLoss ?? n.humanity_loss) || 0,
+        hc,
+      ),
       cyberware_type: String(n.cyberwareType || n.cyberware_type || ''),
       cost: Number(n.cost) || 0,
       weight: Number(n.weight) || 0,

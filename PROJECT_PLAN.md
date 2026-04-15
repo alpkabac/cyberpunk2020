@@ -168,3 +168,9 @@ These all become simpler with an AI-GM:
 3. **Don't paste raw JavaScript into AI prompts.** Translate code into natural-language rules. The AI needs *"full auto: each point above DC = one hit"*, not `if(attackMods.fireMode === fireModes.fullAuto)`.
 
 4. **Test the system prompt first.** Before writing any app code, paste the Layer 1 rules + a character sheet JSON into ChatGPT/Claude and run a few combat rounds. If the AI adjudicates correctly, the foundation is solid.
+
+---
+
+## Backlog & follow-ups
+
+See **[BACKLOG.md](./BACKLOG.md)** for the living list (ranged mods, point-blank damage, exploding-10 reminders, reliability, stabilization, chargen, gear-driven combat modifiers, netrunning *deferred*, etc.).

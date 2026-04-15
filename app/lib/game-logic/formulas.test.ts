@@ -12,6 +12,8 @@ import {
   calculateWoundState,
   combineSP,
   maxLayeredSP,
+  isFlatSaveSuccess,
+  getStabilizationMedicBonus,
 } from './formulas';
 import { Character, createStatBlock } from '../types';
 
@@ -360,5 +362,80 @@ describe('Property 13: Armor SP Layering', () => {
       ),
       { numRuns: 50 }
     );
+  });
+});
+
+describe('Flat save helper', () => {
+  it('isFlatSaveSuccess: success when roll ≤ target', () => {
+    expect(isFlatSaveSuccess(3, 5)).toBe(true);
+    expect(isFlatSaveSuccess(5, 5)).toBe(true);
+    expect(isFlatSaveSuccess(6, 5)).toBe(false);
+  });
+});
+
+describe('getStabilizationMedicBonus', () => {
+  it('sums TECH and the higher of First Aid vs Medical Tech', () => {
+    const character: Character = {
+      id: 'm1',
+      userId: 'u',
+      sessionId: 's',
+      name: 'Medic',
+      type: 'character',
+      imageUrl: '',
+      role: 'Medtechie',
+      age: 30,
+      points: 0,
+      stats: {
+        int: createStatBlock(5, 0),
+        ref: createStatBlock(5, 0),
+        tech: createStatBlock(10, 0),
+        cool: createStatBlock(5, 0),
+        attr: createStatBlock(5, 0),
+        luck: createStatBlock(5, 0),
+        ma: createStatBlock(5, 0),
+        bt: createStatBlock(5, 0),
+        emp: createStatBlock(5, 0),
+      },
+      specialAbility: { name: 'Medical Tech', value: 0 },
+      reputation: 0,
+      improvementPoints: 0,
+      skills: [
+        {
+          id: 's1',
+          name: 'First Aid',
+          value: 4,
+          linkedStat: 'tech',
+          category: 'TECH',
+          isChipped: false,
+        },
+        {
+          id: 's2',
+          name: 'Medical Tech',
+          value: 7,
+          linkedStat: 'tech',
+          category: 'TECH',
+          isChipped: false,
+        },
+      ],
+      damage: 20,
+      isStunned: false,
+      hitLocations: {
+        Head: { location: [1], stoppingPower: 0, ablation: 0 },
+        Torso: { location: [2, 4], stoppingPower: 0, ablation: 0 },
+        rArm: { location: [5], stoppingPower: 0, ablation: 0 },
+        lArm: { location: [6], stoppingPower: 0, ablation: 0 },
+        lLeg: { location: [7, 8], stoppingPower: 0, ablation: 0 },
+        rLeg: { location: [9, 10], stoppingPower: 0, ablation: 0 },
+      },
+      sdp: {
+        sum: { Head: 0, Torso: 0, lArm: 0, rArm: 0, lLeg: 0, rLeg: 0 },
+        current: { Head: 0, Torso: 0, lArm: 0, rArm: 0, lLeg: 0, rLeg: 0 },
+      },
+      eurobucks: 0,
+      items: [],
+      netrunDeck: null,
+      lifepath: null,
+    };
+    expect(getStabilizationMedicBonus(character)).toBe(17);
   });
 });

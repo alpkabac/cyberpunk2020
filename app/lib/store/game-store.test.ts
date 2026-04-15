@@ -4,7 +4,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useGameStore, selectAllCharacters, selectCharacterById } from './game-store';
-import { Character, createStatBlock, Item, ChatMessage, Token } from '../types';
+import { Character, createStatBlock, Item, ChatMessage, Token, Armor } from '../types';
 
 describe('Game Store', () => {
   beforeEach(() => {
@@ -183,6 +183,27 @@ describe('Game Store', () => {
 
   describe('Damage Application', () => {
     it('should apply damage and update wound state', () => {
+      const damageTestHelmet: Armor = {
+        id: 'helmet-1',
+        name: 'Steel Helmet',
+        type: 'armor',
+        flavor: '',
+        notes: '',
+        cost: 100,
+        weight: 1,
+        equipped: true,
+        source: 'Test',
+        coverage: {
+          Head: { stoppingPower: 10, ablation: 0 },
+          Torso: { stoppingPower: 0, ablation: 0 },
+          rArm: { stoppingPower: 0, ablation: 0 },
+          lArm: { stoppingPower: 0, ablation: 0 },
+          rLeg: { stoppingPower: 0, ablation: 0 },
+          lLeg: { stoppingPower: 0, ablation: 0 },
+        },
+        encumbrance: 0,
+      };
+
       const character: Character = {
         id: 'char-1',
         userId: 'user-1',
@@ -223,28 +244,7 @@ describe('Game Store', () => {
           current: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },
         },
         eurobucks: 1000,
-        items: [
-          {
-            id: 'helmet-1',
-            name: 'Steel Helmet',
-            type: 'armor' as const,
-            flavor: '',
-            notes: '',
-            cost: 100,
-            weight: 1,
-            equipped: true,
-            source: 'Test',
-            coverage: {
-              Head: { stoppingPower: 10, ablation: 0 },
-              Torso: { stoppingPower: 0, ablation: 0 },
-              rArm: { stoppingPower: 0, ablation: 0 },
-              lArm: { stoppingPower: 0, ablation: 0 },
-              rLeg: { stoppingPower: 0, ablation: 0 },
-              lLeg: { stoppingPower: 0, ablation: 0 },
-            },
-            encumbrance: 0,
-          } as any,
-        ],
+        items: [damageTestHelmet],
         netrunDeck: null,
         lifepath: null,
       };
@@ -610,6 +610,186 @@ describe('Game Store', () => {
       const updatedChar = selectCharacterById(state, 'char-1');
       
       expect(updatedChar?.stats.ref.base).toBe(10);
+    });
+  });
+
+  describe('UI preferences', () => {
+    it('defaults includeSpecialAbilityInSkillRolls to false', () => {
+      expect(useGameStore.getState().ui.includeSpecialAbilityInSkillRolls).toBe(false);
+    });
+
+    it('sets includeSpecialAbilityInSkillRolls', () => {
+      useGameStore.getState().setIncludeSpecialAbilityInSkillRolls(true);
+      expect(useGameStore.getState().ui.includeSpecialAbilityInSkillRolls).toBe(true);
+      useGameStore.getState().setIncludeSpecialAbilityInSkillRolls(false);
+      expect(useGameStore.getState().ui.includeSpecialAbilityInSkillRolls).toBe(false);
+    });
+  });
+
+  describe('Stun and death saves', () => {
+    it('applyStunSaveRollResult sets isStunned when roll exceeds target', () => {
+      const character: Character = {
+        id: 'char-1',
+        userId: 'user-1',
+        sessionId: 'session-1',
+        name: 'Test Character',
+        type: 'character',
+        imageUrl: '',
+        role: 'Solo',
+        age: 25,
+        points: 60,
+        stats: {
+          int: createStatBlock(7, 0),
+          ref: createStatBlock(8, 0),
+          tech: createStatBlock(5, 0),
+          cool: createStatBlock(7, 0),
+          attr: createStatBlock(6, 0),
+          luck: createStatBlock(5, 0),
+          ma: createStatBlock(6, 0),
+          bt: createStatBlock(8, 0),
+          emp: createStatBlock(6, 0),
+        },
+        specialAbility: { name: 'Combat Sense', value: 0 },
+        reputation: 0,
+        improvementPoints: 0,
+        skills: [],
+        damage: 5,
+        isStunned: false,
+        hitLocations: {
+          Head: { location: [1], stoppingPower: 0, ablation: 0 },
+          Torso: { location: [2, 3, 4], stoppingPower: 0, ablation: 0 },
+          rArm: { location: [5], stoppingPower: 0, ablation: 0 },
+          lArm: { location: [6], stoppingPower: 0, ablation: 0 },
+          lLeg: { location: [7, 8], stoppingPower: 0, ablation: 0 },
+          rLeg: { location: [9, 10], stoppingPower: 0, ablation: 0 },
+        },
+        sdp: {
+          sum: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },
+          current: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },
+        },
+        eurobucks: 1000,
+        items: [],
+        netrunDeck: null,
+        lifepath: null,
+      };
+
+      useGameStore.getState().addCharacter(character);
+      // Serious: BT 8 + Serious(-1) → stun target 7
+      useGameStore.getState().applyStunSaveRollResult('char-1', 8);
+      expect(selectCharacterById(useGameStore.getState(), 'char-1')?.isStunned).toBe(true);
+
+      useGameStore.getState().applyStunSaveRollResult('char-1', 7);
+      expect(selectCharacterById(useGameStore.getState(), 'char-1')?.isStunned).toBe(false);
+    });
+
+    it('applyDeathSaveRollResult sets damage to 41 on failure', () => {
+      const character: Character = {
+        id: 'char-1',
+        userId: 'user-1',
+        sessionId: 'session-1',
+        name: 'Test Character',
+        type: 'character',
+        imageUrl: '',
+        role: 'Solo',
+        age: 25,
+        points: 60,
+        stats: {
+          int: createStatBlock(7, 0),
+          ref: createStatBlock(8, 0),
+          tech: createStatBlock(5, 0),
+          cool: createStatBlock(7, 0),
+          attr: createStatBlock(6, 0),
+          luck: createStatBlock(5, 0),
+          ma: createStatBlock(6, 0),
+          bt: createStatBlock(8, 0),
+          emp: createStatBlock(6, 0),
+        },
+        specialAbility: { name: 'Combat Sense', value: 0 },
+        reputation: 0,
+        improvementPoints: 0,
+        skills: [],
+        damage: 13,
+        isStunned: false,
+        hitLocations: {
+          Head: { location: [1], stoppingPower: 0, ablation: 0 },
+          Torso: { location: [2, 3, 4], stoppingPower: 0, ablation: 0 },
+          rArm: { location: [5], stoppingPower: 0, ablation: 0 },
+          lArm: { location: [6], stoppingPower: 0, ablation: 0 },
+          lLeg: { location: [7, 8], stoppingPower: 0, ablation: 0 },
+          rLeg: { location: [9, 10], stoppingPower: 0, ablation: 0 },
+        },
+        sdp: {
+          sum: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },
+          current: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },
+        },
+        eurobucks: 1000,
+        items: [],
+        netrunDeck: null,
+        lifepath: null,
+      };
+
+      useGameStore.getState().addCharacter(character);
+      // Mortal 0: death save target = 8 + (-3) = 5
+      useGameStore.getState().applyDeathSaveRollResult('char-1', 6);
+      expect(selectCharacterById(useGameStore.getState(), 'char-1')?.damage).toBe(41);
+
+      useGameStore.getState().reset();
+      useGameStore.getState().addCharacter({ ...character, damage: 13 });
+      useGameStore.getState().applyDeathSaveRollResult('char-1', 4);
+      expect(selectCharacterById(useGameStore.getState(), 'char-1')?.damage).toBe(13);
+    });
+
+    it('applyDeathSaveRollResult adds stun save mod to death target', () => {
+      const character: Character = {
+        id: 'char-1',
+        userId: 'user-1',
+        sessionId: 'session-1',
+        name: 'Test Character',
+        type: 'character',
+        imageUrl: '',
+        role: 'Solo',
+        age: 25,
+        points: 60,
+        stats: {
+          int: createStatBlock(7, 0),
+          ref: createStatBlock(8, 0),
+          tech: createStatBlock(5, 0),
+          cool: createStatBlock(7, 0),
+          attr: createStatBlock(6, 0),
+          luck: createStatBlock(5, 0),
+          ma: createStatBlock(6, 0),
+          bt: createStatBlock(8, 0),
+          emp: createStatBlock(6, 0),
+        },
+        specialAbility: { name: 'Combat Sense', value: 0 },
+        reputation: 0,
+        improvementPoints: 0,
+        skills: [],
+        damage: 13,
+        isStunned: false,
+        combatModifiers: { initiative: 0, stunSave: 1 },
+        hitLocations: {
+          Head: { location: [1], stoppingPower: 0, ablation: 0 },
+          Torso: { location: [2, 3, 4], stoppingPower: 0, ablation: 0 },
+          rArm: { location: [5], stoppingPower: 0, ablation: 0 },
+          lArm: { location: [6], stoppingPower: 0, ablation: 0 },
+          lLeg: { location: [7, 8], stoppingPower: 0, ablation: 0 },
+          rLeg: { location: [9, 10], stoppingPower: 0, ablation: 0 },
+        },
+        sdp: {
+          sum: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },
+          current: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },
+        },
+        eurobucks: 1000,
+        items: [],
+        netrunDeck: null,
+        lifepath: null,
+      };
+
+      useGameStore.getState().addCharacter(character);
+      // Base death 5 + mod 1 = 6; roll 6 succeeds (not dead)
+      useGameStore.getState().applyDeathSaveRollResult('char-1', 6);
+      expect(selectCharacterById(useGameStore.getState(), 'char-1')?.damage).toBe(13);
     });
   });
 });

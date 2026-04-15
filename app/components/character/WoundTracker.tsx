@@ -12,6 +12,7 @@ interface WoundTrackerProps {
 export function WoundTracker({ character, editable }: WoundTrackerProps) {
   const updateCharacterField = useGameStore((state) => state.updateCharacterField);
   const { damage, derivedStats, isStunned } = character;
+  const stunSaveMod = character.combatModifiers?.stunSave ?? 0;
 
   const woundStates: Array<{ name: string; range: [number, number]; penalty: string }> = [
     { name: 'Light', range: [1, 4], penalty: 'Stun 0' },
@@ -115,7 +116,14 @@ export function WoundTracker({ character, editable }: WoundTrackerProps) {
                 )
               )}
               <span className="text-[10px] text-gray-500">
-                Save target: ≤ {derivedStats.stunSaveTarget}
+                Save target: ≤ {derivedStats.stunSaveTarget + stunSaveMod}
+                {stunSaveMod !== 0 && (
+                  <span className="text-gray-400">
+                    {' '}
+                    (base {derivedStats.stunSaveTarget}, mod {stunSaveMod >= 0 ? '+' : ''}
+                    {stunSaveMod})
+                  </span>
+                )}
               </span>
             </div>
           )}

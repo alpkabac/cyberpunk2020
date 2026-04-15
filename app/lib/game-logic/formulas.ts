@@ -335,6 +335,14 @@ export function calculateDeathSaveTarget(woundState: WoundState, saveNumber: num
 }
 
 /**
+ * Single flat d10 vs target (stun/death saves): success if roll ≤ target
+ * (FNFF: roll equal to or lower than BT minus wound severity / mortality).
+ */
+export function isFlatSaveSuccess(rollTotal: number, target: number): boolean {
+  return rollTotal <= target;
+}
+
+/**
  * Combine two armor SP values using the layering formula
  */
 export function combineSP(a: number, b: number): number {
@@ -424,7 +432,6 @@ export function calculateDamage(
   sp: number,
   btm: number,
   isAP: boolean,
-  isPointBlank: boolean,
 ): {
   finalDamage: number;
   headMultiplied: boolean;
@@ -462,4 +469,19 @@ export function calculateDamage(
     spReduction,
     btmReduction,
   };
+}
+
+/**
+ * FNFF stabilization (medic): TECH + highest of First Aid / Medical Tech + 1d10 ≥ patient total damage.
+ */
+export function getStabilizationMedicBonus(character: Character): number {
+  const tech = character.stats.tech.total ?? 0;
+  let maxMed = 0;
+  for (const s of character.skills) {
+    const n = s.name.trim().toLowerCase();
+    if (n === 'first aid' || n === 'medical tech') {
+      maxMed = Math.max(maxMed, s.value);
+    }
+  }
+  return tech + maxMed;
 }

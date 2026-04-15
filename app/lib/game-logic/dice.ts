@@ -6,20 +6,29 @@
 import { RollResult } from '../types';
 
 /**
- * Roll a single exploding d10
- * If the result is 10, roll again and add to the total
- * Continues until a non-10 is rolled
+ * Roll a single exploding d10 (FNFF).
+ * If the result is 10, roll again and add to the total until a non-10 is rolled.
  */
-export function rollExplodingD10(): number {
+export function rollExplodingD10Detailed(): {
+  total: number;
+  faces: number[];
+  /** True if at least one 10 was rolled (more than one face, or chain continued after 10). */
+  exploded: boolean;
+} {
+  const faces: number[] = [];
   let total = 0;
   let roll: number;
-  
   do {
     roll = Math.floor(Math.random() * 10) + 1; // 1-10
+    faces.push(roll);
     total += roll;
   } while (roll === 10);
-  
-  return total;
+  return { total, faces, exploded: faces.length > 1 };
+}
+
+/** Same as rollExplodingD10Detailed().total — kept for tests and callers that only need the sum. */
+export function rollExplodingD10(): number {
+  return rollExplodingD10Detailed().total;
 }
 
 /**
@@ -75,34 +84,70 @@ export function parseDiceFormula(formula: string): {
 
 /**
  * Roll dice according to a formula
- * Returns the total and individual roll results
+ * Prefix with `flat:` for non-exploding d10 (stun/death saves: roll ≤ target on one die).
+ * Example: `flat:1d10` — single d10, no explosion on 10.
  */
 export function rollDice(formula: string): RollResult | null {
-  const parsed = parseDiceFormula(formula);
-  
+  let f = formula.trim();
+  let flat = false;
+  if (f.toLowerCase().startsWith('flat:')) {
+    flat = true;
+    f = f.slice(5).trim();
+  }
+
+  const parsed = parseDiceFormula(f);
+
   if (!parsed) {
     return null;
   }
-  
+
   const { count, sides, modifier, multiplier, exploding } = parsed;
   const rolls: number[] = [];
-  
-  // Roll the dice
+  const explodingD10Chains: number[][] = [];
+  let hadExplodingD10 = false;
+  let firstD10Face: number | undefined;
+
+  // Roll the dice (d10 explodes for attacks unless `flat:` — saves must not explode)
   for (let i = 0; i < count; i++) {
-    if (exploding && sides === 10) {
-      rolls.push(rollExplodingD10());
+    if (!flat && exploding && sides === 10) {
+      const d = rollExplodingD10Detailed();
+      rolls.push(d.total);
+      explodingD10Chains.push(d.faces);
+      if (d.exploded) hadExplodingD10 = true;
+      if (i === 0) firstD10Face = d.faces[0];
     } else {
-      rolls.push(Math.floor(Math.random() * sides) + 1);
+      const r = Math.floor(Math.random() * sides) + 1;
+      rolls.push(r);
+      if (i === 0 && sides === 10) firstD10Face = r;
     }
   }
-  
+
   // Calculate total
   let total = rolls.reduce((sum, roll) => sum + roll, 0);
-  total = (total * multiplier) + modifier;
-  
+  total = total * multiplier + modifier;
+
   return {
     total,
     rolls,
     formula,
+    hadExplodingD10,
+    ...(hadExplodingD10 && explodingD10Chains.length > 0
+      ? { explodingD10Chains }
+      : {}),
+    ...(firstD10Face !== undefined ? { firstD10Face } : {}),
   };
+}
+
+/**
+ * Maximum possible total for a simple NdS+M weapon damage string (CP2020 point-blank max damage).
+ * Examples: "3d6" -> 18, "4d6+1" -> 25, "2d6+3" -> 15
+ */
+export function maxDamageFromDiceFormula(formula: string): number | null {
+  const cleaned = formula.replace(/\s/g, '').toLowerCase();
+  const m = cleaned.match(/^(\d+)d(\d+)([+-]\d+)?$/);
+  if (!m) return null;
+  const count = parseInt(m[1], 10);
+  const sides = parseInt(m[2], 10);
+  const mod = m[3] ? parseInt(m[3], 10) : 0;
+  return count * sides + mod;
 }

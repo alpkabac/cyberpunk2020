@@ -2,7 +2,6 @@
 
 import React, { useState } from 'react';
 import { useGameStore } from '@/lib/store/game-store';
-import { Character } from '@/lib/types';
 import { CharacterHeader } from './CharacterHeader';
 import { SkillsTab } from './tabs/SkillsTab';
 import { CombatTab } from './tabs/CombatTab';
@@ -63,7 +62,9 @@ export function CharacterSheet({ characterId, editable = false }: CharacterSheet
       {/* Tab Content */}
       <div className="p-4 bg-white min-h-[500px] max-h-[600px] overflow-y-auto">
         {activeTab === 'skills' && <SkillsTab character={character} editable={editable} />}
-        {activeTab === 'combat' && <CombatTab character={character} editable={editable} />}
+        {activeTab === 'combat' && (
+          <CombatTab key={character.id} character={character} editable={editable} />
+        )}
         {activeTab === 'gear' && <GearTab character={character} editable={editable} />}
         {activeTab === 'cyberware' && <CyberwareTab character={character} editable={editable} />}
         {activeTab === 'life' && <LifeTab character={character} editable={editable} />}

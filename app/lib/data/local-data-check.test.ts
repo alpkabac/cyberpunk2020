@@ -8,6 +8,8 @@ import {
   getAllVehicles,
   getAllPrograms,
   searchAllItems,
+  estimateHumanityLossFromHumanityCost,
+  resolveCyberwareHumanityLoss,
 } from './game-data';
 
 describe('Local JSON Fallback (no Supabase)', () => {
@@ -29,6 +31,22 @@ describe('Local JSON Fallback (no Supabase)', () => {
     clearCache();
     const cyberware = await getAllCyberware();
     expect(cyberware.length).toBeGreaterThan(0);
+  });
+
+  it('cyberware resolves HL from humanityCost dice when Foundry leaves humanity_loss null', async () => {
+    clearCache();
+    const cyberware = await getAllCyberware();
+    const grafted = cyberware.find((c) => c.name.includes('Grafted Muscle'));
+    expect(grafted).toBeDefined();
+    expect(grafted!.humanity_cost).toMatch(/2d6/i);
+    expect(grafted!.humanity_loss).toBe(7);
+  });
+
+  it('estimateHumanityLossFromHumanityCost averages dice strings', () => {
+    expect(estimateHumanityLossFromHumanityCost('2d6')).toBe(7);
+    expect(estimateHumanityLossFromHumanityCost('1d6/2')).toBe(2);
+    expect(resolveCyberwareHumanityLoss(0, '2d6')).toBe(7);
+    expect(resolveCyberwareHumanityLoss(3, '2d6')).toBe(3);
   });
 
   it('should load gear from local JSON', async () => {

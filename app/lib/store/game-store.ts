@@ -18,8 +18,16 @@ import {
   Zone,
   Weapon,
   FireMode,
+  DiceRollIntent,
 } from '../types';
-import { calculateDerivedStats, applyStatModifiers, syncArmorToHitLocations, calculateDamage } from '../game-logic/formulas';
+import {
+  calculateDerivedStats,
+  applyStatModifiers,
+  syncArmorToHitLocations,
+  calculateDamage,
+  isFlatSaveSuccess,
+} from '../game-logic/formulas';
+import { maxDamageFromDiceFormula } from '../game-logic/dice';
 import { getAmmoConsumed } from '../game-logic/lookups';
 
 // ============================================================================
@@ -62,6 +70,13 @@ interface GameState {
     selectedTokenId: string | null;
     isDiceRollerOpen: boolean;
     diceFormula: string | null;
+    /** When true, skill rolls from the Skills tab add special ability to 1d10+total */
+    includeSpecialAbilityInSkillRolls: boolean;
+    /**
+     * Stun/death: next flat d10 applies save. Attack: weapon context for natural-1 fumble resolution.
+     * Cleared after resolve (flat saves) or when the roller closes.
+     */
+    diceRollIntent: DiceRollIntent | null;
     isChatInputFocused: boolean;
     isVoiceRecording: boolean;
   };
@@ -91,11 +106,15 @@ interface GameActions {
     rawDamage: number,
     location: Zone | null,
     isAP?: boolean,
+    pointBlank?: boolean,
+    weaponDamageFormula?: string | null,
   ) => void;
 
   deductMoney: (characterId: string, amount: number) => void;
   addItem: (characterId: string, item: Item) => void;
   removeItem: (characterId: string, itemId: string) => void;
+  /** Sell item for a fraction of list price (default 50%). Adds eurobucks and removes item. */
+  sellItem: (characterId: string, itemId: string, sellFraction?: number) => void;
   updateCharacterField: (characterId: string, path: string, value: unknown) => void;
 
   // Skill actions
@@ -126,8 +145,22 @@ interface GameActions {
   // UI actions
   selectCharacter: (characterId: string | null) => void;
   selectToken: (tokenId: string | null) => void;
-  openDiceRoller: (formula: string) => void;
+  openDiceRoller: (formula: string, intent?: DiceRollIntent | null) => void;
   closeDiceRoller: () => void;
+  setIncludeSpecialAbilityInSkillRolls: (include: boolean) => void;
+  /** Open flat d10 with intent so the roller applies stun save vs target and sets isStunned. */
+  beginStunSaveRoll: (characterId: string) => void;
+  /** Open flat d10 with intent (only if mortally wounded); fail kills the character. */
+  beginDeathSaveRoll: (characterId: string) => void;
+  clearDiceRollIntent: () => void;
+  /** Apply stun save from a flat d10 total (for AI / automation). Uses derived stun target + combatModifiers.stunSave. */
+  applyStunSaveRollResult: (characterId: string, flatRollTotal: number) => void;
+  /**
+   * Apply death save from a flat d10 total (for AI / automation).
+   * Fail → damage 41 (Dead on wound track). Per FNFF: failed death save while Mortally wounded means death;
+   * we represent that as the Dead state (damage ≥ 41), not a separate flag.
+   */
+  applyDeathSaveRollResult: (characterId: string, flatRollTotal: number) => void;
   setVoiceRecording: (isRecording: boolean) => void;
 
   // Utility actions
@@ -191,6 +224,8 @@ const initialState: GameState = {
     selectedTokenId: null,
     isDiceRollerOpen: false,
     diceFormula: null,
+    includeSpecialAbilityInSkillRolls: false,
+    diceRollIntent: null,
     isChatInputFocused: false,
     isVoiceRecording: false,
   },
@@ -266,23 +301,34 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
    * 3. Subtract SP (and ablate SP by 1 if location specified)
    * 4. Subtract BTM
    * 5. Add remainder to damage total
+   *
+   * Point blank (FNFF): if pointBlank and weaponDamageFormula parse as NdS+M, base damage = max dice total.
+   * Otherwise rawDamage is used (already your max if you typed it in manually).
    */
-  applyDamage: (characterId, rawDamage, location, isAP = false) =>
+  applyDamage: (characterId, rawDamage, location, isAP = false, pointBlank = false, weaponDamageFormula = null) =>
     set((state) => {
       const character = state.characters.byId[characterId];
       if (!character) return state;
 
+      let effectiveRaw = rawDamage;
+      if (pointBlank && weaponDamageFormula) {
+        const maxD = maxDamageFromDiceFormula(weaponDamageFormula);
+        if (maxD !== null) {
+          effectiveRaw = maxD;
+        }
+      }
+
       const sp = location ? Math.max(0, character.hitLocations[location].stoppingPower - character.hitLocations[location].ablation) : 0;
       const btm = character.derivedStats?.btm || 0;
 
-      const result = calculateDamage(rawDamage, location, sp, btm, isAP, false);
+      const result = calculateDamage(effectiveRaw, location, sp, btm, isAP);
 
       const newDamage = Math.min(41, Math.max(0, character.damage + result.finalDamage));
 
       // Apply ablation to hit location (increment ablation counter only;
       // stoppingPower is synced from armor on recalc, effective SP = stoppingPower - ablation)
       let updatedHitLocations = character.hitLocations;
-      if (location && character.hitLocations[location] && rawDamage > 0) {
+      if (location && character.hitLocations[location] && effectiveRaw > 0) {
         const effectiveSP = Math.max(0, character.hitLocations[location].stoppingPower - character.hitLocations[location].ablation);
         if (effectiveSP > 0) {
           updatedHitLocations = {
@@ -354,6 +400,30 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
       const updated = recalcCharacter({
         ...character,
         items: character.items.filter((item) => item.id !== itemId),
+      });
+
+      return {
+        characters: {
+          ...state.characters,
+          byId: { ...state.characters.byId, [characterId]: updated },
+        },
+      };
+    }),
+
+  sellItem: (characterId, itemId, sellFraction = 0.5) =>
+    set((state) => {
+      const character = state.characters.byId[characterId];
+      if (!character) return state;
+
+      const item = character.items.find((i) => i.id === itemId);
+      if (!item) return state;
+
+      const payout = Math.max(0, Math.floor(item.cost * (sellFraction <= 0 || sellFraction > 1 ? 0.5 : sellFraction)));
+
+      const updated = recalcCharacter({
+        ...character,
+        eurobucks: character.eurobucks + payout,
+        items: character.items.filter((i) => i.id !== itemId),
       });
 
       return {
@@ -598,14 +668,78 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
       ui: { ...state.ui, selectedTokenId: tokenId },
     })),
 
-  openDiceRoller: (formula) =>
+  openDiceRoller: (formula, intent = null) =>
     set((state) => ({
-      ui: { ...state.ui, isDiceRollerOpen: true, diceFormula: formula },
+      ui: {
+        ...state.ui,
+        isDiceRollerOpen: true,
+        diceFormula: formula,
+        diceRollIntent: intent ?? null,
+      },
     })),
 
   closeDiceRoller: () =>
     set((state) => ({
-      ui: { ...state.ui, isDiceRollerOpen: false, diceFormula: null },
+      ui: {
+        ...state.ui,
+        isDiceRollerOpen: false,
+        diceFormula: null,
+        diceRollIntent: null,
+      },
+    })),
+
+  beginStunSaveRoll: (characterId) =>
+    set((state) => ({
+      ui: {
+        ...state.ui,
+        isDiceRollerOpen: true,
+        diceFormula: 'flat:1d10',
+        diceRollIntent: { characterId, kind: 'stun' },
+      },
+    })),
+
+  beginDeathSaveRoll: (characterId) => {
+    const char = get().characters.byId[characterId];
+    const target = char?.derivedStats?.deathSaveTarget ?? -1;
+    if (target < 0) return;
+    set((state) => ({
+      ui: {
+        ...state.ui,
+        isDiceRollerOpen: true,
+        diceFormula: 'flat:1d10',
+        diceRollIntent: { characterId, kind: 'death' },
+      },
+    }));
+  },
+
+  clearDiceRollIntent: () =>
+    set((state) => ({
+      ui: { ...state.ui, diceRollIntent: null },
+    })),
+
+  applyStunSaveRollResult: (characterId, flatRollTotal) => {
+    const char = get().characters.byId[characterId];
+    if (!char?.derivedStats) return;
+    const bonus = char.combatModifiers?.stunSave ?? 0;
+    const target = char.derivedStats.stunSaveTarget + bonus;
+    const success = isFlatSaveSuccess(flatRollTotal, target);
+    get().updateCharacterField(characterId, 'isStunned', !success);
+  },
+
+  applyDeathSaveRollResult: (characterId, flatRollTotal) => {
+    const char = get().characters.byId[characterId];
+    if (!char?.derivedStats) return;
+    const saveBonus = char.combatModifiers?.stunSave ?? 0;
+    const target = char.derivedStats.deathSaveTarget + saveBonus;
+    if (char.derivedStats.deathSaveTarget < 0) return;
+    if (!isFlatSaveSuccess(flatRollTotal, target)) {
+      get().updateCharacterField(characterId, 'damage', 41);
+    }
+  },
+
+  setIncludeSpecialAbilityInSkillRolls: (include) =>
+    set((state) => ({
+      ui: { ...state.ui, includeSpecialAbilityInSkillRolls: include },
     })),
 
   setVoiceRecording: (isRecording) =>

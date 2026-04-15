@@ -5,6 +5,10 @@ import { Character, Skill, Stats } from '@/lib/types';
 import { useGameStore } from '@/lib/store/game-store';
 import { masterSkillList, SkillDefinition } from '@/lib/game-logic/lookups';
 
+function newSkillId(): string {
+  return `skill-${crypto.randomUUID()}`;
+}
+
 interface SkillsTabProps {
   character: Character;
   editable: boolean;
@@ -15,20 +19,30 @@ export function SkillsTab({ character, editable }: SkillsTabProps) {
   const addSkill = useGameStore((state) => state.addSkill);
   const updateSkill = useGameStore((state) => state.updateSkill);
   const removeSkill = useGameStore((state) => state.removeSkill);
+  const includeSpecialAbilityInRolls = useGameStore(
+    (state) => state.ui.includeSpecialAbilityInSkillRolls,
+  );
+  const setIncludeSpecialAbilityInRolls = useGameStore(
+    (state) => state.setIncludeSpecialAbilityInSkillRolls,
+  );
 
   const [searchFilter, setSearchFilter] = useState('');
   const [sortBy, setSortBy] = useState<'name' | 'category' | 'value'>('category');
   const [showAddSkill, setShowAddSkill] = useState(false);
   const [addSkillSearch, setAddSkillSearch] = useState('');
 
+  const saBonus = character.specialAbility?.value ?? 0;
+
   const handleRollSkill = (skill: Skill) => {
     const statTotal = character.stats[skill.linkedStat]?.total || 0;
     const totalValue = skill.value + statTotal;
-    openDiceRoller(`1d10+${totalValue}`);
+    const withSA =
+      includeSpecialAbilityInRolls && character.specialAbility ? totalValue + saBonus : totalValue;
+    openDiceRoller(`1d10+${withSA}`);
   };
 
   // Filter and sort skills
-  let filteredSkills = character.skills.filter((skill) =>
+  const filteredSkills = character.skills.filter((skill) =>
     skill.name.toLowerCase().includes(searchFilter.toLowerCase()),
   );
 
@@ -65,7 +79,7 @@ export function SkillsTab({ character, editable }: SkillsTabProps) {
 
   const handleAddSkill = (def: SkillDefinition) => {
     const newSkill: Skill = {
-      id: `skill-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      id: newSkillId(),
       name: def.name,
       value: 0,
       linkedStat: def.linkedStat as keyof Stats,
@@ -78,7 +92,7 @@ export function SkillsTab({ character, editable }: SkillsTabProps) {
   const handleAddCustomSkill = () => {
     if (!addSkillSearch.trim()) return;
     const newSkill: Skill = {
-      id: `skill-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      id: newSkillId(),
       name: addSkillSearch.trim(),
       value: 0,
       linkedStat: 'int',
@@ -128,8 +142,8 @@ export function SkillsTab({ character, editable }: SkillsTabProps) {
       )}
 
       {/* Search and Sort */}
-      <div className="flex gap-4 items-center">
-        <div className="flex-grow relative">
+      <div className="flex flex-wrap gap-4 items-center">
+        <div className="flex-grow relative min-w-[200px]">
           <input
             type="text"
             placeholder="Search skills..."
@@ -156,6 +170,20 @@ export function SkillsTab({ character, editable }: SkillsTabProps) {
           <option value="name">By Name</option>
           <option value="value">By Value</option>
         </select>
+
+        {character.specialAbility && (
+          <label className="flex items-center gap-2 border-2 border-yellow-600 bg-yellow-50 px-3 py-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={includeSpecialAbilityInRolls}
+              onChange={(e) => setIncludeSpecialAbilityInRolls(e.target.checked)}
+              className="h-4 w-4 border-2 border-black accent-black"
+            />
+            <span className="text-xs font-bold uppercase text-yellow-900 whitespace-nowrap">
+              Roll + {character.specialAbility.name} (+{saBonus})
+            </span>
+          </label>
+        )}
 
         {editable && (
           <button
@@ -218,6 +246,10 @@ export function SkillsTab({ character, editable }: SkillsTabProps) {
               {skills.map((skill) => {
                 const statTotal = character.stats[skill.linkedStat]?.total || 0;
                 const totalValue = skill.value + statTotal;
+                const rollTotal =
+                  includeSpecialAbilityInRolls && character.specialAbility
+                    ? totalValue + saBonus
+                    : totalValue;
 
                 return (
                   <div
@@ -242,6 +274,12 @@ export function SkillsTab({ character, editable }: SkillsTabProps) {
                       </div>
                       <div className="text-xs text-gray-600">
                         {skill.linkedStat.toUpperCase()}: {skill.value} + {statTotal} = {totalValue}
+                        {includeSpecialAbilityInRolls && character.specialAbility && (
+                          <span className="text-yellow-800 font-semibold">
+                            {' '}
+                            + {character.specialAbility.name} {saBonus} → roll 1d10+{rollTotal}
+                          </span>
+                        )}
                       </div>
                     </button>
 
@@ -289,7 +327,7 @@ export function SkillsTab({ character, editable }: SkillsTabProps) {
                           </button>
                         </>
                       ) : (
-                        <span className="text-xl font-bold ml-2">{totalValue}</span>
+                        <span className="text-xl font-bold ml-2">{rollTotal}</span>
                       )}
                     </div>
                   </div>

@@ -5,7 +5,13 @@
 
 import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
-import { rollExplodingD10, parseDiceFormula, rollDice } from './dice';
+import {
+  rollExplodingD10,
+  rollExplodingD10Detailed,
+  parseDiceFormula,
+  rollDice,
+  maxDamageFromDiceFormula,
+} from './dice';
 
 // ============================================================================
 // Property 25: Exploding D10
@@ -40,6 +46,16 @@ describe('Property 25: Exploding D10', () => {
       ),
       { numRuns: 100 }
     );
+  });
+
+  it('rollExplodingD10Detailed: exploded iff more than one face', () => {
+    let sawExplosion = false;
+    for (let i = 0; i < 400; i++) {
+      const d = rollExplodingD10Detailed();
+      expect(d.exploded).toBe(d.faces.length > 1);
+      if (d.faces.length > 1) sawExplosion = true;
+    }
+    expect(sawExplosion).toBe(true);
   });
 
   it('exploding d10 can produce values greater than 10', () => {
@@ -153,6 +169,7 @@ describe('Property 26: Dice Formula Parsing', () => {
           expect(result).not.toBeNull();
           expect(result!.rolls).toHaveLength(count);
           expect(result!.formula).toBe(formula);
+          expect(typeof result!.hadExplodingD10).toBe('boolean');
           expect(result!.total).toBeGreaterThanOrEqual(count); // Minimum possible
           
           // Each roll should be valid
@@ -177,5 +194,59 @@ describe('Property 26: Dice Formula Parsing', () => {
       const result = rollDice(formula);
       expect(result).toBeNull();
     });
+  });
+
+  it('flat:1d10 never exceeds 10 on the die (no explosion)', () => {
+    for (let i = 0; i < 200; i++) {
+      const result = rollDice('flat:1d10');
+      expect(result).not.toBeNull();
+      expect(result!.rolls).toHaveLength(1);
+      expect(result!.hadExplodingD10).toBe(false);
+      expect(result!.firstD10Face).toBe(result!.rolls[0]);
+      expect(result!.rolls[0]).toBeGreaterThanOrEqual(1);
+      expect(result!.rolls[0]).toBeLessThanOrEqual(10);
+      expect(result!.total).toBe(result!.rolls[0]);
+    }
+  });
+
+  it('2d6 has no firstD10Face', () => {
+    const r = rollDice('2d6');
+    expect(r).not.toBeNull();
+    expect(r!.firstD10Face).toBeUndefined();
+  });
+
+  it('1d10 firstD10Face is the first die face (1–10)', () => {
+    for (let i = 0; i < 200; i++) {
+      const r = rollDice('1d10');
+      expect(r!.firstD10Face).toBeGreaterThanOrEqual(1);
+      expect(r!.firstD10Face).toBeLessThanOrEqual(10);
+    }
+  });
+
+  it('non-flat 1d10 sets hadExplodingD10 when explosion occurred', () => {
+    let sawTrue = false;
+    let sawFalse = false;
+    for (let i = 0; i < 500; i++) {
+      const result = rollDice('1d10');
+      expect(result).not.toBeNull();
+      if (result!.hadExplodingD10) {
+        sawTrue = true;
+        expect(result!.explodingD10Chains).toBeDefined();
+        expect(result!.explodingD10Chains!.some((c) => c.length > 1)).toBe(true);
+      } else {
+        sawFalse = true;
+        expect(result!.rolls[0]).toBeLessThanOrEqual(10);
+      }
+    }
+    expect(sawTrue).toBe(true);
+    expect(sawFalse).toBe(true);
+  });
+
+  it('maxDamageFromDiceFormula parses CP2020 weapon codes', () => {
+    expect(maxDamageFromDiceFormula('3d6')).toBe(18);
+    expect(maxDamageFromDiceFormula('4d6+1')).toBe(25);
+    expect(maxDamageFromDiceFormula('2d6+3')).toBe(15);
+    expect(maxDamageFromDiceFormula('1d10')).toBe(10);
+    expect(maxDamageFromDiceFormula('not dice')).toBeNull();
   });
 });

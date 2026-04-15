@@ -14,6 +14,7 @@ export function GearTab({ character, editable }: GearTabProps) {
   const [showItemBrowser, setShowItemBrowser] = useState(false);
   const updateCharacterField = useGameStore((state) => state.updateCharacterField);
   const removeItem = useGameStore((state) => state.removeItem);
+  const sellItem = useGameStore((state) => state.sellItem);
 
   const handleEurobucksChange = (value: number) => {
     if (!editable) return;
@@ -104,12 +105,24 @@ export function GearTab({ character, editable }: GearTabProps) {
                       )}
                     </div>
                     {editable && (
-                      <button
-                        onClick={() => handleRemoveItem(item.id)}
-                        className="text-xl font-bold hover:text-red-600"
-                      >
-                        ×
-                      </button>
+                      <div className="flex flex-col gap-1 items-end shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => sellItem(character.id, item.id)}
+                          className="text-xs font-bold uppercase px-2 py-0.5 border-2 border-amber-600 text-amber-800 hover:bg-amber-100"
+                          title={`Sell for 50% (€${Math.floor(item.cost * 0.5).toLocaleString()})`}
+                        >
+                          Sell
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveItem(item.id)}
+                          className="text-xl font-bold hover:text-red-600"
+                          title="Remove, no payment"
+                        >
+                          ×
+                        </button>
+                      </div>
                     )}
                   </div>
                 );
@@ -165,12 +178,24 @@ export function GearTab({ character, editable }: GearTabProps) {
                       </div>
                     </div>
                     {editable && (
-                      <button
-                        onClick={() => handleRemoveItem(item.id)}
-                        className="text-xl font-bold hover:text-red-600"
-                      >
-                        ×
-                      </button>
+                      <div className="flex flex-col gap-1 items-end shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => sellItem(character.id, item.id)}
+                          className="text-xs font-bold uppercase px-2 py-0.5 border-2 border-amber-600 text-amber-800 hover:bg-amber-100"
+                          title={`Sell for 50% (€${Math.floor(item.cost * 0.5).toLocaleString()})`}
+                        >
+                          Sell
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveItem(item.id)}
+                          className="text-xl font-bold hover:text-red-600"
+                          title="Remove, no payment"
+                        >
+                          ×
+                        </button>
+                      </div>
                     )}
                   </div>
                 ))}

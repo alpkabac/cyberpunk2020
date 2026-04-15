@@ -142,9 +142,10 @@ export interface Character {
   eurobucks: number;
   items: Item[];
 
-  // Combat modifiers
+  // Combat modifiers (optional; initiative also used for Combat Sense initiative roll)
   combatModifiers?: {
     initiative: number;
+    /** Added to flat stun and death save targets (easier when positive). */
     stunSave: number;
   };
 
@@ -396,7 +397,35 @@ export interface RollResult {
   total: number;
   rolls: number[];
   formula: string;
+  /**
+   * True when any CP2020 exploding d10 rolled at least one 10 (extra d10(s) added).
+   * Always false for `flat:` saves and non-d10 dice.
+   */
+  hadExplodingD10: boolean;
+  /** One face sequence per exploding d10 in the formula (e.g. `[10, 10, 4]`). */
+  explodingD10Chains?: number[][];
+  /**
+   * First face of the first d10 in the formula (before exploding extra d10s).
+   * Used for attack fumbles (natural 1). Omitted when the first die is not d10.
+   */
+  firstD10Face?: number;
 }
+
+/** Intent for the dice roller modal (stun/death saves, weapon attack fumbles, stabilization). */
+export type DiceRollIntent =
+  | { kind: 'stun'; characterId: string }
+  | { kind: 'death'; characterId: string }
+  | {
+      kind: 'attack';
+      characterId: string;
+      weaponId: string;
+      reliability: Reliability;
+      isMelee: boolean;
+      /** True when weapon is auto-capable (reserved for future Foundry-style options). */
+      isAutoWeapon: boolean;
+    }
+  /** Medic roll: total ≥ targetDamage stabilizes the patient (does not auto-edit sheet). */
+  | { kind: 'stabilization'; targetDamage: number };
 
 // ============================================================================
 // Helper to create a default StatBlock

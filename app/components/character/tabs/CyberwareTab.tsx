@@ -14,6 +14,7 @@ export function CyberwareTab({ character, editable }: CyberwareTabProps) {
   const [showItemBrowser, setShowItemBrowser] = useState(false);
   const updateCharacterField = useGameStore((state) => state.updateCharacterField);
   const removeItem = useGameStore((state) => state.removeItem);
+  const sellItem = useGameStore((state) => state.sellItem);
 
   const cyberware = character.items.filter((item): item is Cyberware => item.type === 'cyberware');
 
@@ -123,8 +124,13 @@ export function CyberwareTab({ character, editable }: CyberwareTabProps) {
                           <div className="w-8 h-8 bg-gray-200 border border-black flex-shrink-0" />
                           <div className="flex-grow">
                             <div className="font-bold text-sm">{item.name}</div>
-                            <div className="text-xs text-gray-600 flex gap-2">
-                              <span>HL: {item.humanityLoss || 0}</span>
+                            <div className="text-xs text-gray-600 flex flex-wrap gap-x-2 gap-y-0">
+                              <span title="Average HL from dice (CP2020 rolls at install; data is often dice-only).">
+                                HL: {item.humanityLoss ?? 0}
+                                {item.humanityCost && item.humanityCost !== '0' && (
+                                  <span className="text-gray-500"> ({item.humanityCost})</span>
+                                )}
+                              </span>
                               <span>Surg: {item.surgCode || '?'}</span>
                               <span>€{item.cost.toLocaleString()}</span>
                             </div>
@@ -141,7 +147,7 @@ export function CyberwareTab({ character, editable }: CyberwareTabProps) {
                         )}
 
                         {editable && (
-                          <div className="flex gap-1">
+                          <div className="flex gap-1 flex-wrap">
                             <button
                               onClick={() => handleToggleInstall(item.id)}
                               className={`flex-1 border-2 border-black px-2 py-1 text-xs font-bold uppercase ${
@@ -153,8 +159,18 @@ export function CyberwareTab({ character, editable }: CyberwareTabProps) {
                               {item.equipped ? 'Uninstall' : 'Install'}
                             </button>
                             <button
+                              type="button"
+                              onClick={() => sellItem(character.id, item.id)}
+                              className="border-2 border-amber-600 px-2 py-1 text-xs font-bold uppercase text-amber-800 hover:bg-amber-100"
+                              title={`Sell for 50% list (€${Math.floor(item.cost * 0.5).toLocaleString()})`}
+                            >
+                              Sell
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => handleRemoveCyberware(item.id)}
                               className="border-2 border-black px-2 py-1 text-xs font-bold hover:bg-red-600 hover:text-white"
+                              title="Remove with no payment"
                             >
                               ×
                             </button>
