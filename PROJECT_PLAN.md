@@ -30,7 +30,7 @@ Players get character sheets, a simple map with draggable tokens, AI-generated s
              │  • AI GM (LLM API)    │
              │  • TTS generation     │
              │  • Image generation   │
-             │  • Game state sync    │
+             │  • Game state sync (Supabase Realtime) │
              └───────────┬───────────┘
                          │
              ┌───────────┴───────────┐
@@ -51,13 +51,28 @@ Players get character sheets, a simple map with draggable tokens, AI-generated s
 |---|---|---|
 | Framework | Next.js (React) | API routes + frontend in one project, fast to scaffold |
 | State | Zustand | Minimal boilerplate, simple |
-| Persistence | Supabase or Firebase | Realtime sync for multiplayer, auth, storage for free |
+| Persistence | Supabase | Postgres + **Realtime** (`postgres_changes` + optional `broadcast`), auth, RLS |
 | Styling | Tailwind + cyberpunk theme | Fast to vibecode, pull colors from existing SCSS |
 | Dice | Custom (~50 lines) | Just need `XdY` + exploding d10 |
-| AI GM | OpenAI / Claude API with tool calling | The AI doesn't just chat — it mutates game state via tools |
+| AI GM | OpenRouter (e.g. GLM via **Route Handlers**, keys server-only) | Tool calling mutates game state; same stack as STT/TTS HTTP APIs |
 | TTS | OpenAI TTS API or ElevenLabs | GM narration read aloud |
 | Image Gen | DALL-E / Flux | Scene illustrations on demand |
-| Multiplayer | Supabase Realtime or Firebase Realtime DB | Free tier covers small groups |
+| Multiplayer | **Supabase Realtime** | DB is source of truth; no custom WebSocket server required for baseline |
+| Hosting | **VPS + Node** (preferred) or cloud | Next.js API routes need a place to run; match `.kiro` deployment notes |
+
+---
+
+## Environment variables (Supabase)
+
+Put secrets in **`app/.env.local`** (Next.js loads it automatically; do not commit it).
+
+| Variable | What it is | Where it runs |
+|----------|------------|----------------|
+| **`NEXT_PUBLIC_SUPABASE_URL`** | Project URL (`https://xxxxx.supabase.co`) | **Browser + server** — the `NEXT_PUBLIC_` prefix embeds it in the client bundle (this URL is not secret). |
+| **`NEXT_PUBLIC_SUPABASE_ANON_KEY`** | **Anonymous (public) API key** from Supabase → Project Settings → API | **Browser + server** — safe to expose; **Row Level Security** must restrict what users can read/write. This is the key the React app uses via `lib/supabase.ts`. |
+| **`SUPABASE_SERVICE_ROLE_KEY`** | **Service role** key (same API settings page, **secret**) | **Server only** — never prefix with `NEXT_PUBLIC_`. Bypasses RLS; use only in Route Handlers, server scripts, or imports (e.g. `getServiceRoleClient()` in `lib/supabase.ts`). Do not ship to the browser. |
+
+You need **all three** for full stack work: the two public vars for the normal client, and the service role for admin operations (data import, future server-side jobs) where RLS would block the anon key.
 
 ---
 
@@ -68,6 +83,7 @@ Players get character sheets, a simple map with draggable tokens, AI-generated s
 - Character sheets do their own math (stat totals, armor SP, wound state, BTM). These numbers are always correct.
 - The AI-GM reads that data, makes rulings, narrates outcomes, and calls tools to update state.
 - Players never argue with a calculator. The AI never silently gets a number wrong.
+- **Tabletop trust:** the group is trusted; dice run in the client roller, and players can adjust sheets and damage manually like at a physical table. The AI’s job is **guidance** (especially for learners), not anti-cheat.
 
 ---
 
@@ -85,7 +101,7 @@ The AI-GM has **tool/function calls** that directly change game state. When the 
 | `deduct_money(character, amount)` | Subtract eurobucks |
 | `add_item(character, item)` | Add weapon/gear/cyberware to inventory |
 | `remove_item(character, item_id)` | Remove from inventory |
-| `request_roll(character, skill, modifiers)` | Ask a player to roll dice |
+| `request_roll(character, skill, modifiers)` | Guide player to roll (open roller / suggest formula); not server-enforced |
 | `move_token(token_id, x, y)` | Reposition NPC token on map |
 | `generate_scenery(description)` | Trigger image generation for a scene |
 | `play_narration(text)` | Send text to TTS |
@@ -155,7 +171,7 @@ These all become simpler with an AI-GM:
 | **3** | Dice roller + AI-GM integration with tool calling. Core loop: player describes action → AI responds → rolls happen → state updates. |
 | **4** | Map component (background image + draggable token divs). Scenery image display panel. |
 | **5** | TTS integration. Shopping flow via AI tools. Polish the chat/GM console UI. |
-| **6-7** | Multiplayer sync (if needed). System prompt refinement. Playtesting and iteration. |
+| **6-7** | Supabase Realtime session sync, auth flows. System prompt refinement. Playtesting and iteration. |
 
 ---
 

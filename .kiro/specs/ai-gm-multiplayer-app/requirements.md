@@ -4,6 +4,10 @@
 
 A real-time multiplayer application for playing Cyberpunk 2020 TTRPG with an AI Game Master. The system supports voice input via STT with speaker diarization, AI-driven narration with TTS, character sheet management, combat automation, shopping, and a simple map with token support. The AI-GM uses tool calling to mutate game state and a lorebook system for rule injection.
 
+**Trust and play style:** The app targets a **trusted tabletop group**. Players are not assumed to cheat; dice are rolled in the **client** dice roller, and participants may **manually** apply damage, adjust initiative order, and edit sheets like at a physical table. The AI-GM’s job is **guidance** (especially for players still learning CP2020), not cryptographic enforcement of rolls.
+
+**Real-time transport:** State synchronization uses **Supabase Realtime**—**PostgreSQL** as the source of truth with **`postgres_changes`** subscriptions, plus optional **`broadcast`** for ephemeral UI events. A separate self-hosted WebSocket server is not required for the baseline architecture.
+
 ## Glossary
 
 - **AI-GM**: The AI Game Master that narrates, adjudicates rules, controls NPCs, and manages game state via tool calls
@@ -17,7 +21,7 @@ A real-time multiplayer application for playing Cyberpunk 2020 TTRPG with an AI 
 - **SP**: Stopping Power - armor's damage reduction value
 - **BTM**: Body Type Modifier - damage reduction based on character's body type
 - **Session_State**: The current game state including all characters, NPCs, map, and session history
-- **Real-time_Sync**: Sub-second synchronization of game state across all connected clients
+- **Real-time_Sync**: Sub-second synchronization of game state across all connected clients (via Supabase Realtime and Postgres)
 - **OpenRouter**: API gateway for accessing multiple LLM providers
 - **GLM_4.7**: The specific LLM model to be used via OpenRouter
 
@@ -31,7 +35,7 @@ A real-time multiplayer application for playing Cyberpunk 2020 TTRPG with an AI 
 
 1. THE System SHALL be deployable as a web application accessible via modern browsers
 2. THE System SHALL support real-time state synchronization with latency under 500ms
-3. THE System SHALL use WebSocket connections for bidirectional real-time communication
+3. THE System SHALL use **Supabase Realtime** (PostgreSQL change subscriptions and optional channel broadcast) for real-time communication; authoritative state SHALL be read from the database on load and after reconnect
 4. THE System SHALL persist game state to a database for session continuity
 5. THE System SHALL support concurrent multiplayer sessions without interference
 
@@ -54,12 +58,13 @@ A real-time multiplayer application for playing Cyberpunk 2020 TTRPG with an AI 
 
 #### Acceptance Criteria
 
-1. WHEN the AI-GM narrates an action, THE System SHALL execute corresponding tool calls to update game state
+1. WHEN the AI-GM narrates an action, THE System SHALL execute corresponding tool calls to update game state when those tools are used
 2. THE AI-GM SHALL have access to tools for: apply_damage, deduct_money, add_item, remove_item, request_roll, move_token, generate_scenery, play_narration, lookup_rules, update_character_field
 3. WHEN a tool is called, THE System SHALL validate parameters before execution
-4. WHEN a tool executes, THE System SHALL update the database and broadcast changes to all clients
+4. WHEN a tool executes, THE System SHALL update the database; connected clients SHALL receive updates via Realtime subscriptions to persisted data
 5. THE System SHALL use OpenRouter API with GLM 4.7 model for AI-GM inference
 6. THE System SHALL maintain conversation context across multiple turns
+7. THE **request_roll** tool SHALL be usable to **guide** players (e.g. open the dice roller with a suggested formula); THE System SHALL NOT require server-authoritative dice for the baseline product
 
 ### Requirement 4: Lorebook Rule Injection
 
@@ -88,15 +93,16 @@ A real-time multiplayer application for playing Cyberpunk 2020 TTRPG with an AI 
 
 ### Requirement 6: Combat Automation
 
-**User Story:** As a player, I want combat to be automated by the AI-GM, so that damage, armor, and wound tracking happen without manual calculation.
+**User Story:** As a player, I want the app to support combat resolution, so that damage, armor, and wound tracking stay accurate whether the **AI-GM** applies mechanics via tools or **players** adjust the sheet at the table.
 
 #### Acceptance Criteria
 
-1. WHEN the AI-GM resolves an attack, THE System SHALL apply the damage pipeline: roll damage → head multiplier → subtract SP → subtract BTM → apply remaining damage
+1. WHEN the AI-GM resolves an attack (via tool or narration), THE System SHALL be able to apply the damage pipeline: roll damage → head multiplier → subtract SP → subtract BTM → apply remaining damage
 2. WHEN armor absorbs damage, THE System SHALL reduce SP by 1 (ablation)
 3. WHEN damage is applied, THE System SHALL update the character's damage total and wound state
 4. WHEN a character reaches a new wound threshold, THE System SHALL apply stat penalties automatically
 5. THE System SHALL support hit location targeting with the d10 hit location table
+6. THE System SHALL allow **players** to apply damage and related combat updates **manually** through the character sheet (tabletop-style), in addition to AI-driven tool execution
 
 ### Requirement 7: Shopping System
 
@@ -141,9 +147,9 @@ A real-time multiplayer application for playing Cyberpunk 2020 TTRPG with an AI 
 
 #### Acceptance Criteria
 
-1. WHEN any game state changes, THE System SHALL broadcast updates to all connected clients within 500ms
-2. THE System SHALL use WebSocket connections for real-time communication
-3. WHEN a client reconnects, THE System SHALL sync the current game state
+1. WHEN any persisted game state changes, THE System SHALL deliver updates to subscribed clients within 500ms under normal conditions
+2. THE System SHALL use **Supabase Realtime** (`postgres_changes` for durable data; optional `broadcast` for ephemeral events)
+3. WHEN a client reconnects, THE System SHALL sync the current game state from the **database** and re-establish Realtime subscriptions
 4. THE System SHALL handle network interruptions gracefully without data loss
 5. THE System SHALL support optimistic updates with rollback on conflict
 
@@ -161,7 +167,7 @@ A real-time multiplayer application for playing Cyberpunk 2020 TTRPG with an AI 
 
 ### Requirement 12: Dice Rolling System
 
-**User Story:** As a player, I want to roll dice when requested, so that skill checks and attacks are resolved fairly.
+**User Story:** As a player, I want to roll dice when requested, so that skill checks and attacks are resolved with visible mechanics and guidance from the AI-GM.
 
 #### Acceptance Criteria
 
@@ -170,6 +176,7 @@ A real-time multiplayer application for playing Cyberpunk 2020 TTRPG with an AI 
 3. THE System SHALL support dice formulas: XdY, XdY+Z, 1d10x10
 4. WHEN a roll is made, THE System SHALL display individual die results and total
 5. THE System SHALL send roll results to the AI-GM for adjudication
+6. THE System SHALL NOT require server-side random generation for baseline play; **fairness** is social (trusted group), not a cryptographic guarantee
 
 ### Requirement 13: Data Extraction from Foundry
 
@@ -215,7 +222,7 @@ A real-time multiplayer application for playing Cyberpunk 2020 TTRPG with an AI 
 
 1. WHEN an AI-GM tool call fails, THE System SHALL log the error and notify the AI-GM
 2. WHEN the LLM API is unavailable, THE System SHALL display a clear error message
-3. WHEN a WebSocket connection drops, THE System SHALL attempt reconnection automatically
+3. WHEN a Realtime subscription or network connection drops, THE System SHALL attempt reconnection and resubscription automatically
 4. WHEN invalid data is received, THE System SHALL validate and reject it safely
 5. THE System SHALL provide user-friendly error messages without exposing technical details
 
@@ -237,7 +244,7 @@ A real-time multiplayer application for playing Cyberpunk 2020 TTRPG with an AI 
 
 #### Acceptance Criteria
 
-1. THE System SHALL be deployable to cloud platforms (Vercel, Railway, Fly.io)
+1. THE System SHALL be deployable to cloud platforms and **self-hosted** environments (e.g. VPS with Node, Docker, Railway, Fly.io, Vercel)
 2. THE System SHALL use environment variables for API keys and configuration
 3. THE System SHALL include a development mode with hot reloading
 4. THE System SHALL provide clear documentation for setup and deployment

@@ -4,11 +4,18 @@
 
 This implementation plan breaks down the design into discrete coding tasks. The approach is incremental: start with core game logic (pure functions), build up the data layer and state management, then add the UI components, AI integration, and finally real-time multiplayer features. Each task builds on previous work, with checkpoints to validate progress.
 
+### Architecture decisions (current)
+
+- **Real-time sync:** **Supabase Realtime** (not a custom WebSocket server in Next.js). Authoritative state lives in **PostgreSQL**; clients subscribe via **`postgres_changes`**. Ephemeral events (typing hints, optional live drag previews, roll prompts) use **Realtime `broadcast`** on a per-session channel when not worth persisting as rows.
+- **AI and voice:** **Next.js Route Handlers** (`app/api/.../route.ts`) call **OpenRouter**, STT, and TTS with secrets in server-side env vars. The browser never holds API keys for those services.
+- **Tabletop trust:** Dice use the **client** dice roller; the AI **`request_roll`** tool is for **guidance** (open roller, suggest formula), not cryptographic enforcement. Players may apply damage, initiative order, and sheet edits themselves—consistent with a trusted group.
+- **Deployment:** Prefer **self-hosted Next.js on a VPS** (or similar long-running host) as the primary target; cloud platforms (e.g. Vercel) remain valid if Realtime + API routes fit the hosting model.
+
 ## Tasks
 
 - [x] 1. Set up project structure and dependencies
   - Initialize Next.js 14+ project with TypeScript and App Router
-  - Install dependencies: Zustand, Tailwind CSS, Supabase client, fast-check, ws/Socket.io
+  - Install dependencies: Zustand, Tailwind CSS, Supabase client, fast-check
   - Configure Tailwind with cyberpunk color theme from Foundry SCSS
   - Set up environment variables for API keys (OpenRouter, Supabase, STT, TTS)
   - _Requirements: 18.1, 18.2, 18.3, 14.1_
@@ -432,34 +439,34 @@ This implementation plan breaks down the design into discrete coding tasks. The 
 - [ ] 8. Checkpoint - Validate character sheet
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 9. Implement WebSocket server for real-time sync
-  - [ ] 9.1 Create WebSocket server in api/ws/route.ts
-    - Set up WebSocket server with connection handling
-    - Implement session-based room management
-    - Handle client connect, disconnect, reconnect
+- [ ] 9. Implement Supabase Realtime session sync
+  - [ ] 9.1 Create Realtime subscription module (e.g. `lib/realtime/session-channel.ts`)
+    - Subscribe to `postgres_changes` for session-scoped tables: `characters`, `tokens`, `chat_messages`, etc.
+    - Join a per-session Realtime channel (`session:${sessionId}`) with Supabase Auth
+    - Handle subscribe errors, disconnect, and resubscribe after tab focus / network recovery
     - _Requirements: 1.2, 1.3, 10.2_
 
-  - [ ] 9.2 Implement message broadcasting
-    - Broadcast state updates to all clients in a session
-    - Handle message types: state_update, chat_message, token_move, roll_request
+  - [ ] 9.2 Durable updates vs ephemeral broadcast
+    - Persist important state to Postgres first (writes go through Supabase client + RLS); UI updates from `postgres_changes`
+    - Use Realtime **`broadcast`** on the session channel for ephemeral payloads (e.g. roll_request UX, typing, optional token drag preview) that should not spam the database
+    - Document which event types use rows vs broadcast to avoid conflicting sources of truth
     - _Requirements: 10.1_
 
   - [ ] 9.3 Implement client reconnection and state sync
-    - Send full state snapshot on reconnect
-    - Handle connection health with heartbeat
+    - On (re)connect: load authoritative snapshot from Postgres (session load / refetch), then attach Realtime subscriptions
+    - Do not rely on broadcast alone for history—chat and character rows must be recoverable from the DB
     - _Requirements: 10.3_
 
   - [ ]* 9.4 Write property test for client reconnection
     - **Property 22: Client Reconnection State Sync**
     - **Validates: Requirements 10.3**
 
-  - [ ] 9.4 Integrate WebSocket with Zustand store
-    - Subscribe to store changes and broadcast updates
-    - Apply incoming updates to store
-    - Handle optimistic updates with rollback
+  - [ ] 9.5 Integrate Realtime with Zustand store
+    - On outbound writes: optimistic local updates where helpful; reconcile from `postgres_changes`
+    - Apply incoming Realtime payloads to the store; rollback optimistic rows on RLS/error rejection
     - _Requirements: 10.5_
 
-  - [ ]* 9.5 Write property test for optimistic update rollback
+  - [ ]* 9.6 Write property test for optimistic update rollback
     - **Property 23: Optimistic Update Rollback**
     - **Validates: Requirements 10.5**
 
@@ -496,8 +503,9 @@ This implementation plan breaks down the design into discrete coding tasks. The 
   - [ ] 10.7 Create tool-executor.ts for tool calling
     - Define tool schemas with validation
     - Implement tool handlers: apply_damage, deduct_money, add_item, remove_item, request_roll, move_token, generate_scenery, play_narration, lookup_rules, update_character_field
+    - **`request_roll`:** surface to the client as guidance (open dice roller, suggested formula)—does not replace player agency or enforce server-side randomness
     - Validate parameters before execution
-    - Execute state mutations and update database
+    - Execute state mutations and update database (Realtime propagates via `postgres_changes`)
     - _Requirements: 3.2, 3.3, 3.4_
 
   - [ ]* 10.8 Write property test for tool parameter validation
@@ -606,9 +614,10 @@ This implementation plan breaks down the design into discrete coding tasks. The 
     - **Property 20: Token Ownership**
     - **Validates: Requirements 8.6**
 
-  - [ ] 14.4 Integrate token movement with WebSocket
-    - Broadcast token moves to all clients
-    - Receive and apply token moves from AI-GM
+  - [ ] 14.4 Integrate token movement with Realtime
+    - Persist token `x,y` (and related fields) to Postgres; other clients receive updates via `postgres_changes`
+    - Optional: `broadcast` for smooth drag preview; commit position on drag end
+    - AI-GM `move_token` tool updates the same rows
     - _Requirements: 8.3, 8.4_
 
 - [ ] 15. Implement authentication and authorization
@@ -665,9 +674,9 @@ This implementation plan breaks down the design into discrete coding tasks. The 
     - Return fallback responses on errors
     - _Requirements: 16.2_
 
-  - [ ] 17.4 Add error handling to WebSocket server
-    - Handle connection errors gracefully
-    - Implement auto-reconnect on client
+  - [ ] 17.4 Add error handling for Realtime subscriptions
+    - Handle channel subscribe failures and connection drops gracefully
+    - Implement client resubscribe / refetch after errors
     - _Requirements: 16.3_
 
   - [ ] 17.5 Add error logging
@@ -721,14 +730,13 @@ This implementation plan breaks down the design into discrete coding tasks. The 
 
 - [ ] 21. Deployment preparation
   - [ ] 21.1 Set up production environment variables
-    - Add all API keys to Vercel environment
-    - Configure Supabase production database
+    - Configure secrets on the target host (VPS process manager, Docker, or Vercel/hosting dashboard)
+    - Configure Supabase production database and Realtime
     - _Requirements: 18.2_
 
-  - [ ] 21.2 Deploy to Vercel
-    - Connect GitHub repository
-    - Configure build settings
-    - Deploy to production
+  - [ ] 21.2 Deploy Next.js (VPS or cloud)
+    - **Preferred:** build and run Next.js on a VPS (Node, systemd, PM2, or Docker) for predictable API + long-running behavior
+    - **Alternative:** Vercel or similar if compatible with the chosen stack
     - _Requirements: 18.1_
 
   - [ ] 21.3 Write deployment documentation
@@ -745,3 +753,4 @@ This implementation plan breaks down the design into discrete coding tasks. The 
 - Unit tests validate specific examples and edge cases
 - The implementation follows a bottom-up approach: game logic → data layer → UI → AI integration → real-time features
 - All tests are required to ensure comprehensive correctness validation from the start
+- A **custom Node WebSocket server (Socket.io, etc.)** is an optional future escalation if Realtime limits or product needs change; it is not required for the current plan

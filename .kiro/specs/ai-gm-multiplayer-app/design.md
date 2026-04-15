@@ -2,9 +2,9 @@
 
 ## Overview
 
-This application is a real-time multiplayer web platform for playing Cyberpunk 2020 TTRPG with an AI Game Master. The architecture follows a client-server model with WebSocket-based real-time synchronization, voice input via STT with speaker diarization, and AI-driven game state management through tool calling.
+This application is a real-time multiplayer web platform for playing Cyberpunk 2020 TTRPG with an AI Game Master. The architecture follows a client-server model with **Supabase Realtime** for synchronization: **PostgreSQL** is authoritative, with **`postgres_changes`** subscriptions for durable updates and optional **`broadcast`** for ephemeral UI events. Voice input uses STT (HTTP from Next.js Route Handlers to STT providers or self-hosted endpoints); AI-driven game state management uses **tool calling** from Route Handlers.
 
-The system is built on Next.js 14+ with React for the frontend, Supabase for real-time database and authentication, and integrates with OpenRouter (GLM 4.7) for AI-GM inference. Voice processing uses browser WebRTC APIs for audio capture, a cloud STT service with speaker diarization, and TTS for narration output.
+The system is built on Next.js 14+ with React for the frontend, Supabase for database, Realtime, and authentication, and integrates with OpenRouter (GLM 4.7) for AI-GM inference via **server-side** API routes. Voice processing uses browser **getUserMedia** / MediaRecorder for capture, STT over HTTP, and TTS for narration output. **Tabletop trust:** client-side dice; no server roll enforcement in the baseline design.
 
 ## Architecture
 
@@ -23,15 +23,15 @@ The system is built on Next.js 14+ with React for the frontend, Supabase for rea
 │  │         Zustand Store (Client State)                  │   │
 │  │  • Characters  • Map State  • Session History        │   │
 │  └──────────────────────────────────────────────────────┘   │
-│                          ↕ WebSocket                         │
+│                    ↕ Supabase Realtime                       │
 └──────────────────────────────────────────────────────────────┘
                            ↕
 ┌──────────────────────────────────────────────────────────────┐
-│                  Next.js Server (API Routes)                  │
+│                  Next.js Server (Route Handlers)             │
 │                                                              │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
-│  │ WebSocket    │  │ AI-GM        │  │ Voice Processing │  │
-│  │ Server       │  │ Orchestrator │  │ (STT/TTS)        │  │
+│  │ (no custom   │  │ AI-GM        │  │ Voice / STT /    │  │
+│  │  WS server)  │  │ Orchestrator │  │ TTS HTTP APIs    │  │
 │  └──────────────┘  └──────────────┘  └──────────────────┘  │
 │                                                              │
 │  ┌──────────────────────────────────────────────────────┐   │
@@ -57,13 +57,12 @@ The system is built on Next.js 14+ with React for the frontend, Supabase for rea
 - React 18+ (Client Components for interactivity)
 - Zustand (Client state management)
 - Tailwind CSS (Styling with cyberpunk theme)
-- WebRTC API (Audio capture)
+- `getUserMedia` / MediaRecorder (Audio capture; upload to STT via HTTP)
 - Canvas API or React-DnD (Map and token rendering)
 
 **Backend:**
-- Next.js API Routes (REST endpoints)
-- WebSocket server (ws or Socket.io)
-- Node.js runtime
+- Next.js Route Handlers (`app/api/.../route.ts`) — REST endpoints for AI-GM, STT, TTS; secrets stay server-side
+- Node.js runtime (same process as Next on VPS or serverless handlers on cloud hosts)
 
 **Database & Auth:**
 - Supabase (PostgreSQL + Realtime + Auth)
@@ -74,8 +73,9 @@ The system is built on Next.js 14+ with React for the frontend, Supabase for rea
 - OpenAI TTS or ElevenLabs (Text-to-speech)
 
 **Deployment:**
-- Vercel (Next.js hosting)
-- Supabase Cloud (Database)
+- **Preferred:** VPS or container host running Next.js (predictable API + env)
+- **Alternative:** Vercel or similar for frontend/API if compatible with hosting constraints
+- Supabase Cloud (Database + Realtime + Auth)
 
 ## Components and Interfaces
 
@@ -326,17 +326,20 @@ interface SkillsEnhancedProps {
 
 ### 2. Server Components
 
-#### WebSocket Server
+#### Real-time sync (Supabase Realtime)
+
+Durable state changes are written to PostgreSQL (via Supabase client + RLS). Clients subscribe with **`postgres_changes`** filtered by `session_id`. Ephemeral events (e.g. roll-request UX, typing indicators, optional live drag preview) may use **`channel.broadcast`** on `session:${sessionId}` without persisting every event.
+
 ```typescript
-interface WSMessage {
-  type: 'state_update' | 'chat_message' | 'token_move' | 'roll_request';
-  payload: any;
-  sessionId: string;
+// Durable: characters, tokens, chat_messages — subscribe to postgres_changes
+// Ephemeral: { event: 'roll_prompt', ... } — channel.broadcast, optional
+
+interface SessionBroadcastPayload {
+  event: 'roll_request' | 'typing' | 'token_drag' | string;
+  payload: Record<string, unknown>;
 }
 
-// Manages WebSocket connections per session
-// Broadcasts state updates to all clients in a session
-// Handles client reconnection and state sync
+// Reconnect: refetch session from DB, then channel.subscribe() again
 ```
 
 #### AI-GM Orchestrator
@@ -376,8 +379,8 @@ interface ToolDefinition {
 
 // Validates tool call parameters
 // Executes state mutations (apply_damage, deduct_money, etc.)
-// Updates database
-// Broadcasts changes via WebSocket
+// Updates database; Realtime delivers changes to subscribers (postgres_changes)
+// request_roll: guidance only — opens client dice roller; no server RNG requirement
 ```
 
 #### Lorebook System
@@ -875,8 +878,8 @@ const channel = supabase.channel(`session:${sessionId}`)
 - Timeout errors (504)
 
 **3. Real-time Errors**
-- WebSocket connection failures
-- Message delivery failures
+- Realtime subscription or channel failures
+- Broadcast message delivery failures
 - State synchronization conflicts
 
 ### Error Handling Strategies
@@ -937,20 +940,12 @@ try {
 }
 ```
 
-**WebSocket Errors:**
+**Realtime subscription errors:**
 ```typescript
-wsServer.on('error', (error, ws) => {
-  logger.error('WebSocket error', { error, clientId: ws.clientId });
-  
-  // Attempt graceful close
-  ws.close(1011, 'Server error');
-});
-
-wsServer.on('close', (ws) => {
-  // Clean up client state
-  removeClient(ws.clientId);
-  
-  // Client will auto-reconnect and resync
+channel.subscribe((status, err) => {
+  if (status === 'SUBSCRIBED') return;
+  logger.error('Realtime channel error', { status, err, sessionId });
+  // Refetch session from Postgres, then resubscribe
 });
 ```
 
@@ -1128,11 +1123,11 @@ const weaponArbitrary = fc.record({
 
 **Real-time Sync:**
 - Multiple clients connecting to same session
-- State updates broadcast to all clients
-- Reconnection and state sync
+- State updates delivered via Realtime (`postgres_changes`) to all subscribers
+- Reconnection and state sync from database + resubscribe
 
 **AI-GM Flow:**
-- Player input → AI response → tool execution → state update → broadcast
+- Player input → AI response → tool execution → state persisted → Realtime notifies clients
 
 **Voice Processing:**
 - Audio capture → STT → speaker diarization → character mapping → AI-GM
@@ -1151,7 +1146,7 @@ const weaponArbitrary = fc.record({
 - Database query performance under load
 
 **Latency Testing:**
-- WebSocket message delivery < 500ms
+- Realtime notification path < 500ms under normal conditions
 - AI-GM response time < 5s (excluding LLM inference)
 - Database operations < 200ms
 
@@ -1165,9 +1160,9 @@ const weaponArbitrary = fc.record({
 
 3. **Character Sheet Component** - Build the UI for displaying and editing characters. This validates the game logic integration.
 
-4. **WebSocket Server** - Implement real-time communication layer for state synchronization.
+4. **Supabase Realtime** - Subscribe to `postgres_changes` (+ optional broadcast) and wire to Zustand.
 
-5. **AI-GM Integration** - Build context assembly, tool executor, and OpenRouter API integration.
+5. **AI-GM Integration** - Build context assembly, tool executor, and OpenRouter API integration (Route Handlers).
 
 6. **Voice Processing** - Integrate STT with speaker diarization and TTS for narration.
 
@@ -1194,10 +1189,10 @@ const weaponArbitrary = fc.record({
 - GLM 4.7 offers good performance for tool calling
 - Fallback options if primary model is unavailable
 
-**Why WebSocket over Server-Sent Events:**
-- Bidirectional communication needed (client can send actions)
-- Lower latency for real-time updates
-- Better for voice streaming
+**Why Supabase Realtime instead of a custom Node WebSocket server:**
+- Aligns with Postgres as source of truth and RLS; fewer moving parts to deploy
+- `postgres_changes` for durable state; `broadcast` for ephemeral UI when needed
+- Custom Socket.io/WebSocket service remains an optional future path if requirements outgrow Realtime
 
 **Why fast-check for Property Testing:**
 - Mature JavaScript property testing library
@@ -1236,10 +1231,9 @@ const weaponArbitrary = fc.record({
 - Pagination for chat history
 - Archiving old sessions
 
-**WebSocket:**
-- Connection pooling
-- Message batching for bulk updates
-- Heartbeat for connection health
+**Realtime:**
+- Prefer DB writes for authoritative updates; avoid duplicating state in broadcast-only messages
+- Monitor Supabase Realtime quotas and connection counts
 
 **Caching:**
 - Static game data (weapons, armor) cached in memory
@@ -1248,5 +1242,5 @@ const weaponArbitrary = fc.record({
 
 **Monitoring:**
 - Error tracking (Sentry)
-- Performance monitoring (Vercel Analytics)
+- Performance monitoring (hosting provider or OpenTelemetry)
 - Database query performance (Supabase Dashboard)
