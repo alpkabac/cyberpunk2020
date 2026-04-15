@@ -179,9 +179,64 @@ export const martialActionBonuses: Record<string, Record<string, number>> = {
   Brawling: {},
 };
 
+/** Lowercase alias → canonical key in {@link martialActionBonuses} (multiplayer-safe name resolution). */
+const MARTIAL_ARTS_ALIASES: Record<string, string> = (() => {
+  const m: Record<string, string> = {};
+  for (const k of Object.keys(martialActionBonuses)) {
+    m[k.toLowerCase()] = k;
+  }
+  Object.assign(m, {
+    'martial arts: choi li fut': 'Martial Arts: ChoiLiFut',
+    'martial arts: thai kick boxing': 'Martial Arts: ThaiKickBoxing',
+    'martial arts: thai kickboxing': 'Martial Arts: ThaiKickBoxing',
+    'martial arts: tae kwon do': 'Martial Arts: TaeKwonDo',
+    'martial arts: animal kung fu': 'Martial Arts: AnimalKungFu',
+  });
+  return m;
+})();
+
+/**
+ * Maps a skill name from the sheet (any alias) to the canonical martial arts key, or null if not a style.
+ * Legacy untyped "Martial Arts" → null. Imported / Foundry names with spaces map to the same bonuses.
+ */
+export function resolveMartialArtsStyleKey(skillName: string): string | null {
+  const t = skillName.trim();
+  if (!t) return null;
+  const low = t.toLowerCase();
+  if (low === 'martial arts') return null;
+  const canon = MARTIAL_ARTS_ALIASES[low];
+  if (canon && martialActionBonuses[canon]) return canon;
+  return null;
+}
+
 export function getMartialActionBonus(martialKey: string, actionKey: string): number {
-  const style = martialActionBonuses[martialKey] || {};
+  const canon = resolveMartialArtsStyleKey(martialKey);
+  const key = canon ?? (martialActionBonuses[martialKey] ? martialKey : '');
+  const style = (key && martialActionBonuses[key]) || {};
   return Number(style[actionKey] || 0);
+}
+
+/** CP2020: one skill per language; stored as `Know Language: <label>` for stable sync across sessions. */
+export const KNOW_LANGUAGE_SKILL_PREFIX = 'Know Language: ' as const;
+
+export function formatKnowLanguageSkill(language: string): string {
+  const s = language.trim();
+  if (!s) {
+    throw new Error('Language name is required');
+  }
+  return `${KNOW_LANGUAGE_SKILL_PREFIX}${s}`;
+}
+
+export function isKnowLanguageSkill(skillName: string): boolean {
+  return skillName.trim().startsWith(KNOW_LANGUAGE_SKILL_PREFIX);
+}
+
+/** Returns the language part after the prefix, or null if not a Know Language skill. */
+export function parseKnowLanguageLabel(skillName: string): string | null {
+  const t = skillName.trim();
+  if (!t.toLowerCase().startsWith(KNOW_LANGUAGE_SKILL_PREFIX.toLowerCase())) return null;
+  const rest = t.slice(t.indexOf(':') + 1).trim();
+  return rest || null;
 }
 
 // ============================================================================
@@ -394,6 +449,21 @@ export interface SkillDefinition {
   category: string;
 }
 
+/** CP2020: one Martial Arts *style* per skill. Names align with {@link resolveMartialArtsStyleKey} / Foundry imports. */
+export const martialArtsStyleSkillDefinitions: SkillDefinition[] = [
+  { name: 'Martial Arts: Aikido', linkedStat: 'ref', category: 'REF' },
+  { name: 'Martial Arts: Animal Kung Fu', linkedStat: 'ref', category: 'REF' },
+  { name: 'Martial Arts: Boxing', linkedStat: 'ref', category: 'REF' },
+  { name: 'Martial Arts: Capoeira', linkedStat: 'ref', category: 'REF' },
+  { name: 'Martial Arts: Choi Li Fut', linkedStat: 'ref', category: 'REF' },
+  { name: 'Martial Arts: Judo', linkedStat: 'ref', category: 'REF' },
+  { name: 'Martial Arts: Karate', linkedStat: 'ref', category: 'REF' },
+  { name: 'Martial Arts: Savate', linkedStat: 'ref', category: 'REF' },
+  { name: 'Martial Arts: Tae Kwon Do', linkedStat: 'ref', category: 'REF' },
+  { name: 'Martial Arts: Thai Kick Boxing', linkedStat: 'ref', category: 'REF' },
+  { name: 'Martial Arts: Wrestling', linkedStat: 'ref', category: 'REF' },
+];
+
 export const masterSkillList: SkillDefinition[] = [
   // ATTR
   { name: 'Personal Grooming', linkedStat: 'attr', category: 'ATTR' },
@@ -431,7 +501,6 @@ export const masterSkillList: SkillDefinition[] = [
   { name: 'Geology', linkedStat: 'int', category: 'INT' },
   { name: 'Hide/Evade', linkedStat: 'int', category: 'INT' },
   { name: 'History', linkedStat: 'int', category: 'INT' },
-  { name: 'Know Language', linkedStat: 'int', category: 'INT' },
   { name: 'Library Search', linkedStat: 'int', category: 'INT' },
   { name: 'Mathematics', linkedStat: 'int', category: 'INT' },
   { name: 'Physics', linkedStat: 'int', category: 'INT' },
@@ -452,7 +521,7 @@ export const masterSkillList: SkillDefinition[] = [
   { name: 'Fencing', linkedStat: 'ref', category: 'REF' },
   { name: 'Handgun', linkedStat: 'ref', category: 'REF' },
   { name: 'Heavy Weapons', linkedStat: 'ref', category: 'REF' },
-  { name: 'Martial Arts', linkedStat: 'ref', category: 'REF' },
+  ...martialArtsStyleSkillDefinitions,
   { name: 'Melee', linkedStat: 'ref', category: 'REF' },
   { name: 'Motorcycle', linkedStat: 'ref', category: 'REF' },
   { name: 'Operate Hvy. Machinery', linkedStat: 'ref', category: 'REF' },

@@ -3,7 +3,12 @@
 import React, { useState } from 'react';
 import { Character, Skill, Stats } from '@/lib/types';
 import { useGameStore } from '@/lib/store/game-store';
-import { masterSkillList, SkillDefinition } from '@/lib/game-logic/lookups';
+import {
+  masterSkillList,
+  SkillDefinition,
+  formatKnowLanguageSkill,
+  KNOW_LANGUAGE_SKILL_PREFIX,
+} from '@/lib/game-logic/lookups';
 
 function newSkillId(): string {
   return `skill-${crypto.randomUUID()}`;
@@ -30,6 +35,7 @@ export function SkillsTab({ character, editable }: SkillsTabProps) {
   const [sortBy, setSortBy] = useState<'name' | 'category' | 'value'>('category');
   const [showAddSkill, setShowAddSkill] = useState(false);
   const [addSkillSearch, setAddSkillSearch] = useState('');
+  const [knowLanguageLabel, setKnowLanguageLabel] = useState('');
 
   const saBonus = character.specialAbility?.value ?? 0;
 
@@ -91,16 +97,37 @@ export function SkillsTab({ character, editable }: SkillsTabProps) {
 
   const handleAddCustomSkill = () => {
     if (!addSkillSearch.trim()) return;
+    const raw = addSkillSearch.trim();
     const newSkill: Skill = {
       id: newSkillId(),
-      name: addSkillSearch.trim(),
+      name: raw,
       value: 0,
       linkedStat: 'int',
-      category: 'Custom',
+      category:
+        raw.toLowerCase().startsWith(KNOW_LANGUAGE_SKILL_PREFIX.toLowerCase()) ? 'INT' : 'Custom',
       isChipped: false,
     };
     addSkill(character.id, newSkill);
     setAddSkillSearch('');
+  };
+
+  const handleAddKnowLanguage = () => {
+    let name: string;
+    try {
+      name = formatKnowLanguageSkill(knowLanguageLabel);
+    } catch {
+      return;
+    }
+    if (existingSkillNames.has(name.toLowerCase())) return;
+    addSkill(character.id, {
+      id: newSkillId(),
+      name,
+      value: 0,
+      linkedStat: 'int',
+      category: 'INT',
+      isChipped: false,
+    });
+    setKnowLanguageLabel('');
   };
 
   return (
@@ -197,15 +224,39 @@ export function SkillsTab({ character, editable }: SkillsTabProps) {
 
       {/* Add Skill Panel */}
       {showAddSkill && editable && (
-        <div className="border-2 border-green-600 bg-green-50 p-3">
-          <div className="font-bold uppercase text-sm mb-2">Add Skill from Master List</div>
+        <div className="border-2 border-green-600 bg-green-50 p-3 space-y-3">
+          <div className="font-bold uppercase text-sm">Add Skill from Master List</div>
           <input
             type="text"
             placeholder="Search skills to add..."
             value={addSkillSearch}
             onChange={(e) => setAddSkillSearch(e.target.value)}
-            className="w-full border border-black px-2 py-1 mb-2"
+            className="w-full border border-black px-2 py-1"
           />
+          <div className="border-t border-green-700 pt-2">
+            <div className="text-xs font-bold uppercase text-green-900 mb-1">Know Language (CP2020)</div>
+            <p className="text-xs text-gray-700 mb-2">
+              One skill per language. Stored as <code className="bg-white px-0.5">{KNOW_LANGUAGE_SKILL_PREFIX}</code>
+              … so names stay consistent in multiplayer sync.
+            </p>
+            <div className="flex flex-wrap gap-2 items-center">
+              <input
+                type="text"
+                placeholder="e.g. Japanese, Spanish, Streetslang…"
+                value={knowLanguageLabel}
+                onChange={(e) => setKnowLanguageLabel(e.target.value)}
+                className="flex-1 min-w-[160px] border border-black px-2 py-1 text-sm"
+              />
+              <button
+                type="button"
+                onClick={handleAddKnowLanguage}
+                disabled={!knowLanguageLabel.trim()}
+                className="border-2 border-black px-3 py-1 text-sm font-bold uppercase bg-white hover:bg-green-100 disabled:opacity-50"
+              >
+                Add language
+              </button>
+            </div>
+          </div>
           <div className="max-h-40 overflow-y-auto space-y-1">
             {availableSkills.slice(0, 20).map((def) => (
               <button

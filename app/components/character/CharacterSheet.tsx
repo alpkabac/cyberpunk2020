@@ -19,7 +19,9 @@ interface CharacterSheetProps {
 type TabType = 'skills' | 'combat' | 'gear' | 'cyberware' | 'life' | 'netrun';
 
 export function CharacterSheet({ characterId, editable = false }: CharacterSheetProps) {
-  const character = useGameStore((state) => state.characters.byId[characterId]);
+  const character = useGameStore(
+    (state) => state.characters.byId[characterId] ?? state.npcs.byId[characterId],
+  );
   const [activeTab, setActiveTab] = useState<TabType>('skills');
 
   if (!character) {

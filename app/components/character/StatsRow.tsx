@@ -1,8 +1,21 @@
 'use client';
 
 import React from 'react';
-import { Character, Stats } from '@/lib/types';
+import { Character, StatBlock, Stats } from '@/lib/types';
 import { useGameStore } from '@/lib/store/game-store';
+
+function safeStatTotal(stat: StatBlock): number {
+  if (typeof stat.total === 'number' && Number.isFinite(stat.total)) {
+    return stat.total;
+  }
+  const b = Number(stat.base ?? 0);
+  const tm = Number(stat.tempMod ?? 0);
+  const c = Number(stat.cyberMod ?? 0);
+  const a = Number(stat.armorMod ?? 0);
+  const w = Number(stat.woundMod ?? 0);
+  const sum = b + tm + c + a + w;
+  return Number.isFinite(sum) ? Math.max(0, sum) : 0;
+}
 
 interface StatsRowProps {
   character: Character;
@@ -33,14 +46,18 @@ export function StatsRow({ character, editable }: StatsRowProps) {
   };
 
   const handleStatRoll = (statKey: keyof Stats) => {
-    const total = stats[statKey].total || stats[statKey].base + stats[statKey].tempMod;
+    const total = safeStatTotal(stats[statKey]);
     openDiceRoller(`1d10+${total}`);
   };
 
   // Check if a stat has modifiers (cyber, armor, wound)
   const hasModifiers = (statKey: keyof Stats): boolean => {
     const s = stats[statKey];
-    return (s.cyberMod !== 0 || s.armorMod !== 0 || s.woundMod !== 0);
+    return (
+      Number(s.cyberMod ?? 0) !== 0 ||
+      Number(s.armorMod ?? 0) !== 0 ||
+      Number(s.woundMod ?? 0) !== 0
+    );
   };
 
   return (
@@ -49,7 +66,7 @@ export function StatsRow({ character, editable }: StatsRowProps) {
       <div className="grid grid-cols-9 gap-1">
         {(Object.keys(stats) as Array<keyof Stats>).map((statKey) => {
           const stat = stats[statKey];
-          const total = stat.total ?? stat.base + stat.tempMod;
+          const total = safeStatTotal(stat);
           const hasMods = hasModifiers(statKey);
 
           return (
@@ -67,7 +84,7 @@ export function StatsRow({ character, editable }: StatsRowProps) {
                   <>
                     <input
                       type="number"
-                      value={stat.base}
+                      value={Number.isFinite(Number(stat.base)) ? stat.base : ''}
                       onChange={(e) =>
                         handleStatChange(statKey, 'base', parseInt(e.target.value) || 1)
                       }
@@ -78,7 +95,7 @@ export function StatsRow({ character, editable }: StatsRowProps) {
                     <span>+</span>
                     <input
                       type="number"
-                      value={stat.tempMod}
+                      value={Number.isFinite(Number(stat.tempMod)) ? stat.tempMod : ''}
                       onChange={(e) =>
                         handleStatChange(statKey, 'tempMod', parseInt(e.target.value) || 0)
                       }
@@ -89,10 +106,10 @@ export function StatsRow({ character, editable }: StatsRowProps) {
                   </>
                 ) : (
                   <span>
-                    {stat.base}
-                    {stat.tempMod !== 0 && (
+                    {stat.base ?? '—'}
+                    {Number(stat.tempMod ?? 0) !== 0 && (
                       <span className="text-gray-500">
-                        {stat.tempMod > 0 ? `+${stat.tempMod}` : stat.tempMod}
+                        {Number(stat.tempMod) > 0 ? `+${stat.tempMod}` : stat.tempMod}
                       </span>
                     )}
                   </span>
@@ -160,7 +177,8 @@ export function StatsRow({ character, editable }: StatsRowProps) {
           <div className="flex flex-col items-center border border-black p-1 bg-white" title="Humanity / Max Humanity">
             <label className="font-bold uppercase">HUM</label>
             <span>
-              {derivedStats.humanity}/{(stats.emp.base + stats.emp.tempMod + stats.emp.cyberMod) * 10}
+              {derivedStats.humanity}/
+              {(Number(stats.emp.base ?? 0) + Number(stats.emp.tempMod ?? 0) + Number(stats.emp.cyberMod ?? 0)) * 10}
             </span>
           </div>
           <div className="flex flex-col items-center border border-black p-1 bg-white" title="Save Number (= BT)">

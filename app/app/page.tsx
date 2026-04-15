@@ -31,6 +31,10 @@ export default function Home() {
 
           <div className="text-sm text-gray-600 space-y-1">
             <p>Full character sheet with stats, skills, combat, gear, cyberware, netrunning, and lifepath.</p>
+            <p className="text-gray-500">
+              Cloud: open <code className="text-gray-400">/character-demo?session=…</code> after creating a session in
+              Realtime test — edits save to Supabase and sync to other clients.
+            </p>
             <p className="text-gray-700">More features coming: AI-GM chat, dice roller, token map, multiplayer.</p>
           </div>
         </div>

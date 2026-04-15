@@ -24,25 +24,47 @@ interface LifeTabProps {
   editable: boolean;
 }
 
+const EMPTY_LIFEPATH: Lifepath = {
+  style: { clothes: '', hair: '', affectations: '' },
+  ethnicity: '',
+  language: '',
+  familyBackground: '',
+  siblings: '',
+  motivations: {
+    traits: '',
+    valuedPerson: '',
+    valueMost: '',
+    feelAboutPeople: '',
+    valuedPossession: '',
+  },
+  lifeEvents: [],
+  notes: '',
+};
+
+/** Merge partial DB / JSON lifepath with defaults so nested fields are never undefined. */
 function ensureLifepath(character: Character): Lifepath {
-  return (
-    character.lifepath || {
-      style: { clothes: '', hair: '', affectations: '' },
-      ethnicity: '',
-      language: '',
-      familyBackground: '',
-      siblings: '',
-      motivations: {
-        traits: '',
-        valuedPerson: '',
-        valueMost: '',
-        feelAboutPeople: '',
-        valuedPossession: '',
-      },
-      lifeEvents: [],
-      notes: '',
-    }
-  );
+  const lp = character.lifepath;
+  if (!lp) return { ...EMPTY_LIFEPATH };
+  return {
+    style: {
+      clothes: lp.style?.clothes ?? '',
+      hair: lp.style?.hair ?? '',
+      affectations: lp.style?.affectations ?? '',
+    },
+    ethnicity: lp.ethnicity ?? '',
+    language: lp.language ?? '',
+    familyBackground: lp.familyBackground ?? '',
+    siblings: lp.siblings ?? '',
+    motivations: {
+      traits: lp.motivations?.traits ?? '',
+      valuedPerson: lp.motivations?.valuedPerson ?? '',
+      valueMost: lp.motivations?.valueMost ?? '',
+      feelAboutPeople: lp.motivations?.feelAboutPeople ?? '',
+      valuedPossession: lp.motivations?.valuedPossession ?? '',
+    },
+    lifeEvents: Array.isArray(lp.lifeEvents) ? lp.lifeEvents : [],
+    notes: lp.notes ?? '',
+  };
 }
 
 /** CP2020 Lifepath: roll 1D10 per column or pick from list. */
