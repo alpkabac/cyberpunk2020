@@ -3,6 +3,10 @@
 -- ============================================================================
 -- This schema defines all tables for the multiplayer AI-GM application
 -- Run this in your Supabase SQL editor to set up the database
+--
+-- If you already applied an older schema.sql, run:
+--   migrations/001_character_sheet_columns.sql
+-- to add the same columns without recreating tables.
 
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -60,24 +64,33 @@ CREATE TABLE IF NOT EXISTS characters (
   age INTEGER DEFAULT 25,
   points INTEGER DEFAULT 0,
   
-  -- Stats (JSONB for flexibility)
+  -- Stats (JSONB; matches StatBlock in app/lib/types.ts)
   stats JSONB NOT NULL DEFAULT '{
-    "int": {"base": 5, "tempMod": 0},
-    "ref": {"base": 5, "tempMod": 0},
-    "tech": {"base": 5, "tempMod": 0},
-    "cool": {"base": 5, "tempMod": 0},
-    "attr": {"base": 5, "tempMod": 0},
-    "luck": {"base": 5, "tempMod": 0},
-    "ma": {"base": 5, "tempMod": 0},
-    "bt": {"base": 5, "tempMod": 0},
-    "emp": {"base": 5, "tempMod": 0}
+    "int": {"base": 5, "tempMod": 0, "cyberMod": 0, "armorMod": 0, "woundMod": 0, "total": 5},
+    "ref": {"base": 5, "tempMod": 0, "cyberMod": 0, "armorMod": 0, "woundMod": 0, "total": 5},
+    "tech": {"base": 5, "tempMod": 0, "cyberMod": 0, "armorMod": 0, "woundMod": 0, "total": 5},
+    "cool": {"base": 5, "tempMod": 0, "cyberMod": 0, "armorMod": 0, "woundMod": 0, "total": 5},
+    "attr": {"base": 5, "tempMod": 0, "cyberMod": 0, "armorMod": 0, "woundMod": 0, "total": 5},
+    "luck": {"base": 5, "tempMod": 0, "cyberMod": 0, "armorMod": 0, "woundMod": 0, "total": 5},
+    "ma": {"base": 5, "tempMod": 0, "cyberMod": 0, "armorMod": 0, "woundMod": 0, "total": 5},
+    "bt": {"base": 5, "tempMod": 0, "cyberMod": 0, "armorMod": 0, "woundMod": 0, "total": 5},
+    "emp": {"base": 5, "tempMod": 0, "cyberMod": 0, "armorMod": 0, "woundMod": 0, "total": 5}
   }'::jsonb,
-  
-  -- Skills array
+
+  -- Role special ability (matches Character.specialAbility)
+  special_ability JSONB NOT NULL DEFAULT '{"name":"","value":0}'::jsonb,
+
+  reputation INTEGER NOT NULL DEFAULT 0,
+  improvement_points INTEGER NOT NULL DEFAULT 0,
+
+  -- Skills array (Skill[] in app — id, name, value, linkedStat, category, isChipped, …)
   skills JSONB DEFAULT '[]'::jsonb,
   
   -- Wound tracking
   damage INTEGER DEFAULT 0,
+  is_stunned BOOLEAN NOT NULL DEFAULT FALSE,
+
+  combat_modifiers JSONB DEFAULT '{"initiative":0,"stunSave":0}'::jsonb,
   
   -- Hit locations with SP
   hit_locations JSONB NOT NULL DEFAULT '{
@@ -283,11 +296,13 @@ CREATE TABLE IF NOT EXISTS programs (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name TEXT NOT NULL,
   program_type TEXT DEFAULT '',
+  program_class TEXT DEFAULT '',
   strength INTEGER DEFAULT 0,
   mu_cost INTEGER DEFAULT 0,
   cost INTEGER DEFAULT 0,
   description TEXT DEFAULT '',
   source TEXT DEFAULT '',
+  options JSONB DEFAULT '[]'::jsonb,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -338,3 +353,12 @@ COMMENT ON TABLE gear IS 'Reference data for miscellaneous items';
 COMMENT ON TABLE vehicles IS 'Reference data for all vehicles in the game';
 COMMENT ON TABLE skills_reference IS 'Reference data for all skills in the game';
 COMMENT ON TABLE programs IS 'Reference data for netrunning programs';
+
+COMMENT ON COLUMN characters.stats IS 'Stats JSON matching StatBlock (base, tempMod, cyberMod, armorMod, woundMod, total) per key';
+COMMENT ON COLUMN characters.special_ability IS 'Role special ability: { name, value }';
+COMMENT ON COLUMN characters.reputation IS 'Reputation (REP)';
+COMMENT ON COLUMN characters.improvement_points IS 'Improvement Points (IP)';
+COMMENT ON COLUMN characters.is_stunned IS 'Stun state after failed stun save';
+COMMENT ON COLUMN characters.combat_modifiers IS 'Optional initiative / stun save bonuses: { initiative, stunSave }';
+COMMENT ON COLUMN programs.program_class IS 'Net program class (matches app Program.programClass)';
+COMMENT ON COLUMN programs.options IS 'Program options array (matches app Program.options)';

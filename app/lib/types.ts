@@ -327,6 +327,8 @@ export interface Token {
   y: number;
   size: number;
   controlledBy: 'player' | 'gm';
+  /** Set when synced from Postgres (`tokens.character_id`). */
+  characterId?: string | null;
 }
 
 export interface Scene {

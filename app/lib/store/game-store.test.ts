@@ -739,6 +739,61 @@ describe('Game Store', () => {
       expect(selectCharacterById(useGameStore.getState(), 'char-1')?.damage).toBe(13);
     });
 
+    it('optimistic character edit can be rolled back', () => {
+      const character: Character = {
+        id: 'char-1',
+        userId: 'user-1',
+        sessionId: 'session-1',
+        name: 'Test Character',
+        type: 'character',
+        imageUrl: '',
+        role: 'Solo',
+        age: 25,
+        points: 60,
+        stats: {
+          int: createStatBlock(7, 0),
+          ref: createStatBlock(8, 0),
+          tech: createStatBlock(5, 0),
+          cool: createStatBlock(7, 0),
+          attr: createStatBlock(6, 0),
+          luck: createStatBlock(5, 0),
+          ma: createStatBlock(6, 0),
+          bt: createStatBlock(8, 0),
+          emp: createStatBlock(6, 0),
+        },
+        specialAbility: { name: 'Combat Sense', value: 0 },
+        reputation: 0,
+        improvementPoints: 0,
+        skills: [],
+        damage: 0,
+        isStunned: false,
+        hitLocations: {
+          Head: { location: [1], stoppingPower: 0, ablation: 0 },
+          Torso: { location: [2, 3, 4], stoppingPower: 0, ablation: 0 },
+          rArm: { location: [5], stoppingPower: 0, ablation: 0 },
+          lArm: { location: [6], stoppingPower: 0, ablation: 0 },
+          lLeg: { location: [7, 8], stoppingPower: 0, ablation: 0 },
+          rLeg: { location: [9, 10], stoppingPower: 0, ablation: 0 },
+        },
+        sdp: {
+          sum: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },
+          current: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },
+        },
+        eurobucks: 1000,
+        items: [],
+        netrunDeck: null,
+        lifepath: null,
+      };
+
+      useGameStore.getState().addCharacter(character);
+      useGameStore.getState().beginOptimisticCharacterEdit('char-1');
+      useGameStore.getState().updateCharacter('char-1', { name: 'Optimistic Name' });
+      expect(selectCharacterById(useGameStore.getState(), 'char-1')?.name).toBe('Optimistic Name');
+
+      useGameStore.getState().rollbackOptimisticCharacterEdit('char-1');
+      expect(selectCharacterById(useGameStore.getState(), 'char-1')?.name).toBe('Test Character');
+    });
+
     it('applyDeathSaveRollResult adds stun save mod to death target', () => {
       const character: Character = {
         id: 'char-1',

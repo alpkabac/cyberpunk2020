@@ -29,6 +29,7 @@ import {
 } from '../game-logic/formulas';
 import { maxDamageFromDiceFormula } from '../game-logic/dice';
 import { getAmmoConsumed } from '../game-logic/lookups';
+import type { LoadedSessionSnapshot } from '../realtime/session-load';
 
 // ============================================================================
 // State Interface
@@ -79,6 +80,11 @@ interface GameState {
     diceRollIntent: DiceRollIntent | null;
     isChatInputFocused: boolean;
     isVoiceRecording: boolean;
+  };
+
+  /** Optimistic edit backups for Supabase writes (rollback on RLS/error). */
+  realtime: {
+    optimisticBackupByCharacterId: Record<string, Character>;
   };
 }
 
@@ -163,6 +169,17 @@ interface GameActions {
   applyDeathSaveRollResult: (characterId: string, flatRollTotal: number) => void;
   setVoiceRecording: (isRecording: boolean) => void;
 
+  // Supabase Realtime / session sync
+  hydrateFromLoadedSnapshot: (snapshot: LoadedSessionSnapshot) => void;
+  applyRemoteCharacterUpsert: (character: Character) => void;
+  removeRemoteCharacter: (characterId: string) => void;
+  applyRemoteTokenUpsert: (token: Token) => void;
+  removeRemoteToken: (tokenId: string) => void;
+  appendRemoteChatMessage: (message: ChatMessage) => void;
+  beginOptimisticCharacterEdit: (characterId: string) => void;
+  rollbackOptimisticCharacterEdit: (characterId: string) => void;
+  clearOptimisticCharacterBackup: (characterId: string) => void;
+
   // Utility actions
   reset: () => void;
 }
@@ -228,6 +245,10 @@ const initialState: GameState = {
     diceRollIntent: null,
     isChatInputFocused: false,
     isVoiceRecording: false,
+  },
+
+  realtime: {
+    optimisticBackupByCharacterId: {},
   },
 };
 
@@ -746,6 +767,168 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     set((state) => ({
       ui: { ...state.ui, isVoiceRecording: isRecording },
     })),
+
+  hydrateFromLoadedSnapshot: (snapshot) =>
+    set((state) => {
+      const byIdChar: Record<string, Character> = {};
+      const allIdsChar: string[] = [];
+      const byIdNpc: Record<string, Character> = {};
+      const allIdsNpc: string[] = [];
+
+      for (const c of snapshot.characters) {
+        const rec = recalcCharacter(c);
+        if (rec.type === 'npc') {
+          byIdNpc[rec.id] = rec;
+          allIdsNpc.push(rec.id);
+        } else {
+          byIdChar[rec.id] = rec;
+          allIdsChar.push(rec.id);
+        }
+      }
+
+      return {
+        session: {
+          id: snapshot.session.id,
+          name: snapshot.session.name,
+          createdBy: snapshot.session.createdBy,
+          createdAt: snapshot.session.createdAt,
+          activeScene: snapshot.session.activeScene,
+          settings: snapshot.session.settings,
+          sessionSummary: snapshot.session.sessionSummary,
+        },
+        characters: { byId: byIdChar, allIds: allIdsChar },
+        npcs: { byId: byIdNpc, allIds: allIdsNpc },
+        map: {
+          backgroundImageUrl: snapshot.session.mapBackgroundUrl,
+          tokens: snapshot.tokens,
+        },
+        chat: {
+          messages: snapshot.chatMessages,
+          isLoading: false,
+        },
+        ui: state.ui,
+        realtime: { optimisticBackupByCharacterId: {} },
+      };
+    }),
+
+  applyRemoteCharacterUpsert: (character) =>
+    set((state) => {
+      const rec = recalcCharacter(character);
+      if (rec.type === 'npc') {
+        const exists = state.npcs.allIds.includes(rec.id);
+        return {
+          npcs: {
+            byId: { ...state.npcs.byId, [rec.id]: rec },
+            allIds: exists ? state.npcs.allIds : [...state.npcs.allIds, rec.id],
+          },
+        };
+      }
+      const exists = state.characters.allIds.includes(rec.id);
+      return {
+        characters: {
+          byId: { ...state.characters.byId, [rec.id]: rec },
+          allIds: exists ? state.characters.allIds : [...state.characters.allIds, rec.id],
+        },
+      };
+    }),
+
+  removeRemoteCharacter: (characterId) =>
+    set((state) => {
+      if (characterId in state.characters.byId) {
+        const byId = { ...state.characters.byId };
+        delete byId[characterId];
+        return {
+          characters: {
+            byId,
+            allIds: state.characters.allIds.filter((id) => id !== characterId),
+          },
+        };
+      }
+      if (characterId in state.npcs.byId) {
+        const byId = { ...state.npcs.byId };
+        delete byId[characterId];
+        return {
+          npcs: {
+            byId,
+            allIds: state.npcs.allIds.filter((id) => id !== characterId),
+          },
+        };
+      }
+      return state;
+    }),
+
+  applyRemoteTokenUpsert: (token) =>
+    set((state) => {
+      const idx = state.map.tokens.findIndex((t) => t.id === token.id);
+      if (idx === -1) {
+        return { map: { ...state.map, tokens: [...state.map.tokens, token] } };
+      }
+      const next = [...state.map.tokens];
+      next[idx] = token;
+      return { map: { ...state.map, tokens: next } };
+    }),
+
+  removeRemoteToken: (tokenId) =>
+    set((state) => ({
+      map: {
+        ...state.map,
+        tokens: state.map.tokens.filter((t) => t.id !== tokenId),
+      },
+    })),
+
+  appendRemoteChatMessage: (message) =>
+    set((state) => {
+      if (state.chat.messages.some((m) => m.id === message.id)) return state;
+      return {
+        chat: { ...state.chat, messages: [...state.chat.messages, message] },
+      };
+    }),
+
+  beginOptimisticCharacterEdit: (characterId) =>
+    set((state) => {
+      const c = state.characters.byId[characterId] ?? state.npcs.byId[characterId];
+      if (!c) return state;
+      return {
+        realtime: {
+          ...state.realtime,
+          optimisticBackupByCharacterId: {
+            ...state.realtime.optimisticBackupByCharacterId,
+            [characterId]: { ...c },
+          },
+        },
+      };
+    }),
+
+  rollbackOptimisticCharacterEdit: (characterId) =>
+    set((state) => {
+      const backup = state.realtime.optimisticBackupByCharacterId[characterId];
+      if (!backup) return state;
+      const rest = { ...state.realtime.optimisticBackupByCharacterId };
+      delete rest[characterId];
+      if (backup.type === 'npc') {
+        return {
+          npcs: {
+            ...state.npcs,
+            byId: { ...state.npcs.byId, [characterId]: backup },
+          },
+          realtime: { ...state.realtime, optimisticBackupByCharacterId: rest },
+        };
+      }
+      return {
+        characters: {
+          ...state.characters,
+          byId: { ...state.characters.byId, [characterId]: backup },
+        },
+        realtime: { ...state.realtime, optimisticBackupByCharacterId: rest },
+      };
+    }),
+
+  clearOptimisticCharacterBackup: (characterId) =>
+    set((state) => {
+      const rest = { ...state.realtime.optimisticBackupByCharacterId };
+      delete rest[characterId];
+      return { realtime: { ...state.realtime, optimisticBackupByCharacterId: rest } };
+    }),
 
   reset: () => set(initialState),
 }));

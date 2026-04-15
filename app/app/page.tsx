@@ -22,6 +22,13 @@ export default function Home() {
             Character Sheet Demo
           </Link>
 
+          <Link
+            href="/realtime-test"
+            className="block w-full max-w-md mx-auto bg-violet-900/80 hover:bg-violet-800 text-violet-100 border-2 border-violet-500/60 px-8 py-4 font-bold uppercase text-lg tracking-wider transition-colors"
+          >
+            Realtime session test (two tabs)
+          </Link>
+
           <div className="text-sm text-gray-600 space-y-1">
             <p>Full character sheet with stats, skills, combat, gear, cyberware, netrunning, and lifepath.</p>
             <p className="text-gray-700">More features coming: AI-GM chat, dice roller, token map, multiplayer.</p>

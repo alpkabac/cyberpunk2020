@@ -439,36 +439,42 @@ This implementation plan breaks down the design into discrete coding tasks. The 
 - [ ] 8. Checkpoint - Validate character sheet
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 9. Implement Supabase Realtime session sync
-  - [ ] 9.1 Create Realtime subscription module (e.g. `lib/realtime/session-channel.ts`)
+- [x] 9. Implement Supabase Realtime session sync
+  - [x] 9.1 Create Realtime subscription module (e.g. `lib/realtime/session-channel.ts`)
     - Subscribe to `postgres_changes` for session-scoped tables: `characters`, `tokens`, `chat_messages`, etc.
     - Join a per-session Realtime channel (`session:${sessionId}`) with Supabase Auth
     - Handle subscribe errors, disconnect, and resubscribe after tab focus / network recovery
     - _Requirements: 1.2, 1.3, 10.2_
+    - **COMPLETED:** `app/lib/realtime/session-channel.ts`, `connectSessionRealtime`, `attachSessionRealtimeRecovery`
 
-  - [ ] 9.2 Durable updates vs ephemeral broadcast
+  - [x] 9.2 Durable updates vs ephemeral broadcast
     - Persist important state to Postgres first (writes go through Supabase client + RLS); UI updates from `postgres_changes`
     - Use Realtime **`broadcast`** on the session channel for ephemeral payloads (e.g. roll_request UX, typing, optional token drag preview) that should not spam the database
     - Document which event types use rows vs broadcast to avoid conflicting sources of truth
     - _Requirements: 10.1_
+    - **COMPLETED:** `app/lib/realtime/realtime-events.ts`
 
-  - [ ] 9.3 Implement client reconnection and state sync
+  - [x] 9.3 Implement client reconnection and state sync
     - On (re)connect: load authoritative snapshot from Postgres (session load / refetch), then attach Realtime subscriptions
     - Do not rely on broadcast alone for history—chat and character rows must be recoverable from the DB
     - _Requirements: 10.3_
+    - **COMPLETED:** `fetchSessionSnapshot` + `connectSessionRealtime` / `recover()`
 
-  - [ ]* 9.4 Write property test for client reconnection
+  - [x] 9.4 Write property test for client reconnection
     - **Property 22: Client Reconnection State Sync**
     - **Validates: Requirements 10.3**
+    - **COMPLETED:** `app/lib/realtime/session-sync.property.test.ts`
 
-  - [ ] 9.5 Integrate Realtime with Zustand store
+  - [x] 9.5 Integrate Realtime with Zustand store
     - On outbound writes: optimistic local updates where helpful; reconcile from `postgres_changes`
     - Apply incoming Realtime payloads to the store; rollback optimistic rows on RLS/error rejection
     - _Requirements: 10.5_
+    - **COMPLETED:** `hydrateFromLoadedSnapshot`, remote upserts, `beginOptimisticCharacterEdit` / `rollbackOptimisticCharacterEdit`, `createDefaultPostgresHandlersForGameStore`
 
-  - [ ]* 9.6 Write property test for optimistic update rollback
+  - [x] 9.6 Write property test for optimistic update rollback
     - **Property 23: Optimistic Update Rollback**
     - **Validates: Requirements 10.5**
+    - **COMPLETED:** `app/lib/realtime/session-sync.property.test.ts`
 
 - [ ] 10. Implement AI-GM orchestrator
   - [ ] 10.1 Create context-builder.ts for LLM context assembly
