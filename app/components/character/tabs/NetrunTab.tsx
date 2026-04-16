@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Character, NetrunDeck, Program } from '@/lib/types';
 import { useGameStore } from '@/lib/store/game-store';
+import { sheetRollContext } from '@/lib/dice-roll-send-to-gm';
 import { ItemBrowser } from '../ItemBrowser';
 
 interface NetrunTabProps {
@@ -32,6 +33,7 @@ export function NetrunTab({ character, editable }: NetrunTabProps) {
   const updateCharacterField = useGameStore((state) => state.updateCharacterField);
   const removeItem = useGameStore((state) => state.removeItem);
   const openDiceRoller = useGameStore((state) => state.openDiceRoller);
+  const sessionId = useGameStore((state) => state.session.id);
 
   const deck: NetrunDeck = character.netrunDeck || DEFAULT_DECK;
   const programs = character.items.filter((item): item is Program => item.type === 'program');
@@ -82,9 +84,11 @@ export function NetrunTab({ character, editable }: NetrunTabProps) {
             <button
               onClick={() =>
                 interfaceSkill &&
-                openDiceRoller(
-                  `1d10+${interfaceSkill.value + (character.stats.int.total || 0)}`,
-                )
+                openDiceRoller(`1d10+${interfaceSkill.value + (character.stats.int.total || 0)}`, {
+                  kind: 'custom',
+                  characterId: character.id,
+                  ...sheetRollContext(character, sessionId, 'Interface (netrun)'),
+                })
               }
               className="w-full text-2xl font-bold hover:bg-blue-100 cursor-pointer"
             >

@@ -15,6 +15,7 @@ import {
   rangedCombatModifiers,
   RangeBracket,
 } from '@/lib/game-logic/lookups';
+import { sheetRollContext } from '@/lib/dice-roll-send-to-gm';
 
 /** Must match `rangedCombatModifiers` key for aimed shots (attack −4; zone chosen if hit). */
 const AIMED_SHOT_LABEL = 'Aimed shot (specific area)' as const;
@@ -46,6 +47,7 @@ export function CombatTab({ character, editable }: CombatTabProps) {
   const [aimedZoneByWeapon, setAimedZoneByWeapon] = useState<Record<string, string>>({});
 
   const openDiceRoller = useGameStore((state) => state.openDiceRoller);
+  const sessionId = useGameStore((state) => state.session.id);
   const beginStunSaveRoll = useGameStore((state) => state.beginStunSaveRoll);
   const beginDeathSaveRoll = useGameStore((state) => state.beginDeathSaveRoll);
   const updateCharacterField = useGameStore((state) => state.updateCharacterField);
@@ -157,6 +159,7 @@ export function CombatTab({ character, editable }: CombatTabProps) {
       reliability: weapon.reliability,
       isMelee: weapon.weaponType === 'Melee',
       isAutoWeapon,
+      ...sheetRollContext(character, sessionId, `${weapon.name} attack`),
     });
   };
 
@@ -174,6 +177,7 @@ export function CombatTab({ character, editable }: CombatTabProps) {
         reliability: weapon.reliability,
         isMelee: weapon.weaponType === 'Melee',
         isAutoWeapon,
+        ...sheetRollContext(character, sessionId, `${weapon.name} attack`),
       });
     }
   };
@@ -196,7 +200,11 @@ export function CombatTab({ character, editable }: CombatTabProps) {
                     ? character.specialAbility.value
                     : 0;
                 const refTotal = character.stats.ref.total || 0;
-                openDiceRoller(`1d10+${refTotal + initMod + combatSense}`);
+                openDiceRoller(`1d10+${refTotal + initMod + combatSense}`, {
+                  kind: 'custom',
+                  characterId: character.id,
+                  ...sheetRollContext(character, sessionId, 'Initiative'),
+                });
               }}
               className="border-2 border-black p-3 hover:bg-gray-100 font-bold uppercase"
             >
@@ -340,12 +348,18 @@ export function CombatTab({ character, editable }: CombatTabProps) {
               </label>
               <button
                 type="button"
-                onClick={() =>
+                onClick={() => {
+                  const tgt = Math.max(1, Math.min(40, stabilizationTarget));
                   openDiceRoller(`1d10+${stabBonus}`, {
                     kind: 'stabilization',
-                    targetDamage: Math.max(1, Math.min(40, stabilizationTarget)),
-                  })
-                }
+                    targetDamage: tgt,
+                    ...sheetRollContext(
+                      character,
+                      sessionId,
+                      `Stabilization (patient damage ${tgt})`,
+                    ),
+                  });
+                }}
                 className="border-2 border-teal-900 bg-teal-200 px-3 py-2 font-bold uppercase hover:bg-teal-300"
               >
                 Roll stabilization
@@ -809,7 +823,11 @@ export function CombatTab({ character, editable }: CombatTabProps) {
                               const dmgFormula = isMelee && sdb !== 0
                                 ? `${weapon.damage}${sdb >= 0 ? '+' : ''}${sdb}`
                                 : weapon.damage;
-                              openDiceRoller(dmgFormula);
+                              openDiceRoller(dmgFormula, {
+                                kind: 'custom',
+                                characterId: character.id,
+                                ...sheetRollContext(character, sessionId, `${weapon.name} damage`),
+                              });
                             }}
                             className="flex-1 border-2 border-black p-2 font-bold uppercase text-sm bg-red-50 hover:bg-red-100"
                           >

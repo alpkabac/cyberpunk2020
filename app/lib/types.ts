@@ -421,11 +421,21 @@ export interface RollResult {
   firstD10Face?: number;
 }
 
+/**
+ * Optional context for posting a sheet roll to the AI-GM (`/api/gm`).
+ * Callers should set `rollSummary` + `sessionId` + `speakerName` when in a session (use `sheetRollContext` helper).
+ */
+export type DiceRollGmContext = {
+  rollSummary?: string;
+  sessionId?: string;
+  speakerName?: string;
+};
+
 /** Intent for the dice roller modal (stun/death saves, weapon attack fumbles, stabilization). */
 export type DiceRollIntent =
-  | { kind: 'stun'; characterId: string }
-  | { kind: 'death'; characterId: string }
-  | {
+  | ({ kind: 'stun'; characterId: string } & DiceRollGmContext)
+  | ({ kind: 'death'; characterId: string } & DiceRollGmContext)
+  | ({
       kind: 'attack';
       characterId: string;
       weaponId: string;
@@ -433,9 +443,17 @@ export type DiceRollIntent =
       isMelee: boolean;
       /** True when weapon is auto-capable (reserved for future Foundry-style options). */
       isAutoWeapon: boolean;
-    }
+    } & DiceRollGmContext)
   /** Medic roll: total ≥ targetDamage stabilizes the patient (does not auto-edit sheet). */
-  | { kind: 'stabilization'; targetDamage: number }
+  | ({ kind: 'stabilization'; targetDamage: number } & DiceRollGmContext)
+  /** Generic sheet roll with an explicit label (skills, stats, initiative, damage, netrun, etc.). */
+  | {
+      kind: 'custom';
+      characterId: string;
+      rollSummary: string;
+      sessionId?: string;
+      speakerName?: string;
+    }
   /** GM requested a player roll via `request_roll`; after rolling, post result to `/api/gm`. */
   | {
       kind: 'gm_request';

@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { useGameStore } from '@/lib/store/game-store';
 import { rollDice } from '@/lib/game-logic/dice';
 import { resolveAttackFumbleOutcome } from '@/lib/game-logic/fumbles';
+import { buildGmDiceRollMessage } from '@/lib/dice-roll-send-to-gm';
 import { RollResult } from '@/lib/types';
 
 interface DiceRollEntry {
@@ -11,6 +12,12 @@ interface DiceRollEntry {
   formula: string;
   result: RollResult;
   timestamp: number;
+  /** Captured when the roll completes so "Send to GM" still works after stun/death clears intent. */
+  sendToGm?: {
+    sessionId: string;
+    speakerName: string;
+    playerMessage: string;
+  };
 }
 
 export function DiceRoller() {
@@ -33,6 +40,8 @@ export function DiceRoller() {
   } | null>(null);
   const [gmSubmitError, setGmSubmitError] = useState<string | null>(null);
   const [gmSubmitting, setGmSubmitting] = useState(false);
+  const [sheetSendError, setSheetSendError] = useState<string | null>(null);
+  const [sheetSending, setSheetSending] = useState(false);
 
   const doRoll = useCallback((formula: string) => {
     const result = rollDice(formula);
@@ -41,17 +50,21 @@ export function DiceRoller() {
     setIsAnimating(true);
     setTimeout(() => setIsAnimating(false), 300);
 
+    const intentSnapshot = useGameStore.getState().ui.diceRollIntent;
+    const sendPayload = buildGmDiceRollMessage(intentSnapshot, formula, result.total);
+
     const entry: DiceRollEntry = {
       id: Date.now(),
       formula,
       result,
       timestamp: Date.now(),
+      ...(sendPayload ? { sendToGm: sendPayload } : {}),
     };
 
     setLastRoll(entry);
     setRollHistory((prev) => [entry, ...prev].slice(0, 20));
 
-    const intent = useGameStore.getState().ui.diceRollIntent;
+    const intent = intentSnapshot;
     const isFlat = formula.trim().toLowerCase().startsWith('flat:');
 
     if (!isFlat && intent?.kind === 'attack' && result.firstD10Face === 1) {
@@ -128,8 +141,37 @@ export function DiceRoller() {
     setStabilizationOutcome(null);
     setGmSubmitError(null);
     setGmSubmitting(false);
+    setSheetSendError(null);
+    setSheetSending(false);
     closeDiceRoller();
   }, [closeDiceRoller]);
+
+  const sendSheetRollToGm = useCallback(async () => {
+    const payload = lastRoll?.sendToGm;
+    if (!payload) return;
+    setSheetSendError(null);
+    setSheetSending(true);
+    try {
+      const res = await fetch('/api/gm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: payload.sessionId,
+          playerMessage: payload.playerMessage,
+          speakerName: payload.speakerName,
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        setSheetSendError(data.error ?? res.statusText ?? 'Request failed');
+        return;
+      }
+    } catch (e) {
+      setSheetSendError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSheetSending(false);
+    }
+  }, [lastRoll?.sendToGm]);
 
   const handleQuickRoll = (formula: string) => {
     setCustomFormula(formula);
@@ -277,6 +319,24 @@ export function DiceRoller() {
               {gmSubmitError && (
                 <div className="mt-3 text-left border-2 border-red-800 bg-red-50 text-red-900 text-xs p-2">
                   {gmSubmitError}
+                </div>
+              )}
+              {lastRoll.sendToGm && (
+                <div className="mt-3 text-left border-2 border-black bg-[#e8e8d0] p-2 space-y-1">
+                  <button
+                    type="button"
+                    onClick={() => void sendSheetRollToGm()}
+                    disabled={sheetSending}
+                    className="w-full border-2 border-black bg-white text-black py-2 font-bold uppercase text-sm hover:bg-amber-50 disabled:opacity-50"
+                  >
+                    {sheetSending ? 'Sending…' : 'Send roll to AI-GM'}
+                  </button>
+                  <p className="text-[10px] text-black font-mono break-words">
+                    {lastRoll.sendToGm.playerMessage}
+                  </p>
+                  {sheetSendError && (
+                    <p className="text-xs text-red-800 border border-red-800 bg-red-50 p-1">{sheetSendError}</p>
+                  )}
                 </div>
               )}
             </div>

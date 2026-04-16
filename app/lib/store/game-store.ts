@@ -719,26 +719,42 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
       },
     })),
 
-  beginStunSaveRoll: (characterId) =>
+  beginStunSaveRoll: (characterId) => {
+    const char = get().characters.byId[characterId] ?? get().npcs.byId[characterId];
+    const sessionId = get().session.id;
     set((state) => ({
       ui: {
         ...state.ui,
         isDiceRollerOpen: true,
         diceFormula: 'flat:1d10',
-        diceRollIntent: { characterId, kind: 'stun' },
+        diceRollIntent: {
+          characterId,
+          kind: 'stun',
+          sessionId: sessionId ?? undefined,
+          speakerName: char?.name,
+          rollSummary: 'Stun save',
+        },
       },
-    })),
+    }));
+  },
 
   beginDeathSaveRoll: (characterId) => {
-    const char = get().characters.byId[characterId];
+    const char = get().characters.byId[characterId] ?? get().npcs.byId[characterId];
     const target = char?.derivedStats?.deathSaveTarget ?? -1;
     if (target < 0) return;
+    const sessionId = get().session.id;
     set((state) => ({
       ui: {
         ...state.ui,
         isDiceRollerOpen: true,
         diceFormula: 'flat:1d10',
-        diceRollIntent: { characterId, kind: 'death' },
+        diceRollIntent: {
+          characterId,
+          kind: 'death',
+          sessionId: sessionId ?? undefined,
+          speakerName: char?.name,
+          rollSummary: 'Death save',
+        },
       },
     }));
   },

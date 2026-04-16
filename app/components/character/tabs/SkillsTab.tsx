@@ -9,6 +9,7 @@ import {
   formatKnowLanguageSkill,
   KNOW_LANGUAGE_SKILL_PREFIX,
 } from '@/lib/game-logic/lookups';
+import { sheetRollContext } from '@/lib/dice-roll-send-to-gm';
 
 function newSkillId(): string {
   return `skill-${crypto.randomUUID()}`;
@@ -21,6 +22,7 @@ interface SkillsTabProps {
 
 export function SkillsTab({ character, editable }: SkillsTabProps) {
   const openDiceRoller = useGameStore((state) => state.openDiceRoller);
+  const sessionId = useGameStore((state) => state.session.id);
   const addSkill = useGameStore((state) => state.addSkill);
   const updateSkill = useGameStore((state) => state.updateSkill);
   const removeSkill = useGameStore((state) => state.removeSkill);
@@ -44,7 +46,11 @@ export function SkillsTab({ character, editable }: SkillsTabProps) {
     const totalValue = skill.value + statTotal;
     const withSA =
       includeSpecialAbilityInRolls && character.specialAbility ? totalValue + saBonus : totalValue;
-    openDiceRoller(`1d10+${withSA}`);
+    openDiceRoller(`1d10+${withSA}`, {
+      kind: 'custom',
+      characterId: character.id,
+      ...sheetRollContext(character, sessionId, `${skill.name} (skill)`),
+    });
   };
 
   // Filter and sort skills

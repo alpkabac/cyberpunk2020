@@ -3,6 +3,7 @@
 import React from 'react';
 import { Character, StatBlock, Stats } from '@/lib/types';
 import { useGameStore } from '@/lib/store/game-store';
+import { sheetRollContext } from '@/lib/dice-roll-send-to-gm';
 
 function safeStatTotal(stat: StatBlock): number {
   if (typeof stat.total === 'number' && Number.isFinite(stat.total)) {
@@ -25,6 +26,7 @@ interface StatsRowProps {
 export function StatsRow({ character, editable }: StatsRowProps) {
   const updateCharacterField = useGameStore((state) => state.updateCharacterField);
   const openDiceRoller = useGameStore((state) => state.openDiceRoller);
+  const sessionId = useGameStore((state) => state.session.id);
 
   const { stats, derivedStats } = character;
 
@@ -47,7 +49,11 @@ export function StatsRow({ character, editable }: StatsRowProps) {
 
   const handleStatRoll = (statKey: keyof Stats) => {
     const total = safeStatTotal(stats[statKey]);
-    openDiceRoller(`1d10+${total}`);
+    openDiceRoller(`1d10+${total}`, {
+      kind: 'custom',
+      characterId: character.id,
+      ...sheetRollContext(character, sessionId, `${statLabels[statKey]} check`),
+    });
   };
 
   // Check if a stat has modifiers (cyber, armor, wound)
