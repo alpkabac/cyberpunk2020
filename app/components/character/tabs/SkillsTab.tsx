@@ -170,7 +170,7 @@ export function SkillsTab({ character, editable }: SkillsTabProps) {
 
       {/* Search and Sort */}
       <div className="flex flex-wrap gap-4 items-center">
-        <div className="flex-grow relative min-w-[200px]">
+        <div className="grow relative min-w-[200px]">
           <input
             type="text"
             placeholder="Search skills..."
@@ -308,7 +308,7 @@ export function SkillsTab({ character, editable }: SkillsTabProps) {
                   >
                     <button
                       onClick={() => handleRollSkill(skill)}
-                      className="flex-grow text-left"
+                      className="grow text-left"
                     >
                       <div className="font-bold flex items-center gap-1">
                         {skill.name}

@@ -600,28 +600,32 @@ This implementation plan breaks down the design into discrete coding tasks. The 
 - [ ] 11. Checkpoint - Validate AI-GM integration
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 12. Build Chat Interface component
-  - [ ] 12.1 Create ChatInterface.tsx with message display
+- [x] 12. Build Chat Interface component
+  - [x] 12.1 Create ChatInterface.tsx with message display
     - Display chat history with speaker names
     - Color-code messages by type (narration, player, system, roll)
     - Auto-scroll to latest message
     - _Requirements: 11.5_
+    - **COMPLETED:** `app/components/chat/ChatInterface.tsx`, integrated in `SessionRoomClient.tsx`
 
-  - [ ]* 12.2 Write property test for session history ordering
+  - [x]* 12.2 Write property test for session history ordering
     - **Property 24: Session History Ordering**
     - **Validates: Requirements 11.5**
+    - **COMPLETED:** `app/lib/chat/chat-order.ts`, `app/lib/chat/chat-order.property.test.ts`
 
-  - [ ] 12.3 Add text input for player messages
+  - [x] 12.3 Add text input for player messages
     - Text input with send button
     - Send message to AI-GM endpoint
     - Display AI response in chat
     - _Requirements: 3.1_
+    - **COMPLETED:** POST `/api/gm` from ChatInterface; narration/player rows via Realtime
 
-  - [ ] 12.4 Add dice roller UI
+  - [x] 12.4 Add dice roller UI
     - Display dice roller when AI-GM requests a roll
     - Show roll animation and results
     - Send results back to AI-GM
     - _Requirements: 12.1, 12.4, 12.5_
+    - **COMPLETED:** `request_roll` → system `roll_request` opens `DiceRoller`; `DiceRollIntent` `gm_request` POSTs roll to `/api/gm`; single `DiceRoller` mount in session room + character demo
 
 - [ ] 13. Implement voice processing
   - [ ] 13.1 Add audio capture with WebRTC

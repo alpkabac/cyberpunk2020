@@ -64,3 +64,14 @@ body {
   border-width: 0px;
   background-color: var(--foreground);
 }
+
+/* Number inputs: hide browser spinners (cleaner than default +/- UI on Windows) */
+input[type='number'].input-plain {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+input[type='number'].input-plain::-webkit-inner-spin-button,
+input[type='number'].input-plain::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}

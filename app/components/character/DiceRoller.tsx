@@ -27,6 +27,8 @@ export function DiceRoller() {
     target: number;
     success: boolean;
   } | null>(null);
+  const [gmSubmitError, setGmSubmitError] = useState<string | null>(null);
+  const [gmSubmitting, setGmSubmitting] = useState(false);
 
   const doRoll = useCallback((formula: string) => {
     const result = rollDice(formula);
@@ -63,6 +65,35 @@ export function DiceRoller() {
       setStabilizationOutcome(null);
     }
 
+    if (intent?.kind === 'gm_request') {
+      const { sessionId, reason, speakerName } = intent;
+      const playerMessage = `[Roll] ${formula} = ${result.total} (dice: ${result.rolls.join(', ')})${reason ? ` — ${reason}` : ''}`;
+      void (async () => {
+        setGmSubmitError(null);
+        setGmSubmitting(true);
+        try {
+          const res = await fetch('/api/gm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionId, playerMessage, speakerName }),
+          });
+          const data = (await res.json().catch(() => ({}))) as { error?: string };
+          if (!res.ok) {
+            setGmSubmitError(data.error ?? res.statusText ?? 'Request failed');
+            return;
+          }
+          const store = useGameStore.getState();
+          store.clearDiceRollIntent();
+          store.closeDiceRoller();
+        } catch (e) {
+          setGmSubmitError(e instanceof Error ? e.message : String(e));
+        } finally {
+          setGmSubmitting(false);
+        }
+      })();
+      return;
+    }
+
     if (intent && isFlat) {
       const store = useGameStore.getState();
       if (intent.kind === 'stun') {
@@ -89,6 +120,8 @@ export function DiceRoller() {
   const handleClose = useCallback(() => {
     setFumbleLines(null);
     setStabilizationOutcome(null);
+    setGmSubmitError(null);
+    setGmSubmitting(false);
     closeDiceRoller();
   }, [closeDiceRoller]);
 
@@ -227,6 +260,14 @@ export function DiceRoller() {
               {lastRoll.formula.toLowerCase().startsWith('flat:') && (
                 <div className="text-xs text-gray-600 mt-2">
                   Single d10 — no explosion (compare to save target)
+                </div>
+              )}
+              {gmSubmitting && (
+                <div className="mt-3 text-xs text-gray-700 font-mono">Sending result to AI-GM…</div>
+              )}
+              {gmSubmitError && (
+                <div className="mt-3 text-left border-2 border-red-800 bg-red-50 text-red-900 text-xs p-2">
+                  {gmSubmitError}
                 </div>
               )}
             </div>

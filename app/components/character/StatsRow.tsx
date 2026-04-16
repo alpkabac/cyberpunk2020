@@ -78,32 +78,41 @@ export function StatsRow({ character, editable }: StatsRowProps) {
             >
               <label className="text-xs font-bold uppercase">{statLabels[statKey]}</label>
 
-              {/* Base + Temp Mod */}
-              <div className="flex items-center gap-0.5 text-xs">
+              {/* Base + Temp Mod (stacked: avoids cramped row + native spinner chrome) */}
+              <div className="w-full min-w-0 text-xs">
                 {editable ? (
-                  <>
-                    <input
-                      type="number"
-                      value={Number.isFinite(Number(stat.base)) ? stat.base : ''}
-                      onChange={(e) =>
-                        handleStatChange(statKey, 'base', parseInt(e.target.value) || 1)
-                      }
-                      className="w-8 text-center border border-gray-400 p-0.5"
-                      min="1"
-                      max="15"
-                    />
-                    <span>+</span>
-                    <input
-                      type="number"
-                      value={Number.isFinite(Number(stat.tempMod)) ? stat.tempMod : ''}
-                      onChange={(e) =>
-                        handleStatChange(statKey, 'tempMod', parseInt(e.target.value) || 0)
-                      }
-                      className="w-8 text-center border border-gray-400 p-0.5"
-                      min="-10"
-                      max="10"
-                    />
-                  </>
+                  <div className="flex flex-col gap-0.5 w-full">
+                    <div className="flex items-center gap-0.5">
+                      <span className="text-[9px] text-gray-600 font-bold w-3 shrink-0 text-left">
+                        B
+                      </span>
+                      <input
+                        type="number"
+                        value={Number.isFinite(Number(stat.base)) ? stat.base : ''}
+                        onChange={(e) =>
+                          handleStatChange(statKey, 'base', parseInt(e.target.value) || 1)
+                        }
+                        className="input-plain min-w-0 flex-1 text-center border border-black px-0.5 py-0.5 text-xs tabular-nums leading-none"
+                        min="1"
+                        max="15"
+                      />
+                    </div>
+                    <div className="flex items-center gap-0.5">
+                      <span className="text-[9px] text-gray-600 font-bold w-3 shrink-0 text-left">
+                        T
+                      </span>
+                      <input
+                        type="number"
+                        value={Number.isFinite(Number(stat.tempMod)) ? stat.tempMod : ''}
+                        onChange={(e) =>
+                          handleStatChange(statKey, 'tempMod', parseInt(e.target.value) || 0)
+                        }
+                        className="input-plain min-w-0 flex-1 text-center border border-black px-0.5 py-0.5 text-xs tabular-nums leading-none"
+                        min="-10"
+                        max="10"
+                      />
+                    </div>
+                  </div>
                 ) : (
                   <span>
                     {stat.base ?? '—'}

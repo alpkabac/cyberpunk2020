@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import type { User } from '@supabase/supabase-js';
-import { CharacterSheet } from '@/components/character';
+import { CharacterSheet, DiceRoller } from '@/components/character';
+import { ChatInterface } from '@/components/chat';
 import { supabase } from '@/lib/supabase';
 import { useGameStore } from '@/lib/store/game-store';
 import { useSessionRealtimeSync } from '@/lib/hooks/useSessionRealtimeSync';
@@ -294,7 +295,19 @@ export function SessionRoomClient() {
             <p className="text-zinc-500 text-sm">Select a character from the list.</p>
           )}
         </main>
+
+        {user && cloudHydrated && !loadError && (
+          <aside className="w-full lg:w-[360px] shrink-0 lg:max-w-[420px]">
+            <ChatInterface
+              sessionId={sessionId}
+              speakerName={selectedCharacter?.name ?? user.email ?? 'Player'}
+              enabled
+            />
+          </aside>
+        )}
       </div>
+
+      {user && cloudHydrated && !loadError && <DiceRoller />}
     </div>
   );
 }

@@ -9,7 +9,6 @@ import { GearTab } from './tabs/GearTab';
 import { CyberwareTab } from './tabs/CyberwareTab';
 import { LifeTab } from './tabs/LifeTab';
 import { NetrunTab } from './tabs/NetrunTab';
-import { DiceRoller } from './DiceRoller';
 
 interface CharacterSheetProps {
   characterId: string;
@@ -72,9 +71,6 @@ export function CharacterSheet({ characterId, editable = false }: CharacterSheet
         {activeTab === 'life' && <LifeTab character={character} editable={editable} />}
         {activeTab === 'netrun' && <NetrunTab character={character} editable={editable} />}
       </div>
-
-      {/* Dice Roller Modal */}
-      <DiceRoller />
     </div>
   );
 }

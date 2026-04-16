@@ -435,7 +435,15 @@ export type DiceRollIntent =
       isAutoWeapon: boolean;
     }
   /** Medic roll: total ≥ targetDamage stabilizes the patient (does not auto-edit sheet). */
-  | { kind: 'stabilization'; targetDamage: number };
+  | { kind: 'stabilization'; targetDamage: number }
+  /** GM requested a player roll via `request_roll`; after rolling, post result to `/api/gm`. */
+  | {
+      kind: 'gm_request';
+      sessionId: string;
+      formula: string;
+      reason?: string;
+      speakerName: string;
+    };
 
 // ============================================================================
 // Helper to create a default StatBlock

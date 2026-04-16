@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import type { User } from '@supabase/supabase-js';
-import { CharacterSheet } from '@/components/character';
+import { CharacterSheet, DiceRoller } from '@/components/character';
 import { supabase } from '@/lib/supabase';
 import { useGameStore } from '@/lib/store/game-store';
 import { Character, createStatBlock, ROLE_SPECIAL_ABILITIES, Weapon, Armor, Cyberware } from '@/lib/types';
@@ -364,7 +364,10 @@ export function CharacterDemoClient() {
         )}
 
         {sheetId ? (
-          <CharacterSheet characterId={sheetId} editable={true} />
+          <>
+            <CharacterSheet characterId={sheetId} editable={true} />
+            <DiceRoller />
+          </>
         ) : !sessionId ? (
           characters.allIds.length === 0 ? (
             <div className="text-center text-gray-400 py-8">Loading character…</div>
