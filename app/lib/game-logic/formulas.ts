@@ -53,23 +53,6 @@ export function calculateStatTotal(stat: StatBlock): number {
 }
 
 /**
- * Calculate wound-adjusted stat value for critical/mortal states
- * Critical: halved (ceil), Mortal: reduced to 1/3 (ceil)
- */
-function applyWoundPenaltyToStat(statTotal: number, woundState: WoundState): number {
-  if (woundState === 'Critical') {
-    return Math.ceil(statTotal / 2);
-  }
-  if (woundState.startsWith('Mortal')) {
-    return Math.ceil(statTotal / 3);
-  }
-  if (woundState === 'Dead') {
-    return 0;
-  }
-  return statTotal;
-}
-
-/**
  * Calculate all derived stats for a character
  */
 export function calculateDerivedStats(character: Character): DerivedStats {
@@ -90,7 +73,7 @@ export function calculateDerivedStats(character: Character): DerivedStats {
     });
 
   // Step 3: Wound state (need this before applying wound penalties to stats)
-  const { woundState, woundPenalties } = calculateWoundState(character.damage);
+  const { woundState } = calculateWoundState(character.damage);
 
   // Step 4: Compute wound modifiers for REF/INT/COOL
   let refWoundMod = 0;

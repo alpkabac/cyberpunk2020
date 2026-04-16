@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { OpenSessionRoom } from '@/components/OpenSessionRoom';
 
 export default function Home() {
   return (
@@ -16,26 +17,34 @@ export default function Home() {
 
         <div className="border-t border-gray-800 pt-8 space-y-4">
           <Link
+            href="/dev"
+            className="block w-full max-w-md mx-auto bg-zinc-800 hover:bg-zinc-700 text-zinc-100 border-2 border-zinc-500 px-8 py-4 font-bold uppercase text-lg tracking-wider transition-colors"
+          >
+            Session &amp; dev tools
+          </Link>
+          <p className="text-xs text-zinc-500 max-w-md mx-auto">
+            One place: save session UUID, open the room, character demo, realtime debugger, and AI-GM scenarios — survives
+            refresh.
+          </p>
+
+          <Link
             href="/character-demo"
             className="block w-full max-w-md mx-auto bg-cyan-600 hover:bg-cyan-500 text-white border-2 border-cyan-400 px-8 py-4 font-bold uppercase text-lg tracking-wider transition-colors"
           >
-            Character Sheet Demo
+            Character sheet demo
           </Link>
 
-          <Link
-            href="/realtime-test"
-            className="block w-full max-w-md mx-auto bg-violet-900/80 hover:bg-violet-800 text-violet-100 border-2 border-violet-500/60 px-8 py-4 font-bold uppercase text-lg tracking-wider transition-colors"
-          >
-            Realtime session test (two tabs)
-          </Link>
+          <div className="border-t border-zinc-800 pt-6">
+            <p className="text-xs uppercase tracking-wider text-zinc-500 mb-2">Jump to session room</p>
+            <OpenSessionRoom />
+          </div>
 
-          <div className="text-sm text-gray-600 space-y-1">
-            <p>Full character sheet with stats, skills, combat, gear, cyberware, netrunning, and lifepath.</p>
-            <p className="text-gray-500">
-              Cloud: open <code className="text-gray-400">/character-demo?session=…</code> after creating a session in
-              Realtime test — edits save to Supabase and sync to other clients.
+          <div className="text-sm text-gray-600 space-y-2 text-left max-w-md mx-auto">
+            <p>
+              <strong className="text-gray-400">Play URL:</strong>{' '}
+              <code className="text-gray-400">/session/&lt;uuid&gt;</code> — cloud sheets:{' '}
+              <code className="text-gray-400">/character-demo?session=…</code>
             </p>
-            <p className="text-gray-700">More features coming: AI-GM chat, dice roller, token map, multiplayer.</p>
           </div>
         </div>
       </div>

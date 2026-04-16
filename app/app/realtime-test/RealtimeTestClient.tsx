@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
@@ -15,6 +15,18 @@ import {
 import { createDefaultPostgresHandlersForGameStore } from '@/lib/realtime/apply-realtime-to-store';
 import { useGameStore } from '@/lib/store/game-store';
 import type { SessionRealtimeHandle } from '@/lib/realtime/session-channel';
+import { isValidSessionUuid, setDevSessionId } from '@/lib/dev/dev-session-storage';
+
+const TAB_LABEL_KEY = 'realtime-test-tab-label';
+const noopSubscribe = () => () => {};
+function getTabLabel(): string {
+  let v = sessionStorage.getItem(TAB_LABEL_KEY);
+  if (!v) {
+    v = `tab-${Math.random().toString(36).slice(2, 8)}`;
+    sessionStorage.setItem(TAB_LABEL_KEY, v);
+  }
+  return v;
+}
 
 export function RealtimeTestClient() {
   const searchParams = useSearchParams();
@@ -31,14 +43,12 @@ export function RealtimeTestClient() {
   const [subscribeStatus, setSubscribeStatus] = useState<string>('idle');
   const [lastError, setLastError] = useState<string | null>(null);
   const [lastBroadcast, setLastBroadcast] = useState<{ event: string; payload: unknown; at: number } | null>(null);
-  const [shareUrl, setShareUrl] = useState('');
 
   const [chatText, setChatText] = useState('');
   const [sceneNote, setSceneNote] = useState('');
   const [charName, setCharName] = useState('Tab Tester');
 
-  /** Set only on client to avoid hydration mismatch (sessionStorage / random). */
-  const [tabLabel, setTabLabel] = useState<string | null>(null);
+  const tabLabel = useSyncExternalStore(noopSubscribe, getTabLabel, () => 'tab');
 
   const handleRef = useRef<SessionRealtimeHandle | null>(null);
   const recoveryCleanupRef = useRef<(() => void) | null>(null);
@@ -51,22 +61,19 @@ export function RealtimeTestClient() {
   );
   const tokens = useGameStore((s) => s.map.tokens);
 
-  useEffect(() => {
-    const k = 'realtime-test-tab-label';
-    let v = sessionStorage.getItem(k);
-    if (!v) {
-      v = `tab-${Math.random().toString(36).slice(2, 8)}`;
-      sessionStorage.setItem(k, v);
-    }
-    setTabLabel(v);
-  }, []);
+  const tabId = tabLabel;
 
-  const tabId = tabLabel ?? 'tab';
-
-  useEffect(() => {
+  const [prevSessionFromUrl, setPrevSessionFromUrl] = useState(sessionFromUrl);
+  if (sessionFromUrl !== prevSessionFromUrl) {
+    setPrevSessionFromUrl(sessionFromUrl);
     if (sessionFromUrl) {
       setSessionIdInput(sessionFromUrl);
       setSessionId(sessionFromUrl);
+    }
+  }
+  useEffect(() => {
+    if (sessionFromUrl && isValidSessionUuid(sessionFromUrl)) {
+      setDevSessionId(sessionFromUrl);
     }
   }, [sessionFromUrl]);
 
@@ -88,14 +95,9 @@ export function RealtimeTestClient() {
     }
   }, [sessionId]);
 
-  useEffect(() => {
-    if (typeof window === 'undefined' || !sessionId) {
-      setShareUrl('');
-      return;
-    }
-    setShareUrl(
-      `${window.location.origin}${window.location.pathname}?session=${encodeURIComponent(sessionId)}`,
-    );
+  const shareUrl = useMemo(() => {
+    if (typeof window === 'undefined' || !sessionId) return '';
+    return `${window.location.origin}${window.location.pathname}?session=${encodeURIComponent(sessionId)}`;
   }, [sessionId]);
 
   const applySessionFromInput = () => {
@@ -105,6 +107,7 @@ export function RealtimeTestClient() {
       return;
     }
     setSessionId(trimmed);
+    setDevSessionId(trimmed);
     const url = new URL(window.location.href);
     url.searchParams.set('session', trimmed);
     window.history.replaceState({}, '', url.toString());
@@ -145,11 +148,17 @@ export function RealtimeTestClient() {
     }
   }, [sessionId, userId]);
 
-  useEffect(() => {
+  const connKey = `${sessionId ?? ''}|${userId ?? ''}`;
+  const [prevConnKey, setPrevConnKey] = useState<string | null>(null);
+  if (connKey !== prevConnKey) {
+    setPrevConnKey(connKey);
     if (!sessionId || !userId) {
       setSubscribeStatus('idle');
-      return;
     }
+  }
+
+  useEffect(() => {
+    if (!sessionId || !userId) return;
     let cancelled = false;
     void (async () => {
       await connectRealtime();
@@ -202,6 +211,7 @@ export function RealtimeTestClient() {
     if (data?.id) {
       setSessionId(data.id);
       setSessionIdInput(data.id);
+      setDevSessionId(data.id);
       const url = new URL(window.location.href);
       url.searchParams.set('session', data.id);
       window.history.replaceState({}, '', url.toString());
@@ -316,9 +326,14 @@ export function RealtimeTestClient() {
         <header className="flex flex-col gap-2 border-b border-zinc-800 pb-6">
           <div className="flex flex-wrap items-center gap-4 justify-between">
             <h1 className="text-xl md:text-2xl text-cyan-400 tracking-tight">Realtime multiplayer test</h1>
-            <Link href="/" className="text-zinc-500 hover:text-cyan-400 underline">
-              Home
-            </Link>
+            <div className="flex gap-4 text-sm">
+              <Link href="/dev" className="text-zinc-500 hover:text-cyan-400 underline">
+                Dev hub
+              </Link>
+              <Link href="/" className="text-zinc-500 hover:text-cyan-400 underline">
+                Home
+              </Link>
+            </div>
           </div>
           <p className="text-zinc-400 max-w-2xl">
             Sign in (same account in both tabs is fine). Create or paste a session ID, then open this URL in a second tab.
@@ -327,7 +342,7 @@ export function RealtimeTestClient() {
           <p className="text-amber-400/90">
             This tab:{' '}
             <span className="text-amber-200" suppressHydrationWarning>
-              {tabLabel ?? '…'}
+              {tabLabel}
             </span>
           </p>
         </header>

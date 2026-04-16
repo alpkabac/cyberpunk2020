@@ -49,7 +49,7 @@ cp .env.local.example .env.local
 ```
 
 Required environment variables:
-- `OPENROUTER_API_KEY`: Your OpenRouter API key
+- `CP2020_OPENROUTER_API_KEY`: OpenRouter API key (avoids Windows `OPENROUTER_API_KEY` shadowing `.env.local`; legacy names still supported)
 - `NEXT_PUBLIC_SUPABASE_URL`: Your Supabase project URL
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Your Supabase anonymous key
 - `SUPABASE_SERVICE_ROLE_KEY`: Your Supabase service role key

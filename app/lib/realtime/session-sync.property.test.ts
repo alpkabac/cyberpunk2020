@@ -5,7 +5,7 @@
 
 import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
-import type { Character, ChatMessage, Token } from '../types';
+import type { Character } from '../types';
 import {
   resolveCharacterConflict,
   snapshotEntitiesArePresentInHydration,

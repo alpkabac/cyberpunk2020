@@ -16,11 +16,8 @@ import {
   getArmorByName,
   getAllCyberware,
   getCyberwareByType,
-  getAllGear,
-  getAllVehicles,
   getAllSkills,
   getSkillByName,
-  getAllPrograms,
   searchAllItems,
 } from './game-data';
 

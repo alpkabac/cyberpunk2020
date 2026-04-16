@@ -59,7 +59,7 @@ function parseFoundryDB(filePath: string): FoundryItem[] {
         try {
           const item = JSON.parse(line);
           items.push(item);
-        } catch (err) {
+        } catch {
           console.warn(`Failed to parse line in ${filePath}:`, line.substring(0, 100));
         }
       }

@@ -476,68 +476,80 @@ This implementation plan breaks down the design into discrete coding tasks. The 
     - **Validates: Requirements 10.5**
     - **COMPLETED:** `app/lib/realtime/session-sync.property.test.ts`
 
-- [ ] 10. Implement AI-GM orchestrator
-  - [ ] 10.1 Create context-builder.ts for LLM context assembly
+- [x] 10. Implement AI-GM orchestrator
+  - [x] 10.1 Create context-builder.ts for LLM context assembly
     - Build system prompt with core rules
     - Serialize character sheets to compact JSON
     - Add active scene description
     - Add recent chat history
     - _Requirements: 3.6, 4.1_
+    - **COMPLETED:** `app/lib/gm/context-builder.ts`
 
-  - [ ]* 10.2 Write property test for conversation context continuity
+  - [x] 10.2 Write property test for conversation context continuity
     - **Property 7: Conversation Context Continuity**
     - **Validates: Requirements 3.6**
+    - **COMPLETED:** `app/lib/gm/gm.property.test.ts`
 
-  - [ ] 10.3 Create lorebook.ts for rule injection
+  - [x] 10.3 Create lorebook.ts for rule injection
     - Load rule files with keywords and priority
     - Implement keyword matching on player input
     - Sort by priority and enforce token budget
     - _Requirements: 4.1, 4.2, 4.3_
+    - **COMPLETED:** `app/lib/gm/lorebook.ts`, `app/lib/gm/lore/default-rules.json`
 
-  - [ ]* 10.4 Write property test for keyword-based rule injection
+  - [x] 10.4 Write property test for keyword-based rule injection
     - **Property 8: Keyword-Based Rule Injection**
     - **Validates: Requirements 4.1**
+    - **COMPLETED:** `app/lib/gm/gm.property.test.ts`
 
-  - [ ]* 10.5 Write property test for rule priority selection
+  - [x] 10.5 Write property test for rule priority selection
     - **Property 9: Rule Priority Selection**
     - **Validates: Requirements 4.2**
+    - **COMPLETED:** `app/lib/gm/gm.property.test.ts`
 
-  - [ ]* 10.6 Write property test for token budget enforcement
+  - [x] 10.6 Write property test for token budget enforcement
     - **Property 10: Token Budget Enforcement**
     - **Validates: Requirements 4.3**
+    - **COMPLETED:** `app/lib/gm/gm.property.test.ts`
 
-  - [ ] 10.7 Create tool-executor.ts for tool calling
+  - [x] 10.7 Create tool-executor.ts for tool calling
     - Define tool schemas with validation
     - Implement tool handlers: apply_damage, deduct_money, add_item, remove_item, request_roll, move_token, generate_scenery, play_narration, lookup_rules, update_character_field
     - **`request_roll`:** surface to the client as guidance (open dice roller, suggested formula)—does not replace player agency or enforce server-side randomness
     - Validate parameters before execution
     - Execute state mutations and update database (Realtime propagates via `postgres_changes`)
     - _Requirements: 3.2, 3.3, 3.4_
+    - **COMPLETED:** `app/lib/gm/tool-executor.ts`, `app/lib/gm/tool-definitions.ts`, `app/lib/gm/character-mutations.ts`
 
-  - [ ]* 10.8 Write property test for tool parameter validation
+  - [x] 10.8 Write property test for tool parameter validation
     - **Property 6: Tool Parameter Validation**
     - **Validates: Requirements 3.3**
+    - **COMPLETED:** `app/lib/gm/gm.property.test.ts`
 
-  - [ ]* 10.9 Write property test for tool execution state changes
+  - [x] 10.9 Write property test for tool execution state changes
     - **Property 5: Tool Execution State Changes**
     - **Validates: Requirements 3.1, 3.4**
+    - **COMPLETED:** `app/lib/gm/gm.property.test.ts`
 
-  - [ ]* 10.10 Write property test for rule lookup tool
+  - [x] 10.10 Write property test for rule lookup tool
     - **Property 11: Rule Lookup Tool**
     - **Validates: Requirements 4.4**
+    - **COMPLETED:** `app/lib/gm/gm.property.test.ts`
 
-  - [ ] 10.11 Create api/gm/route.ts for AI-GM endpoint
+  - [x] 10.11 Create api/gm/route.ts for AI-GM endpoint
     - Assemble context with context-builder and lorebook
-    - Call OpenRouter API with GLM 4.7
+    - Call OpenRouter API (default: DeepSeek V3.2)
     - Parse tool calls from response
     - Execute tools via tool-executor
     - Return narration and state changes
     - Handle errors and retries
     - _Requirements: 3.1, 3.5, 16.1, 16.2_
+    - **COMPLETED:** `app/app/api/gm/route.ts`, `app/lib/gm/openrouter.ts` — default model `deepseek/deepseek-v3.2` (override with `OPENROUTER_MODEL`)
 
-  - [ ]* 10.12 Write property test for tool call error logging
+  - [x] 10.12 Write property test for tool call error logging
     - **Property 31: Tool Call Error Logging**
     - **Validates: Requirements 16.1**
+    - **COMPLETED:** `app/lib/gm/gm.property.test.ts` (validation surface); route logs failed tools with `console.error`
 
 - [ ] 11. Checkpoint - Validate AI-GM integration
   - Ensure all tests pass, ask the user if questions arise.

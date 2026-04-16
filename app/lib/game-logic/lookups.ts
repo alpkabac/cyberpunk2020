@@ -4,6 +4,7 @@
  */
 
 import { WeaponType, Concealability, Availability, Reliability, Zone, FireMode } from '../types';
+import { rollDice } from './dice';
 
 // ============================================================================
 // Weapon Types and Attack Skills
@@ -255,20 +256,23 @@ export const rangeBrackets: Record<RangeBracket, { dc: number; label: string }> 
 
 /**
  * Get the maximum distance (in meters) for each range bracket
- * based on a weapon's range stat
+ * based on a weapon's range stat (CP2020: weapon listing "Range" in m).
+ * Returns null when the weapon range is missing or not a positive number — UI should show "—" not NaN.
  */
-export function getRangeDistance(bracket: RangeBracket, weaponRange: number): number {
+export function getRangeDistance(bracket: RangeBracket, weaponRange: number): number | null {
+  const r = Number(weaponRange);
+  const ok = Number.isFinite(r) && r > 0;
   switch (bracket) {
     case 'PointBlank':
       return 1;
     case 'Close':
-      return Math.floor(weaponRange / 4);
+      return ok ? Math.floor(r / 4) : null;
     case 'Medium':
-      return Math.floor(weaponRange / 2);
+      return ok ? Math.floor(r / 2) : null;
     case 'Long':
-      return weaponRange;
+      return ok ? r : null;
     case 'Extreme':
-      return weaponRange * 2;
+      return ok ? r * 2 : null;
   }
 }
 
@@ -341,6 +345,14 @@ export const hitLocationRollRanges: Record<Zone, string> = {
 export function getHitLocation(roll: number): Zone | null {
   if (roll < 1 || roll > 10) return null;
   return hitLocationTable[roll];
+}
+
+/** FNFF hit location: single unmodified d10 on the standard table (use `flat:` so d10 does not explode). */
+export function rollFnffHitLocation(): { d10: number; zone: Zone | null } {
+  const r = rollDice('flat:1d10');
+  if (!r || r.firstD10Face === undefined) return { d10: 0, zone: null };
+  const d10 = r.firstD10Face;
+  return { d10, zone: getHitLocation(d10) };
 }
 
 /**

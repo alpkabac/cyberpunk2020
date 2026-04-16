@@ -149,6 +149,7 @@ export function CharacterHeader({ character, editable }: CharacterHeaderProps) {
       <div className="flex gap-4">
         {/* Character Image */}
         <div className="flex-shrink-0">
+          {/* eslint-disable-next-line @next/next/no-img-element -- character portraits use arbitrary external URLs with inline SVG fallback */}
           <img
             src={character.imageUrl || '/placeholder-character.png'}
             alt={character.name}

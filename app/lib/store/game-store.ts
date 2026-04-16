@@ -7,7 +7,6 @@ import { create } from 'zustand';
 import {
   Character,
   Session,
-  MapState,
   Token,
   ChatMessage,
   Scene,
@@ -328,8 +327,11 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
    */
   applyDamage: (characterId, rawDamage, location, isAP = false, pointBlank = false, weaponDamageFormula = null) =>
     set((state) => {
-      const character = state.characters.byId[characterId];
+      const character =
+        state.characters.byId[characterId] ?? state.npcs.byId[characterId];
       if (!character) return state;
+
+      const isNpc = character.type === 'npc';
 
       let effectiveRaw = rawDamage;
       if (pointBlank && weaponDamageFormula) {
@@ -368,6 +370,14 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
         hitLocations: updatedHitLocations,
       });
 
+      if (isNpc) {
+        return {
+          npcs: {
+            ...state.npcs,
+            byId: { ...state.npcs.byId, [characterId]: updated },
+          },
+        };
+      }
       return {
         characters: {
           ...state.characters,

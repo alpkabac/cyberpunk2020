@@ -43,7 +43,7 @@ The Tailwind CSS configuration has been updated with the Cyberpunk 2020 color pa
 Created `.env.local` and `.env.local.example` with placeholders for:
 
 **API Keys:**
-- `OPENROUTER_API_KEY`: For AI-GM (GLM 4.7 model)
+- `CP2020_OPENROUTER_API_KEY`: For AI-GM / OpenRouter (legacy: `OPENROUTER_API_KEY`)
 - `NEXT_PUBLIC_SUPABASE_URL`: Supabase project URL
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Supabase anonymous key
 - `SUPABASE_SERVICE_ROLE_KEY`: Supabase admin key

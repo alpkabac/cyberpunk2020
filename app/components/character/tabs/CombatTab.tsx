@@ -16,6 +16,9 @@ import {
   RangeBracket,
 } from '@/lib/game-logic/lookups';
 
+/** Must match `rangedCombatModifiers` key for aimed shots (attack −4; zone chosen if hit). */
+const AIMED_SHOT_LABEL = 'Aimed shot (specific area)' as const;
+
 interface CombatTabProps {
   character: Character;
   editable: boolean;
@@ -39,6 +42,8 @@ export function CombatTab({ character, editable }: CombatTabProps) {
   const [stabilizationTarget, setStabilizationTarget] = useState(() =>
     Math.max(1, Math.min(40, character.damage)),
   );
+  /** When aimed shot is checked, optional declared zone for Apply Damage preset. */
+  const [aimedZoneByWeapon, setAimedZoneByWeapon] = useState<Record<string, string>>({});
 
   const openDiceRoller = useGameStore((state) => state.openDiceRoller);
   const beginStunSaveRoll = useGameStore((state) => state.beginStunSaveRoll);
@@ -662,6 +667,30 @@ export function CombatTab({ character, editable }: CombatTabProps) {
                                 >
                                   Clear ranged mods
                                 </button>
+                                {rangedModToggles[weapon.id]?.[AIMED_SHOT_LABEL] && (
+                                  <div className="mt-2 border border-amber-800/40 bg-amber-50/50 p-2">
+                                    <label className="text-[10px] font-bold uppercase text-amber-950">
+                                      Aimed target zone (if hit)
+                                    </label>
+                                    <select
+                                      value={aimedZoneByWeapon[weapon.id] ?? ''}
+                                      onChange={(e) =>
+                                        setAimedZoneByWeapon((prev) => ({
+                                          ...prev,
+                                          [weapon.id]: e.target.value,
+                                        }))
+                                      }
+                                      className="mt-1 w-full border border-black bg-white px-2 py-1 text-[11px]"
+                                    >
+                                      <option value="">— Pick after successful aimed shot —</option>
+                                      {locationOrder.map((z) => (
+                                        <option key={z} value={z}>
+                                          {locationLabels[z]} (d10 {hitLocationRollRanges[z]})
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                )}
                               </div>
 
                               <div className="border-2 border-dashed border-amber-700/40 bg-amber-50/80 p-2 text-xs">
@@ -701,6 +730,7 @@ export function CombatTab({ character, editable }: CombatTabProps) {
                                     ][]
                                   ).map(([key, { dc, label }]) => {
                                     const selected = selBracket === key;
+                                    const distM = getRangeDistance(key, weapon.range);
                                     return (
                                       <button
                                         key={key}
@@ -716,7 +746,7 @@ export function CombatTab({ character, editable }: CombatTabProps) {
                                         <div className="font-bold">{label}</div>
                                         <div>DV {dc}</div>
                                         <div className="text-gray-500">
-                                          {getRangeDistance(key, weapon.range)}m
+                                          {distM === null ? '—' : `${distM}m`}
                                         </div>
                                       </button>
                                     );
@@ -790,16 +820,24 @@ export function CombatTab({ character, editable }: CombatTabProps) {
                           <button
                             type="button"
                             onClick={() => {
+                              const aimed = !!rangedModToggles[weapon.id]?.[AIMED_SHOT_LABEL];
+                              const z = aimedZoneByWeapon[weapon.id] as Zone | undefined;
                               setDamageApplicatorPreset({
-                                pointBlank: true,
                                 weaponDamageFormula: weapon.damage || '',
+                                pointBlank: false,
+                                ...(aimed
+                                  ? {
+                                      hitLocationMode: 'aimed' as const,
+                                      ...(z ? { aimedLocation: z } : {}),
+                                    }
+                                  : { hitLocationMode: 'random' as const }),
                               });
                               setShowDamageApplicator(true);
                             }}
-                            className="w-full mt-2 border-2 border-amber-800 bg-amber-100 hover:bg-amber-200 p-2 text-xs font-bold uppercase"
-                            title="Opens Apply Damage with Point blank checked and this weapon damage code (max dice per FNFF)."
+                            className="w-full mt-2 border-2 border-black bg-white hover:bg-gray-100 p-2 text-xs font-bold uppercase"
+                            title="Apply Damage with weapon code, hit location (random d10 or aimed zone), and Roll weapon damage in the dialog."
                           >
-                            Apply Damage — point blank (weapon: {weapon.damage || 'set code'})
+                            Apply Damage — resolve hit &amp; location
                           </button>
                         )}
                         {editable && isMelee && weapon.damage && (
@@ -812,6 +850,7 @@ export function CombatTab({ character, editable }: CombatTabProps) {
                                   : weapon.damage;
                               setDamageApplicatorPreset({
                                 weaponDamageFormula: dmgWithSdb,
+                                hitLocationMode: 'random',
                               });
                               setShowDamageApplicator(true);
                             }}
@@ -889,6 +928,7 @@ export function CombatTab({ character, editable }: CombatTabProps) {
 
       {showDamageApplicator && (
         <DamageApplicator
+          key={`${character.id}-${damageApplicatorPreset ? JSON.stringify(damageApplicatorPreset) : 'default'}`}
           characterId={character.id}
           preset={damageApplicatorPreset}
           onClose={() => {

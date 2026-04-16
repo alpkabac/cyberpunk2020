@@ -8,6 +8,7 @@ import fc from 'fast-check';
 import {
   getHitLocation,
   hitLocationTable,
+  rollFnffHitLocation,
   resolveMartialArtsStyleKey,
   getMartialActionBonus,
   formatKnowLanguageSkill,
@@ -77,6 +78,18 @@ describe('Property 17: Hit Location Mapping', () => {
       const location = hitLocationTable[i];
       expect(validZones).toContain(location);
     }
+  });
+
+  it('rollFnffHitLocation returns consistent d10 and zone', () => {
+    fc.assert(
+      fc.property(fc.integer({ min: 1, max: 20 }), () => {
+        const { d10, zone } = rollFnffHitLocation();
+        expect(d10).toBeGreaterThanOrEqual(1);
+        expect(d10).toBeLessThanOrEqual(10);
+        expect(zone).toBe(getHitLocation(d10));
+      }),
+      { numRuns: 30 },
+    );
   });
 });
 

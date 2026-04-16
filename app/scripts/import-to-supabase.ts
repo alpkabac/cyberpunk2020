@@ -25,39 +25,87 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
 interface FoundryItem {
-  _id: string;
+  _id?: string;
   name: string;
-  type: string;
-  img: string;
-  data: any;
+  type?: string;
+  img?: string;
+  data?: any;
+  system?: any;
+}
+
+const FOUNDRY_META_KEYS = new Set([
+  '_id',
+  'id',
+  'name',
+  'type',
+  'img',
+  'effects',
+  'folder',
+  'sort',
+  'permission',
+  'flags',
+  'data',
+  'system',
+]);
+
+/**
+ * Foundry items use `data` (or v10+ `system`). Some exports omit those and put fields at the top level.
+ */
+function getFoundryItemData(item: Record<string, unknown>): Record<string, any> {
+  const nested = item.data ?? item.system;
+  if (nested != null && typeof nested === 'object' && !Array.isArray(nested)) {
+    return nested as Record<string, any>;
+  }
+  const rest: Record<string, any> = {};
+  for (const [k, v] of Object.entries(item)) {
+    if (!FOUNDRY_META_KEYS.has(k)) rest[k] = v;
+  }
+  return rest;
+}
+
+function parseIntField(v: unknown, fallback = 0): number {
+  if (v === undefined || v === null || v === '') return fallback;
+  const n = parseInt(String(v), 10);
+  return Number.isNaN(n) ? fallback : n;
+}
+
+function parseFloatField(v: unknown, fallback = 0): number {
+  if (v === undefined || v === null || v === '') return fallback;
+  const n = parseFloat(String(v));
+  return Number.isNaN(n) ? fallback : n;
+}
+
+function resolveSource(item: Record<string, unknown>, data: Record<string, any>): string {
+  return String(data.source ?? item.source ?? 'Cyberpunk 2020');
 }
 
 /**
  * Transform Foundry weapon data to our schema
  */
 function transformWeapon(item: FoundryItem): any {
-  const data = item.data;
-  
+  const raw = item as unknown as Record<string, unknown>;
+  const data = getFoundryItemData(raw);
+
   return {
-    name: item.name,
+    name: String(item.name ?? data.name ?? '').trim() || 'Unknown',
     weapon_type: data.weaponType || 'Unknown',
-    accuracy: parseInt(data.accuracy) || 0,
+    accuracy: parseIntField(data.accuracy),
     concealability: data.concealability || '',
     availability: data.availability || '',
     ammo_type: data.ammoType || '',
     damage: data.damage || '1d6',
-    ap: data.ap || false,
-    shots: parseInt(data.shots) || 0,
-    rof: parseInt(data.rof) || 1,
+    ap: Boolean(data.ap),
+    shots: parseIntField(data.shots),
+    rof: parseIntField(data.rof, 1),
     reliability: data.reliability || 'ST',
-    range: parseInt(data.range) || 0,
+    range: parseIntField(data.range),
     attack_type: data.attackType || '',
     attack_skill: data.attackSkill || '',
-    cost: parseInt(data.cost) || 0,
-    weight: parseFloat(data.weight) || 0,
+    cost: parseIntField(data.cost),
+    weight: parseFloatField(data.weight),
     flavor: data.flavor || '',
     notes: data.notes || '',
-    source: data.source || item.data.source || 'Cyberpunk 2020'
+    source: resolveSource(raw, data),
   };
 }
 
@@ -65,20 +113,19 @@ function transformWeapon(item: FoundryItem): any {
  * Transform Foundry armor data to our schema
  */
 function transformArmor(item: FoundryItem): any {
-  const data = item.data;
-  
-  // Extract coverage data
-  const coverage = data.coverage || {};
-  
+  const raw = item as unknown as Record<string, unknown>;
+  const data = getFoundryItemData(raw);
+  const coverage = data.coverage && typeof data.coverage === 'object' ? data.coverage : {};
+
   return {
-    name: item.name,
-    coverage: coverage,
-    encumbrance: parseInt(data.encumbrance) || 0,
-    cost: parseInt(data.cost) || 0,
-    weight: parseFloat(data.weight) || 0,
+    name: String(item.name ?? data.name ?? '').trim() || 'Unknown',
+    coverage,
+    encumbrance: parseIntField(data.encumbrance),
+    cost: parseIntField(data.cost),
+    weight: parseFloatField(data.weight),
     flavor: data.flavor || '',
     notes: data.notes || '',
-    source: data.source || 'Cyberpunk 2020'
+    source: resolveSource(raw, data),
   };
 }
 
@@ -86,19 +133,20 @@ function transformArmor(item: FoundryItem): any {
  * Transform Foundry cyberware data to our schema
  */
 function transformCyberware(item: FoundryItem): any {
-  const data = item.data;
-  
+  const raw = item as unknown as Record<string, unknown>;
+  const data = getFoundryItemData(raw);
+
   return {
-    name: item.name,
+    name: String(item.name ?? data.name ?? '').trim() || 'Unknown',
     surg_code: data.surgCode || '',
     humanity_cost: data.humanityCost || '',
-    humanity_loss: parseFloat(data.humanityLoss) || 0,
+    humanity_loss: parseFloatField(data.humanityLoss),
     cyberware_type: data.cyberwareType || '',
-    cost: parseInt(data.cost) || 0,
-    weight: parseFloat(data.weight) || 0,
+    cost: parseIntField(data.cost),
+    weight: parseFloatField(data.weight),
     flavor: data.flavor || '',
     notes: data.notes || '',
-    source: data.source || 'Cyberpunk 2020'
+    source: resolveSource(raw, data),
   };
 }
 
@@ -106,15 +154,16 @@ function transformCyberware(item: FoundryItem): any {
  * Transform Foundry gear data to our schema
  */
 function transformGear(item: FoundryItem): any {
-  const data = item.data;
-  
+  const raw = item as unknown as Record<string, unknown>;
+  const data = getFoundryItemData(raw);
+
   return {
-    name: item.name,
-    cost: parseInt(data.cost) || 0,
-    weight: parseFloat(data.weight) || 0,
+    name: String(item.name ?? data.name ?? '').trim() || 'Unknown',
+    cost: parseIntField(data.cost),
+    weight: parseFloatField(data.weight),
     flavor: data.flavor || '',
     notes: data.notes || '',
-    source: data.source || 'Cyberpunk 2020'
+    source: resolveSource(raw, data),
   };
 }
 
@@ -122,21 +171,22 @@ function transformGear(item: FoundryItem): any {
  * Transform Foundry vehicle data to our schema
  */
 function transformVehicle(item: FoundryItem): any {
-  const data = item.data;
-  
+  const raw = item as unknown as Record<string, unknown>;
+  const data = getFoundryItemData(raw);
+
   return {
-    name: item.name,
-    vehicle_type: data.vehicleType || '',
-    top_speed: parseInt(data.topSpeed) || 0,
-    acceleration: parseInt(data.acceleration) || 0,
-    handling: parseInt(data.handling) || 0,
-    armor: parseInt(data.armor) || 0,
-    sdp: parseInt(data.sdp) || 0,
-    cost: parseInt(data.cost) || 0,
-    weight: parseFloat(data.weight) || 0,
+    name: String(item.name ?? data.name ?? '').trim() || 'Unknown',
+    vehicle_type: data.vehicleType || data.vehicle_type || '',
+    top_speed: parseIntField(data.topSpeed ?? data.top_speed),
+    acceleration: parseIntField(data.acceleration),
+    handling: parseIntField(data.handling),
+    armor: parseIntField(data.armor),
+    sdp: parseIntField(data.sdp),
+    cost: parseIntField(data.cost),
+    weight: parseFloatField(data.weight),
     flavor: data.flavor || '',
     notes: data.notes || '',
-    source: data.source || 'Cyberpunk 2020'
+    source: resolveSource(raw, data),
   };
 }
 
@@ -144,31 +194,42 @@ function transformVehicle(item: FoundryItem): any {
  * Transform Foundry skill data to our schema
  */
 function transformSkill(item: FoundryItem): any {
-  const data = item.data;
-  
+  const raw = item as unknown as Record<string, unknown>;
+  const data = getFoundryItemData(raw);
+
   return {
-    name: item.name,
-    linked_stat: data.linkedStat || data.stat || 'INT',
+    name: String(item.name ?? data.name ?? '').trim() || 'Unknown',
+    linked_stat: data.linkedStat || data.linked_stat || data.stat || 'INT',
     category: data.category || '',
     description: data.flavor || data.description || '',
-    source: data.source || 'Cyberpunk 2020'
+    source: resolveSource(raw, data),
   };
 }
 
 /**
- * Transform Foundry program data to our schema
+ * Transform Foundry program data to our schema (matches `programs` in schema.sql)
  */
 function transformProgram(item: FoundryItem): any {
-  const data = item.data;
-  
+  const raw = item as unknown as Record<string, unknown>;
+  const data = getFoundryItemData(raw);
+  const strengthRaw = data.strength ?? data.power;
+  const muRaw = data.muCost ?? data.mu_cost ?? data.mu;
+
+  let options: string[] = [];
+  if (Array.isArray(data.options)) {
+    options = data.options.map((x: unknown) => String(x));
+  }
+
   return {
-    name: item.name,
-    program_type: data.programType || '',
-    strength: parseInt(data.strength) || 0,
-    mu_cost: parseInt(data.muCost) || 0,
-    cost: parseInt(data.cost) || 0,
+    name: String(item.name ?? data.name ?? '').trim() || 'Unknown',
+    program_type: data.programType || data.program_type || '',
+    program_class: data.programClass || data.program_class || '',
+    strength: Math.round(Number(strengthRaw)) || 0,
+    mu_cost: Math.round(Number(muRaw)) || 0,
+    cost: parseIntField(data.cost),
     description: data.flavor || data.description || '',
-    source: data.source || 'Cyberpunk 2020'
+    source: resolveSource(raw, data),
+    options,
   };
 }
 
@@ -253,7 +314,7 @@ async function main() {
   
   try {
     // Test connection
-    const { data, error } = await supabase.from('weapons').select('count').limit(1);
+    const { error } = await supabase.from('weapons').select('count').limit(1);
     if (error) {
       console.error('❌ Failed to connect to Supabase:', error.message);
       console.error('Make sure the database schema is set up and credentials are correct.');

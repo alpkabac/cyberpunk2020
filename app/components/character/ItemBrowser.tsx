@@ -170,8 +170,8 @@ function convertProgram(src: DataProgram): Program {
     programType: src.program_type || '',
     strength: src.strength || 0,
     muCost: src.mu_cost || 0,
-    programClass: '',
-    options: [],
+    programClass: src.program_class || '',
+    options: Array.isArray(src.options) ? [...src.options] : [],
   };
 }
 

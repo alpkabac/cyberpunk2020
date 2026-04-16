@@ -33,10 +33,6 @@ function getSupabaseClient(): ReturnType<typeof createClient> | null {
   return supabase;
 }
 
-function isSupabaseAvailable(): boolean {
-  return getSupabaseClient() !== null;
-}
-
 // ============================================================================
 // Type Definitions (data-layer specific — may differ from core types)
 // ============================================================================
@@ -129,11 +125,13 @@ export interface Program {
   id: string;
   name: string;
   program_type: string;
+  program_class: string;
   strength: number;
   mu_cost: number;
   cost: number;
   description: string;
   source: string;
+  options: string[];
 }
 
 // ============================================================================
@@ -300,6 +298,22 @@ function normalizeLocalGear(): Gear[] {
   });
 }
 
+function normalizeProgramOptions(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((x) => String(x));
+}
+
+/** Foundry exports use `power` / `mu`; some sources use `strength` / `muCost`. */
+function resolveProgramStrength(n: Record<string, unknown>): number {
+  const v = n.strength ?? n.power;
+  return Math.round(Number(v)) || 0;
+}
+
+function resolveProgramMuCost(n: Record<string, unknown>): number {
+  const v = n.muCost ?? n.mu_cost ?? n.mu;
+  return Math.round(Number(v)) || 0;
+}
+
 function normalizeLocalVehicles(): Vehicle[] {
   return (localVehicles as Record<string, unknown>[]).map((raw) => {
     const n = normalizeFoundryItem(raw);
@@ -328,11 +342,13 @@ function normalizeLocalPrograms(): Program[] {
       id: String(n.id),
       name: String(n.name),
       program_type: String(n.programType || n.program_type || ''),
-      strength: Number(n.strength) || 0,
-      mu_cost: Number(n.muCost || n.mu_cost) || 0,
+      program_class: String(n.programClass ?? n.program_class ?? ''),
+      strength: resolveProgramStrength(n),
+      mu_cost: resolveProgramMuCost(n),
       cost: Number(n.cost) || 0,
       description: String(n.flavor || n.description || ''),
       source: String(n.source || 'Local'),
+      options: normalizeProgramOptions(n.options),
     };
   });
 }

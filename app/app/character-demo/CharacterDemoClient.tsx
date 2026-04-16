@@ -37,17 +37,12 @@ export function CharacterDemoClient() {
     return () => subscription.unsubscribe();
   }, []);
 
-  useEffect(() => {
-    if (!sessionId) {
-      setCloudHydrated(true);
-      return;
-    }
-    if (!user) {
-      setCloudHydrated(true);
-      return;
-    }
-    setCloudHydrated(false);
-  }, [sessionId, user?.id]);
+  const syncKey = `${sessionId ?? ''}|${user?.id ?? ''}`;
+  const [prevSyncKey, setPrevSyncKey] = useState<string | null>(null);
+  if (syncKey !== prevSyncKey) {
+    setPrevSyncKey(syncKey);
+    setCloudHydrated(!sessionId || !user);
+  }
 
   const onSyncComplete = useCallback(() => {
     setSyncHint('Session loaded — edits save to Supabase.');
@@ -63,7 +58,7 @@ export function CharacterDemoClient() {
       ? characters.allIds.find((id) => characters.byId[id]?.userId === user.id)
       : undefined;
     return mine ?? characters.allIds[0] ?? null;
-  }, [characterParam, characters.allIds, characters.byId, user?.id]);
+  }, [characterParam, characters.allIds, characters.byId, user]);
 
   const cloudSync = Boolean(sessionId && user?.id && resolvedCharacterId);
 

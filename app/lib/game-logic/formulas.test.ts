@@ -229,27 +229,27 @@ describe('Property 14: Damage Application and Wound State', () => {
           
           // Apply penalties based on wound state
           let expectedRef = ref;
-          let expectedInt = int;
-          let expectedCool = cool;
+          let _expectedInt = int;
+          let _expectedCool = cool;
           
           if (damage === 0 || damage <= 4) {
             // No penalties
             expectedRef = ref;
-            expectedInt = int;
-            expectedCool = cool;
+            _expectedInt = int;
+            _expectedCool = cool;
           } else if (damage <= 8) {
             // Serious: REF -2
             expectedRef = ref - 2;
           } else if (damage <= 12) {
             // Critical: halved (rounded up)
             expectedRef = Math.ceil(ref / 2);
-            expectedInt = Math.ceil(int / 2);
-            expectedCool = Math.ceil(cool / 2);
+            _expectedInt = Math.ceil(int / 2);
+            _expectedCool = Math.ceil(cool / 2);
           } else if (damage <= 40) {
             // Mortal: 1/3 (rounded up)
             expectedRef = Math.ceil(ref / 3);
-            expectedInt = Math.ceil(int / 3);
-            expectedCool = Math.ceil(cool / 3);
+            _expectedInt = Math.ceil(int / 3);
+            _expectedCool = Math.ceil(cool / 3);
           }
           
           // Verify penalties direction is correct

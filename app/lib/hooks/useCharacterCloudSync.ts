@@ -25,7 +25,8 @@ export function useCharacterCloudSync(
     let lastSent = '';
 
     const flush = async () => {
-      const character = useGameStore.getState().characters.byId[characterId];
+      const s = useGameStore.getState();
+      const character = s.characters.byId[characterId] ?? s.npcs.byId[characterId];
       if (!character || savingRef.current) return;
       const payload = JSON.stringify(serializeCharacterForDb(character));
       if (payload === lastSent) return;
@@ -40,8 +41,10 @@ export function useCharacterCloudSync(
     };
 
     const unsub = useGameStore.subscribe((state, prevState) => {
-      const character = state.characters.byId[characterId];
-      const prevChar = prevState.characters.byId[characterId];
+      const character =
+        state.characters.byId[characterId] ?? state.npcs.byId[characterId];
+      const prevChar =
+        prevState.characters.byId[characterId] ?? prevState.npcs.byId[characterId];
       if (!character) return;
       if (character === prevChar) return;
       if (debounceTimer) clearTimeout(debounceTimer);

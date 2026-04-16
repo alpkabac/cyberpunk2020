@@ -50,15 +50,17 @@ export function SessionRoomClient() {
     return () => subscription.unsubscribe();
   }, []);
 
-  useEffect(() => {
-    if (!sessionId) return;
-    if (!user) {
+  const syncKey = `${sessionId}|${user?.id ?? ''}`;
+  const [prevSyncKey, setPrevSyncKey] = useState<string | null>(null);
+  if (syncKey !== prevSyncKey) {
+    setPrevSyncKey(syncKey);
+    if (sessionId && user) {
+      setCloudHydrated(false);
+      setLoadError(null);
+    } else if (sessionId) {
       setCloudHydrated(true);
-      return;
     }
-    setCloudHydrated(false);
-    setLoadError(null);
-  }, [sessionId, user?.id]);
+  }
 
   const onSyncComplete = useCallback(() => {
     setCloudHydrated(true);
@@ -99,7 +101,7 @@ export function SessionRoomClient() {
     npcs.byId,
     selectedId,
     allPlayableIds,
-    user?.id,
+    user,
   ]);
 
   const selectedCharacter =
@@ -155,8 +157,15 @@ export function SessionRoomClient() {
           )}
         </div>
         <div className="flex items-center gap-2 text-xs text-zinc-500">
-          <Link href="/realtime-test" className="hover:text-violet-400 underline">
-            Realtime tools
+          <Link href="/dev" className="hover:text-violet-400 underline">
+            Dev hub
+          </Link>
+          <span className="text-zinc-700">·</span>
+          <Link
+            href={`/realtime-test?session=${encodeURIComponent(sessionId)}`}
+            className="hover:text-violet-400 underline"
+          >
+            Realtime lab
           </Link>
         </div>
       </header>
@@ -261,9 +270,9 @@ export function SessionRoomClient() {
                 <p className="text-xs text-zinc-500">
                   No characters yet. Use{' '}
                   <Link href={`/realtime-test?session=${encodeURIComponent(sessionId)}`} className="text-violet-400 underline">
-                    Realtime test
+                    Realtime tools
                   </Link>{' '}
-                  to add one.
+                  to create a character for this session.
                 </p>
               )}
             </>

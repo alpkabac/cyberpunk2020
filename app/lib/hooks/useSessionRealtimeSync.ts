@@ -24,7 +24,9 @@ export function useSessionRealtimeSync(
   const handleRef = useRef<SessionRealtimeHandle | null>(null);
   const recoveryRef = useRef<(() => void) | null>(null);
   const onDoneRef = useRef(onSyncComplete);
-  onDoneRef.current = onSyncComplete;
+  useEffect(() => {
+    onDoneRef.current = onSyncComplete;
+  });
 
   useEffect(() => {
     if (!sessionId || !userId) {

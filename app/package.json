@@ -9,7 +9,13 @@
     "lint": "eslint",
     "test": "vitest",
     "test:ui": "vitest --ui",
-    "test:run": "vitest run"
+    "test:run": "vitest run",
+    "test:unit": "vitest run --project unit",
+    "test:property": "vitest run --project property",
+    "build:scripts": "tsc -p tsconfig.scripts.json",
+    "typecheck:scripts": "tsc -p tsconfig.scripts.json --noEmit",
+    "import:supabase": "npm run build:scripts && node .scripts-out/import-to-supabase.js",
+    "extract:foundry": "npm run build:scripts && node .scripts-out/extract-foundry-data.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.103.0",
