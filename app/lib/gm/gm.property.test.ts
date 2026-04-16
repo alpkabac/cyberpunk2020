@@ -169,6 +169,30 @@ describe('Property 6: Tool parameter validation', () => {
     const v = validateGmToolParameters('apply_damage', { character_id: 'abc', raw_damage: 5, location: 'Torso' });
     expect(v.ok).toBe(true);
   });
+
+  it('accepts request_roll (legacy formula and structured roll_kind)', () => {
+    expect(validateGmToolParameters('request_roll', { formula: '1d10+5' }).ok).toBe(true);
+    expect(
+      validateGmToolParameters('request_roll', {
+        roll_kind: 'skill',
+        character_id: 'c',
+        skill_id: 's',
+      }).ok,
+    ).toBe(true);
+    expect(
+      validateGmToolParameters('request_roll', {
+        roll_kind: 'stat',
+        character_id: 'c',
+        stat: 'ref',
+      }).ok,
+    ).toBe(true);
+    expect(
+      validateGmToolParameters('request_roll', { roll_kind: 'raw_formula', formula: '2d6' }).ok,
+    ).toBe(true);
+    expect(validateGmToolParameters('request_roll', { roll_kind: 'skill', character_id: 'c' }).ok).toBe(
+      false,
+    );
+  });
 });
 
 describe('Property 5: Tool execution state changes (pure)', () => {

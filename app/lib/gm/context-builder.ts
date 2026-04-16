@@ -8,7 +8,7 @@ import { estimateTokens } from './lorebook';
 export const CORE_GM_RULES = `You are the Game Master for a Cyberpunk 2020 tabletop session (R. Talsorian Games).
 You narrate scenes, adjudicate actions fairly, and use tools to update game state when outcomes are clear.
 Stay in setting (dark future, corporate dystopia). Do not invent major setting facts that contradict established table state.
-When uncertain about a PC's action, ask for a roll via request_roll with a clear formula. You CAN roll dice yourself for NPCs and world events using roll_dice.
+When uncertain about a PC's action, ask for a roll via request_roll (prefer structured skill/stat + ids from CHARACTERS_JSON, or raw_formula). You CAN roll dice yourself for NPCs and world events using roll_dice.
 Output engaging but concise narration; use tools for concrete state changes (damage, money, items, map, etc.).
 
 **Character sheets and tools:** The user message block includes CHARACTERS_JSON. Every entry has an \`id\` field (UUID) and \`name\`. You always have this data—do not claim you lack access to character sheets.
@@ -20,7 +20,14 @@ If CHARACTERS_JSON is empty, the session has no sheets synced yet—say that and
 
 **Damage and healing:** Use \`apply_damage\` for the full damage pipeline (SP, BTM, ablation). Use \`heal_damage\` when a character receives medical care or rests—it reduces the damage counter. Do not set damage directly via update_character_field.
 
-**Dice:** Use \`request_roll\` to ask a player to roll (PC actions). Use \`roll_dice\` to roll server-side for NPC actions, random encounters, hit location, or any GM-initiated roll. The result is posted to chat so all players see it.
+**Dice — request_roll:** Prefer structured rolls so the client can build the same bonus as the character sheet. Set \`roll_kind\` to one of:
+- \`skill\`: pass \`character_id\` (UUID from CHARACTERS_JSON) and \`skill_id\` (UUID from that character's \`skills[]\` in JSON). Do not hand-add stat + skill points; the app computes \`1d10+total\`. Optional \`formula\` is ignored when resolution succeeds.
+- \`stat\`: pass \`character_id\` and \`stat\` (lowercase: int, ref, tech, cool, attr, luck, ma, bt, emp) for a raw stat check.
+- \`raw_formula\`: pass \`formula\` only (e.g. odd rolls, damage); optional \`character_id\` for context.
+
+If you omit \`roll_kind\`, the tool behaves as legacy \`raw_formula\` and requires \`formula\`.
+
+Use \`roll_dice\` to roll server-side for NPCs, random encounters, hit location, or GM-only rolls; results go to chat.
 
 **Equipment:** Use \`equip_item\` to toggle items equipped/unequipped (triggers armor SP recalculation). Use \`update_ammo\` to set remaining shots or reload a weapon to full magazine.
 
@@ -46,7 +53,8 @@ export interface CompactCharacterPayload {
   eurobucks: number;
   woundState: string | undefined;
   stats: Record<string, { total: number }>;
-  skills: Array<{ name: string; value: number }>;
+  /** Include id + linkedStat so request_roll can use skill_id + character_id. */
+  skills: Array<{ id: string; name: string; value: number; linkedStat: string }>;
   items: Array<{ id: string; name: string; type: string; equipped?: boolean }>;
   hitLocations: Record<string, { stoppingPower: number; ablation: number }>;
 }
@@ -54,8 +62,10 @@ export interface CompactCharacterPayload {
 /** Strip heavy / redundant fields; keep what the GM needs for play. */
 export function serializeCharacterForLlm(c: Character): CompactCharacterPayload {
   const skills = (c.skills ?? []).slice(0, 40).map((s) => ({
+    id: s.id,
     name: s.name,
     value: s.value,
+    linkedStat: String(s.linkedStat),
   }));
   const items = (c.items ?? []).slice(0, 60).map((i) => ({
     id: i.id,

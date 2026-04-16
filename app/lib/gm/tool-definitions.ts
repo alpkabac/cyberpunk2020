@@ -95,15 +95,29 @@ export const GM_TOOL_DEFINITIONS = [
     function: {
       name: 'request_roll',
       description:
-        'Ask the table to roll dice (guidance only). Does not roll server-side; persists a system message with suggested formula.',
+        'Ask the table to roll dice (guidance only). Prefer roll_kind skill or stat with character_id + skill_id/stat from CHARACTERS_JSON so the app builds the same 1d10+bonus as the sheet. raw_formula + formula for freeform rolls.',
       parameters: {
         type: 'object',
         properties: {
-          formula: { type: 'string', description: 'Dice formula suggestion, e.g. REF+Melee+1d10' },
-          reason: { type: 'string' },
-          character_id: { type: 'string', description: 'Optional focus character' },
+          roll_kind: {
+            type: 'string',
+            enum: ['skill', 'stat', 'raw_formula'],
+            description:
+              'skill = character_id + skill_id (sheet math). stat = character_id + stat key. raw_formula = formula string only.',
+          },
+          formula: {
+            type: 'string',
+            description: 'Required for raw_formula; optional hint otherwise. e.g. 1d10+8',
+          },
+          reason: { type: 'string', description: 'Situation / what the roll is for' },
+          character_id: { type: 'string', description: 'UUID from CHARACTERS_JSON' },
+          skill_id: { type: 'string', description: 'UUID of skill on that character (skills[].id)' },
+          stat: {
+            type: 'string',
+            description: 'For roll_kind stat: int, ref, tech, cool, attr, luck, ma, bt, emp',
+          },
         },
-        required: ['formula'],
+        required: [],
       },
     },
   },

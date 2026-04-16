@@ -6,6 +6,7 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import type { User } from '@supabase/supabase-js';
 import { CharacterSheet, DiceRoller } from '@/components/character';
 import { ChatInterface } from '@/components/chat';
+import { PopoutCharacterSheet } from '@/components/session/PopoutCharacterSheet';
 import { supabase } from '@/lib/supabase';
 import { useGameStore } from '@/lib/store/game-store';
 import { useSessionRealtimeSync } from '@/lib/hooks/useSessionRealtimeSync';
@@ -30,6 +31,7 @@ export function SessionRoomClient() {
   const [cloudHydrated, setCloudHydrated] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [sheetPopout, setSheetPopout] = useState(false);
 
   const session = useGameStore((s) => s.session);
   const characters = useGameStore(
@@ -76,6 +78,7 @@ export function SessionRoomClient() {
   const selectCharacter = useCallback(
     (id: string) => {
       setSelectedId(id);
+      setSheetPopout(false);
       router.replace(`/session/${sessionId}?character=${encodeURIComponent(id)}`, { scroll: false });
     },
     [router, sessionId],
@@ -288,7 +291,31 @@ export function SessionRoomClient() {
                   View only — you can only edit your own character (or NPCs if you are the session GM).
                 </p>
               )}
-              <CharacterSheet characterId={resolvedCharacterId} editable={canEditSheet} />
+              {!sheetPopout && (
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setSheetPopout(true)}
+                    className="text-[10px] uppercase font-bold px-2 py-1 rounded border border-cyan-700/50 text-cyan-300 hover:bg-cyan-950/40"
+                  >
+                    Pop out sheet
+                  </button>
+                </div>
+              )}
+              {sheetPopout ? (
+                <p className="text-sm text-zinc-500">
+                  Character sheet is in a floating window.{' '}
+                  <button
+                    type="button"
+                    onClick={() => setSheetPopout(false)}
+                    className="text-cyan-400 underline"
+                  >
+                    Dock here
+                  </button>
+                </p>
+              ) : (
+                <CharacterSheet characterId={resolvedCharacterId} editable={canEditSheet} />
+              )}
             </div>
           )}
           {user && cloudHydrated && !loadError && allPlayableIds.length > 0 && !resolvedCharacterId && (
@@ -301,6 +328,7 @@ export function SessionRoomClient() {
             <ChatInterface
               sessionId={sessionId}
               speakerName={selectedCharacter?.name ?? user.email ?? 'Player'}
+              focusCharacterId={resolvedCharacterId}
               enabled
             />
           </aside>
@@ -308,6 +336,20 @@ export function SessionRoomClient() {
       </div>
 
       {user && cloudHydrated && !loadError && <DiceRoller />}
+
+      {user &&
+        cloudHydrated &&
+        !loadError &&
+        sheetPopout &&
+        resolvedCharacterId &&
+        selectedCharacter && (
+          <PopoutCharacterSheet
+            title={selectedCharacter.name}
+            onDock={() => setSheetPopout(false)}
+          >
+            <CharacterSheet characterId={resolvedCharacterId} editable={canEditSheet} />
+          </PopoutCharacterSheet>
+        )}
     </div>
   );
 }

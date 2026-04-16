@@ -21,6 +21,7 @@ import {
   normalizeIncomingItem,
 } from './character-mutations';
 import { rollDice } from '../game-logic/dice';
+import { resolveGmRequestRollForServer } from '../game-logic/resolve-gm-request-roll';
 import type { LoreRule } from './lorebook';
 import { lookupRulesText } from './lorebook';
 
@@ -127,8 +128,35 @@ export function validateGmToolParameters(name: string, raw: unknown): { ok: true
       return { ok: true, name: 'remove_item', args: raw };
     }
     case 'request_roll': {
-      const formula = str(raw.formula, 'formula');
-      if (typeof formula !== 'string') return { ok: false, error: formula.error };
+      const rollKind = optStr(raw.roll_kind);
+      if (!rollKind) {
+        const formula = str(raw.formula, 'formula');
+        if (typeof formula !== 'string') return { ok: false, error: formula.error };
+        return { ok: true, name: 'request_roll', args: raw };
+      }
+      if (rollKind !== 'skill' && rollKind !== 'stat' && rollKind !== 'raw_formula') {
+        return { ok: false, error: 'roll_kind must be skill, stat, or raw_formula' };
+      }
+      if (rollKind === 'raw_formula') {
+        const formula = str(raw.formula, 'formula');
+        if (typeof formula !== 'string') return { ok: false, error: formula.error };
+        return { ok: true, name: 'request_roll', args: raw };
+      }
+      if (rollKind === 'skill') {
+        const character_id = str(raw.character_id, 'character_id');
+        const skill_id = str(raw.skill_id, 'skill_id');
+        if (typeof character_id !== 'string') return { ok: false, error: character_id.error };
+        if (typeof skill_id !== 'string') return { ok: false, error: skill_id.error };
+        return { ok: true, name: 'request_roll', args: raw };
+      }
+      const character_id = str(raw.character_id, 'character_id');
+      const stat = str(raw.stat, 'stat');
+      if (typeof character_id !== 'string') return { ok: false, error: character_id.error };
+      if (typeof stat !== 'string') return { ok: false, error: stat.error };
+      const allowed = new Set(['int', 'ref', 'tech', 'cool', 'attr', 'luck', 'ma', 'bt', 'emp']);
+      if (!allowed.has(stat.toLowerCase())) {
+        return { ok: false, error: 'stat must be a CP2020 stat key (int, ref, tech, …)' };
+      }
       return { ok: true, name: 'request_roll', args: raw };
     }
     case 'move_token': {
@@ -354,17 +382,56 @@ export async function executeGmTool(
       return { ok: true, name, result: { character_id: id, removed: itemId } };
     }
     case 'request_roll': {
-      const formula = String(args.formula);
       const reason = optStr(args.reason) ?? '';
+      const rollKind = optStr(args.roll_kind) ?? 'raw_formula';
       const characterId = optStr(args.character_id);
-      const err = await insertChatMessage(ctx.supabase, ctx.sessionId, 'Game Master', `Roll requested: ${formula}${reason ? ` — ${reason}` : ''}`, 'system', {
+      const meta: Record<string, unknown> = {
         kind: 'roll_request',
-        formula,
+        roll_kind: rollKind,
         reason,
         characterId: characterId ?? null,
-      });
+      };
+      if (rollKind === 'skill' && typeof args.skill_id === 'string') {
+        meta.skill_id = args.skill_id;
+      }
+      if (rollKind === 'stat' && typeof args.stat === 'string') {
+        meta.stat = args.stat.toLowerCase();
+      }
+
+      const c = characterId ? ctx.charactersById.get(characterId) : undefined;
+      let formula = typeof args.formula === 'string' ? args.formula.trim() : '';
+      if (c && (rollKind === 'skill' || rollKind === 'stat')) {
+        const r = resolveGmRequestRollForServer(c, {
+          roll_kind: rollKind,
+          formula,
+          skill_id: optStr(args.skill_id) ?? null,
+          stat: optStr(args.stat) ?? null,
+        });
+        if (r.resolvedFromCharacter) {
+          formula = r.formula;
+        }
+      }
+      if (!formula.trim()) {
+        formula = typeof args.formula === 'string' ? args.formula.trim() : '';
+      }
+      if (!formula.trim()) {
+        return { ok: false, name, error: 'Could not resolve roll formula (check character_id, skill_id, stat, or formula)' };
+      }
+      meta.formula = formula.trim();
+
+      const line = `Roll requested (${rollKind}): ${formula.trim()}${reason ? ` — ${reason}` : ''}`;
+      const err = await insertChatMessage(ctx.supabase, ctx.sessionId, 'Game Master', line, 'system', meta);
       if (err) return { ok: false, name, error: err.message };
-      return { ok: true, name, result: { formula, reason, character_id: characterId ?? null } };
+      return {
+        ok: true,
+        name,
+        result: {
+          formula: formula.trim(),
+          roll_kind: rollKind,
+          reason,
+          character_id: characterId ?? null,
+        },
+      };
     }
     case 'move_token': {
       const tokenId = String(args.token_id);

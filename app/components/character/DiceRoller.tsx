@@ -16,7 +16,11 @@ interface DiceRollEntry {
 export function DiceRoller() {
   const isDiceRollerOpen = useGameStore((state) => state.ui.isDiceRollerOpen);
   const diceFormula = useGameStore((state) => state.ui.diceFormula);
+  const diceRollIntent = useGameStore((state) => state.ui.diceRollIntent);
   const closeDiceRoller = useGameStore((state) => state.closeDiceRoller);
+
+  const nonBlockingGm =
+    diceRollIntent?.kind === 'gm_request' && diceRollIntent.nonBlockingUi !== false;
 
   const [customFormula, setCustomFormula] = useState('');
   const [rollHistory, setRollHistory] = useState<DiceRollEntry[]>([]);
@@ -105,17 +109,19 @@ export function DiceRoller() {
     }
   }, []);
 
-  // Auto-roll when the store opens the modal with a formula. Must not run during render (Zustand →
-  // updateCharacterField caused "Cannot update CharacterDemoPage while rendering DiceRoller").
-  // Defer one frame so we don't sync setState + store updates in the same effect tick (react-compiler lint).
+  // Auto-roll when the store opens with a formula (except GM requests: prefill only, player clicks Roll).
   useEffect(() => {
     if (!isDiceRollerOpen || !diceFormula) return;
+    if (diceRollIntent?.kind === 'gm_request') {
+      const id = requestAnimationFrame(() => setCustomFormula(diceFormula));
+      return () => cancelAnimationFrame(id);
+    }
     const id = requestAnimationFrame(() => {
       setCustomFormula(diceFormula);
       doRoll(diceFormula);
     });
     return () => cancelAnimationFrame(id);
-  }, [isDiceRollerOpen, diceFormula, doRoll]);
+  }, [isDiceRollerOpen, diceFormula, doRoll, diceRollIntent]);
 
   const handleClose = useCallback(() => {
     setFumbleLines(null);
@@ -155,20 +161,23 @@ export function DiceRoller() {
       aria-modal="true"
       role="dialog"
     >
-      {/* Light scrim — sheet stays visible; only slight dim */}
-      <button
-        type="button"
-        className="absolute inset-0 bg-black/15 pointer-events-auto cursor-default"
-        onClick={handleClose}
-        aria-label="Close dice roller"
-      />
+      {nonBlockingGm ? (
+        <div className="absolute inset-0 pointer-events-none" aria-hidden />
+      ) : (
+        <button
+          type="button"
+          className="absolute inset-0 bg-black/15 pointer-events-auto cursor-default"
+          onClick={handleClose}
+          aria-label="Close dice roller"
+        />
+      )}
 
       <div
-        className="relative pointer-events-auto w-full max-w-md bg-[#f5f5dc] border-4 border-black shadow-[8px_8px_0_0_rgba(0,0,0,0.85)] max-h-[90vh] flex flex-col"
+        className="relative pointer-events-auto w-full max-w-md bg-[#f5f5dc] text-black border-4 border-black shadow-[8px_8px_0_0_rgba(0,0,0,0.85)] max-h-[90vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="border-b-4 border-black p-3 flex justify-between items-center bg-[#e8e8d0] shrink-0">
-          <h2 className="text-lg font-bold uppercase tracking-wide">Dice roller</h2>
+          <h2 className="text-lg font-bold uppercase tracking-wide text-black">Dice roller</h2>
           <button
             type="button"
             onClick={handleClose}
@@ -181,7 +190,7 @@ export function DiceRoller() {
         <div className="p-4 text-center overflow-y-auto flex-1 min-h-0">
           {lastRoll ? (
             <div>
-              <div className="text-xs font-mono text-gray-700 uppercase mb-1 break-all">
+              <div className="text-xs font-mono text-black uppercase mb-1 break-all">
                 {displayFormula(lastRoll.formula)}
               </div>
               <div
@@ -192,12 +201,12 @@ export function DiceRoller() {
                 {lastRoll.result.total}
               </div>
               {lastRoll.result.rolls.length > 1 && (
-                <div className="text-sm text-gray-700 mt-2 font-mono">
+                <div className="text-sm text-black mt-2 font-mono">
                   Rolls: [{lastRoll.result.rolls.join(', ')}]
                 </div>
               )}
               {lastRoll.result.rolls.length === 1 && lastRoll.result.rolls[0] !== lastRoll.result.total && (
-                <div className="text-sm text-gray-700 mt-2 font-mono">
+                <div className="text-sm text-black mt-2 font-mono">
                   Roll: {lastRoll.result.rolls[0]}
                   {lastRoll.result.total - lastRoll.result.rolls[0] > 0
                     ? ` + ${lastRoll.result.total - lastRoll.result.rolls[0]}`
@@ -241,7 +250,7 @@ export function DiceRoller() {
                     </div>
                     {lastRoll.result.explodingD10Chains &&
                       lastRoll.result.explodingD10Chains.length > 0 && (
-                      <div className="text-xs text-gray-800 font-mono">
+                      <div className="text-xs text-black font-mono">
                         {lastRoll.result.explodingD10Chains.map((faces, i) => (
                           <span key={i} className="block">
                             {faces.length > 1 ? (
@@ -258,12 +267,12 @@ export function DiceRoller() {
                   </div>
                 )}
               {lastRoll.formula.toLowerCase().startsWith('flat:') && (
-                <div className="text-xs text-gray-600 mt-2">
+                <div className="text-xs text-black mt-2">
                   Single d10 — no explosion (compare to save target)
                 </div>
               )}
               {gmSubmitting && (
-                <div className="mt-3 text-xs text-gray-700 font-mono">Sending result to AI-GM…</div>
+                <div className="mt-3 text-xs text-black font-mono">Sending result to AI-GM…</div>
               )}
               {gmSubmitError && (
                 <div className="mt-3 text-left border-2 border-red-800 bg-red-50 text-red-900 text-xs p-2">
@@ -272,7 +281,7 @@ export function DiceRoller() {
               )}
             </div>
           ) : (
-            <div className="text-gray-600 text-sm py-6">Roll or enter a formula</div>
+            <div className="text-black text-sm py-6">Roll or enter a formula</div>
           )}
         </div>
 
@@ -284,7 +293,7 @@ export function DiceRoller() {
               onChange={(e) => setCustomFormula(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="e.g. 1d10+12, 2d6+3, flat:1d10"
-              className="flex-1 border-2 border-black px-3 py-2 font-mono text-sm bg-white focus:outline-none focus:ring-2 focus:ring-black/20"
+              className="flex-1 border-2 border-black px-3 py-2 font-mono text-sm text-black bg-white focus:outline-none focus:ring-2 focus:ring-black/20"
             />
             <button
               type="button"
@@ -303,7 +312,7 @@ export function DiceRoller() {
                 key={f}
                 type="button"
                 onClick={() => handleQuickRoll(f)}
-                className="border-2 border-black bg-white py-2 font-bold text-sm hover:bg-[#e8e8d0]"
+                className="border-2 border-black bg-white text-black py-2 font-bold text-sm hover:bg-[#e8e8d0]"
               >
                 {f}
               </button>
@@ -316,7 +325,7 @@ export function DiceRoller() {
             <button
               type="button"
               onClick={() => doRoll(lastRoll.formula)}
-              className="w-full border-2 border-black bg-amber-100 py-2 font-bold uppercase text-sm hover:bg-amber-200"
+              className="w-full border-2 border-black bg-amber-100 text-black py-2 font-bold uppercase text-sm hover:bg-amber-200"
             >
               Re-roll ({displayFormula(lastRoll.formula)})
             </button>
@@ -325,14 +334,14 @@ export function DiceRoller() {
 
         {rollHistory.length > 1 && (
           <div className="border-t-2 border-black px-4 py-2 max-h-28 overflow-y-auto bg-white/50 shrink-0">
-            <div className="text-xs font-bold uppercase text-gray-600 mb-1">History</div>
+            <div className="text-xs font-bold uppercase text-black mb-1">History</div>
             <div className="space-y-1">
               {rollHistory.slice(1, 8).map((entry) => (
                 <button
                   key={entry.id}
                   type="button"
                   onClick={() => doRoll(entry.formula)}
-                  className="w-full flex justify-between text-sm font-mono text-left hover:bg-[#e8e8d0] px-1 py-0.5 border border-transparent hover:border-black"
+                  className="w-full flex justify-between text-sm font-mono text-black text-left hover:bg-[#e8e8d0] px-1 py-0.5 border border-transparent hover:border-black"
                 >
                   <span className="truncate mr-2">{displayFormula(entry.formula)}</span>
                   <span className="font-bold shrink-0">{entry.result.total}</span>

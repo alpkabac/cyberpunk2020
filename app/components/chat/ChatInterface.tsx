@@ -4,6 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useGameStore } from '@/lib/store/game-store';
 import { sortChatMessagesByTimestamp } from '@/lib/chat/chat-order';
 import type { ChatMessage } from '@/lib/types';
+import {
+  resolveGmRequestRoll,
+  rollRequestMetadataToInput,
+} from '@/lib/game-logic/resolve-gm-request-roll';
 
 /** Avoid duplicate auto-opens across React Strict Mode remounts within a page session. */
 const autoOpenedRollRequestIds = new Set<string>();
@@ -44,13 +48,23 @@ export interface ChatInterfaceProps {
   speakerName: string;
   /** When false, input is disabled (e.g. not signed in). */
   enabled?: boolean;
+  /** Selected character id — used when GM omits character_id on the request. */
+  focusCharacterId?: string | null;
 }
 
-export function ChatInterface({ sessionId, speakerName, enabled = true }: ChatInterfaceProps) {
+export function ChatInterface({
+  sessionId,
+  speakerName,
+  enabled = true,
+  focusCharacterId = null,
+}: ChatInterfaceProps) {
   const rawMessages = useGameStore((s) => s.chat.messages);
   const isLoading = useGameStore((s) => s.chat.isLoading);
   const setChatLoading = useGameStore((s) => s.setChatLoading);
   const openDiceRoller = useGameStore((s) => s.openDiceRoller);
+  const charactersById = useGameStore((s) => s.characters.byId);
+  const npcsById = useGameStore((s) => s.npcs.byId);
+  const includeSpecialAbilityInSkillRolls = useGameStore((s) => s.ui.includeSpecialAbilityInSkillRolls);
 
   const messages = useMemo(() => sortChatMessagesByTimestamp(rawMessages), [rawMessages]);
 
@@ -68,23 +82,47 @@ export function ChatInterface({ sessionId, speakerName, enabled = true }: ChatIn
     return null;
   }, [messages]);
 
+  const openGmRollFromMessage = useCallback(
+    (m: ChatMessage) => {
+      const meta = m.metadata as Record<string, unknown> | undefined;
+      if (!meta) return;
+      const input = rollRequestMetadataToInput(meta);
+      const cid =
+        (typeof meta.characterId === 'string' && meta.characterId) || focusCharacterId || null;
+      const char = cid ? charactersById[cid] ?? npcsById[cid] : null;
+      const r = resolveGmRequestRoll(char, input, {
+        includeSpecialAbilityInSkillRolls,
+      });
+      const formula = r.formula.trim();
+      if (!formula) return;
+      const reason = typeof meta.reason === 'string' ? meta.reason : undefined;
+      openDiceRoller(formula, {
+        kind: 'gm_request',
+        sessionId,
+        formula,
+        reason,
+        speakerName,
+        nonBlockingUi: true,
+      });
+    },
+    [
+      focusCharacterId,
+      charactersById,
+      npcsById,
+      includeSpecialAbilityInSkillRolls,
+      sessionId,
+      speakerName,
+      openDiceRoller,
+    ],
+  );
+
   useEffect(() => {
     if (!lastRollRequest || !enabled) return;
     const id = lastRollRequest.id;
     if (autoOpenedRollRequestIds.has(id)) return;
     autoOpenedRollRequestIds.add(id);
-    const formula = typeof lastRollRequest.metadata?.formula === 'string' ? lastRollRequest.metadata.formula : '';
-    if (!formula.trim()) return;
-    const reason =
-      typeof lastRollRequest.metadata?.reason === 'string' ? lastRollRequest.metadata.reason : undefined;
-    openDiceRoller(formula.trim(), {
-      kind: 'gm_request',
-      sessionId,
-      formula: formula.trim(),
-      reason,
-      speakerName,
-    });
-  }, [lastRollRequest, enabled, sessionId, speakerName, openDiceRoller]);
+    openGmRollFromMessage(lastRollRequest);
+  }, [lastRollRequest, enabled, openGmRollFromMessage]);
 
   const [draft, setDraft] = useState('');
   const [sendError, setSendError] = useState<string | null>(null);
@@ -115,18 +153,26 @@ export function ChatInterface({ sessionId, speakerName, enabled = true }: ChatIn
 
   const openRollRequestInRoller = useCallback(
     (m: ChatMessage) => {
-      const formula = typeof m.metadata?.formula === 'string' ? m.metadata.formula.trim() : '';
-      if (!formula) return;
-      const reason = typeof m.metadata?.reason === 'string' ? m.metadata.reason : undefined;
-      openDiceRoller(formula, {
-        kind: 'gm_request',
-        sessionId,
-        formula,
-        reason,
-        speakerName,
-      });
+      openGmRollFromMessage(m);
     },
-    [openDiceRoller, sessionId, speakerName],
+    [openGmRollFromMessage],
+  );
+
+  const rollHint = useCallback(
+    (m: ChatMessage) => {
+      const meta = m.metadata as Record<string, unknown> | undefined;
+      if (!meta) return null;
+      const input = rollRequestMetadataToInput(meta);
+      const cid =
+        (typeof meta.characterId === 'string' && meta.characterId) || focusCharacterId || null;
+      const char = cid ? charactersById[cid] ?? npcsById[cid] : null;
+      const r = resolveGmRequestRoll(char, input, {
+        includeSpecialAbilityInSkillRolls,
+      });
+      if (!r.resolvedFromCharacter || !r.label) return null;
+      return r.label;
+    },
+    [focusCharacterId, charactersById, npcsById, includeSpecialAbilityInSkillRolls],
   );
 
   return (
@@ -146,7 +192,10 @@ export function ChatInterface({ sessionId, speakerName, enabled = true }: ChatIn
         {messages.length === 0 ? (
           <p className="text-zinc-500 text-xs">No messages yet. Say something to the AI-GM.</p>
         ) : (
-          messages.map((m) => (
+          messages.map((m) => {
+            const sheetHint =
+              m.type === 'system' && m.metadata?.kind === 'roll_request' ? rollHint(m) : null;
+            return (
             <div
               key={m.id}
               className={`border-l-2 pl-2 py-1.5 rounded-r ${bubbleClasses(m.type, m.metadata)}`}
@@ -159,6 +208,11 @@ export function ChatInterface({ sessionId, speakerName, enabled = true }: ChatIn
                 </span>
               </div>
               <p className="mt-1 whitespace-pre-wrap break-words leading-snug">{m.text}</p>
+              {sheetHint && (
+                <p className="mt-1 text-[10px] text-amber-200/80 font-mono">
+                  Sheet match: {sheetHint}
+                </p>
+              )}
               {m.type === 'system' && m.metadata?.kind === 'roll_request' && (
                 <button
                   type="button"
@@ -169,7 +223,8 @@ export function ChatInterface({ sessionId, speakerName, enabled = true }: ChatIn
                 </button>
               )}
             </div>
-          ))
+            );
+          })
         )}
         <div ref={endRef} />
       </div>

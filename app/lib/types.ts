@@ -443,6 +443,8 @@ export type DiceRollIntent =
       formula: string;
       reason?: string;
       speakerName: string;
+      /** When true (default), backdrop does not capture pointer events so the character sheet stays usable. */
+      nonBlockingUi?: boolean;
     };
 
 // ============================================================================
