@@ -21,6 +21,7 @@ export interface Scenario {
 }
 
 export const GM_SCENARIOS: Scenario[] = [
+  // ── Original tools ────────────────────────────────────────────────
   {
     id: 'combat-resolve',
     title: 'Resolve gunfire',
@@ -93,6 +94,114 @@ export const GM_SCENARIOS: Scenario[] = [
     playerMessage: 'I jack in and probe the subnet for the security daemon — Interface check, what do I see?',
     expect: 'Keywords like net, deck, or ice can inject netrunning-basic into LORE_RULES for this turn.',
   },
+  // ── New tools ─────────────────────────────────────────────────────
+  {
+    id: 'add-money',
+    title: 'Reward eurobucks',
+    summary: 'Add money to a character — symmetric counterpart to deduct_money.',
+    features: ['Tool: add_money'],
+    playerMessage: 'The corp exec wires me 2000 eb for the completed job. Add it to my sheet.',
+    expect:
+      'Should call add_money with the amount. Check toolResults for the updated eurobucks balance. The character must exist in the session.',
+  },
+  {
+    id: 'heal-damage',
+    title: 'Medical attention',
+    summary: 'Reduce damage points — first aid, medtech, or rest.',
+    features: ['Tool: heal_damage'],
+    playerMessage:
+      'The medtech patches me up and says I should heal 8 points of damage. Apply the healing to my character.',
+    expect:
+      'Should call heal_damage with amount 8. Check the result for updated damage and woundState. Damage should not go below 0.',
+  },
+  {
+    id: 'gm-roll',
+    title: 'NPC dice roll (server-side)',
+    summary: 'GM rolls dice for an NPC action — posts the result to chat so all players see it.',
+    features: ['Tool: roll_dice', 'Chat: roll + gm_roll metadata'],
+    playerMessage:
+      'The boostergang leader takes a shot at me. Roll his attack — REF 7 + Handgun 5 + 1d10.',
+    expect:
+      'Should call roll_dice with a formula like 1d10 (the stat+skill bonus may be noted in reason). The result is inserted into chat_messages with type roll. Check toolResults for total, rolls array, and hadExplodingD10.',
+  },
+  {
+    id: 'equip-item',
+    title: 'Equip / unequip gear',
+    summary: 'Toggle an item equipped flag — triggers armor SP recalc for hit locations.',
+    features: ['Tool: equip_item'],
+    playerMessage:
+      'I take off my MetalGear vest before going into the club. Unequip my body armor.',
+    expect:
+      'Should call equip_item with equipped: false. The character must have an armor item in inventory. After unequipping, hit location SP should recalculate on all clients via Realtime.',
+  },
+  {
+    id: 'modify-skill',
+    title: 'Train a skill',
+    summary: 'Change a skill value by name — IP spending or temporary bonus.',
+    features: ['Tool: modify_skill'],
+    playerMessage:
+      'I spent my improvement points. Raise my Handgun skill to 6.',
+    expect:
+      'Should call modify_skill with skill_name "Handgun" and new_value 6. Case-insensitive name match. Value must be 0–10.',
+  },
+  {
+    id: 'update-ammo',
+    title: 'Reload or track ammo',
+    summary: 'Set remaining shots on a weapon, or reload to full magazine.',
+    features: ['Tool: update_ammo'],
+    playerMessage:
+      'I slam a fresh mag into my Militech Arms Avenger. Reload it to full.',
+    expect:
+      'Should call update_ammo with reload: true. The weapon must exist in the character items array. Check result for updated shots_left matching the weapon magazine capacity.',
+  },
+  {
+    id: 'set-condition',
+    title: 'Apply a condition with duration',
+    summary: 'Persistent status effects with optional duration (rounds). Stored in conditions[] as {name, duration}, synced via Realtime. "stunned" uses isStunned instead.',
+    features: ['Tool: set_condition', 'DB: conditions JSONB', 'Chat: system + condition_change metadata'],
+    playerMessage:
+      'The Dazzle grenade goes off right in front of me — I\'m blinded! Apply the blinded condition for 12 rounds (4 turns).',
+    expect:
+      'Should call set_condition with condition "blinded", active true, and duration_rounds 12. The condition is persisted as {name:"blinded", duration:12} in conditions[]. A system chat message with the duration is posted. For "stunned" specifically, only isStunned toggles (not stored in conditions[]).',
+  },
+  {
+    id: 'update-summary',
+    title: 'Session memory',
+    summary: 'Persist important story events to session_summary so context survives long sessions.',
+    features: ['Tool: update_summary'],
+    playerMessage:
+      'We just finished the Arasaka warehouse raid. Update the session summary with what happened: we stole the prototype, lost our rigger, and the corp knows our faces now.',
+    expect:
+      'Should call update_summary with a summary string. The sessions.session_summary column is updated. This text appears in SUMMARY block on future GM turns.',
+  },
+  {
+    id: 'npc-dialogue',
+    title: 'NPC speaks in chat',
+    summary: 'Post in-character dialogue attributed to a named NPC — distinct from GM narration.',
+    features: ['Tool: add_chat_as_npc', 'Chat: narration + npc_dialogue metadata'],
+    playerMessage:
+      'I ask the fixer what he knows about the Tyger Claws hideout. What does he say?',
+    expect:
+      'May call add_chat_as_npc with npc_name (e.g. "Rogue") and text. The chat message appears with the NPC name as speaker, type narration, metadata.kind npc_dialogue. Distinct from play_narration which always says "Game Master".',
+  },
+  {
+    id: 'multi-tool',
+    title: 'Multi-tool combat round',
+    summary: 'Complex scenario that should trigger multiple tools in one turn.',
+    features: ['Tools: roll_dice, apply_damage, set_condition, play_narration'],
+    playerMessage:
+      'The booster shoots at me with his SMG (3-round burst). Roll his attack, determine if it hits, roll damage if so, and apply it. He\'s at medium range.',
+    expect:
+      'The model should chain multiple tools: roll_dice for the attack, possibly roll_dice again for damage, apply_damage if it hits, and maybe set_condition or play_narration. Watch the toolResults array for the sequence.',
+  },
+  {
+    id: 'freeform',
+    title: 'Freeform (custom message)',
+    summary: 'Type your own player message to test any tool combination.',
+    features: ['Any tool'],
+    playerMessage: '',
+    expect: 'Depends on what you type. Use this to test edge cases or combine multiple tools.',
+  },
 ];
 
 type ApiToolResult = { ok: true; name: string; result: unknown } | { ok: false; name: string; error: string };
@@ -142,12 +251,21 @@ export function GmScenariosClient() {
     [selectedId],
   );
 
+  const [customMessage, setCustomMessage] = useState('');
+
+  const isFreeform = selected.id === 'freeform';
+  const effectiveMessage = isFreeform ? customMessage : selected.playerMessage;
+
   const sendScenario = useCallback(async () => {
     setClientError(null);
     setLastJson(null);
     const sid = sessionId.trim();
     if (!sid) {
       setClientError('Paste a session UUID from Supabase or from your /session/… URL.');
+      return;
+    }
+    if (!effectiveMessage.trim()) {
+      setClientError('Player message is empty.');
       return;
     }
 
@@ -158,7 +276,7 @@ export function GmScenariosClient() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sessionId: sid,
-          playerMessage: selected.playerMessage,
+          playerMessage: effectiveMessage,
           speakerName: speakerName.trim() || 'Player',
           loreTokenBudget: 2000,
         }),
@@ -175,11 +293,21 @@ export function GmScenariosClient() {
     } finally {
       setLoading(false);
     }
-  }, [sessionId, selected.playerMessage, speakerName]);
+  }, [sessionId, effectiveMessage, speakerName]);
 
   const copyMessage = useCallback(() => {
-    void navigator.clipboard.writeText(selected.playerMessage);
-  }, [selected.playerMessage]);
+    void navigator.clipboard.writeText(effectiveMessage);
+  }, [effectiveMessage]);
+
+  const originalScenarios = GM_SCENARIOS.filter(
+    (s) => !['add-money', 'heal-damage', 'gm-roll', 'equip-item', 'modify-skill', 'update-ammo', 'set-condition', 'update-summary', 'npc-dialogue', 'multi-tool', 'freeform'].includes(s.id),
+  );
+  const newScenarios = GM_SCENARIOS.filter(
+    (s) => ['add-money', 'heal-damage', 'gm-roll', 'equip-item', 'modify-skill', 'update-ammo', 'set-condition', 'update-summary', 'npc-dialogue'].includes(s.id),
+  );
+  const advancedScenarios = GM_SCENARIOS.filter(
+    (s) => s.id === 'multi-tool' || s.id === 'freeform',
+  );
 
   return (
     <div className="max-w-4xl mx-auto space-y-10">
@@ -218,24 +346,68 @@ export function GmScenariosClient() {
         </label>
       </section>
 
-      <section className="space-y-3">
-        <h2 className="text-sm uppercase tracking-[0.15em] text-yellow-500/90">Pick a scenario</h2>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {GM_SCENARIOS.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              onClick={() => setSelectedId(s.id)}
-              className={`text-left border p-4 rounded-sm transition-colors ${
-                selectedId === s.id
-                  ? 'border-cyan-500 bg-cyan-950/30'
-                  : 'border-gray-800 bg-black/40 hover:border-gray-600'
-              }`}
-            >
-              <p className="font-bold text-white text-sm">{s.title}</p>
-              <p className="text-xs text-gray-500 mt-1 line-clamp-2">{s.summary}</p>
-            </button>
-          ))}
+      <section className="space-y-6">
+        <div className="space-y-3">
+          <h2 className="text-sm uppercase tracking-[0.15em] text-yellow-500/90">Core tools</h2>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {originalScenarios.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => setSelectedId(s.id)}
+                className={`text-left border p-3 rounded-sm transition-colors ${
+                  selectedId === s.id
+                    ? 'border-cyan-500 bg-cyan-950/30'
+                    : 'border-gray-800 bg-black/40 hover:border-gray-600'
+                }`}
+              >
+                <p className="font-bold text-white text-sm">{s.title}</p>
+                <p className="text-xs text-gray-500 mt-1 line-clamp-2">{s.summary}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <h2 className="text-sm uppercase tracking-[0.15em] text-emerald-400/90">New tools</h2>
+          <div className="grid gap-3 sm:grid-cols-3">
+            {newScenarios.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => setSelectedId(s.id)}
+                className={`text-left border p-3 rounded-sm transition-colors ${
+                  selectedId === s.id
+                    ? 'border-emerald-500 bg-emerald-950/30'
+                    : 'border-gray-800 bg-black/40 hover:border-gray-600'
+                }`}
+              >
+                <p className="font-bold text-white text-sm">{s.title}</p>
+                <p className="text-xs text-gray-500 mt-1 line-clamp-1">{s.summary}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <h2 className="text-sm uppercase tracking-[0.15em] text-amber-400/90">Advanced</h2>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {advancedScenarios.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => setSelectedId(s.id)}
+                className={`text-left border p-3 rounded-sm transition-colors ${
+                  selectedId === s.id
+                    ? 'border-amber-500 bg-amber-950/30'
+                    : 'border-gray-800 bg-black/40 hover:border-gray-600'
+                }`}
+              >
+                <p className="font-bold text-white text-sm">{s.title}</p>
+                <p className="text-xs text-gray-500 mt-1 line-clamp-2">{s.summary}</p>
+              </button>
+            ))}
+          </div>
         </div>
       </section>
 
@@ -253,22 +425,36 @@ export function GmScenariosClient() {
           </div>
           <p className="text-gray-300 text-sm">{selected.summary}</p>
           <div>
-            <p className="text-xs text-gray-500 uppercase mb-1">Example player message</p>
-            <pre className="text-sm text-gray-200 whitespace-pre-wrap font-mono bg-black/50 border border-gray-800 p-3 rounded-sm">
-              {selected.playerMessage}
-            </pre>
+            <p className="text-xs text-gray-500 uppercase mb-1">
+              {isFreeform ? 'Your message' : 'Example player message'}
+            </p>
+            {isFreeform ? (
+              <textarea
+                value={customMessage}
+                onChange={(e) => setCustomMessage(e.target.value)}
+                placeholder="Type any player message to test tools…"
+                rows={4}
+                className="w-full text-sm text-gray-200 font-mono bg-black/50 border border-gray-800 p-3 rounded-sm resize-y focus:border-cyan-500 focus:outline-none"
+              />
+            ) : (
+              <pre className="text-sm text-gray-200 whitespace-pre-wrap font-mono bg-black/50 border border-gray-800 p-3 rounded-sm">
+                {selected.playerMessage}
+              </pre>
+            )}
             <div className="flex flex-wrap gap-2 mt-2">
-              <button
-                type="button"
-                onClick={copyMessage}
-                className="text-xs px-3 py-1.5 border border-gray-600 text-gray-300 hover:bg-gray-900"
-              >
-                Copy message
-              </button>
+              {!isFreeform && (
+                <button
+                  type="button"
+                  onClick={copyMessage}
+                  className="text-xs px-3 py-1.5 border border-gray-600 text-gray-300 hover:bg-gray-900"
+                >
+                  Copy message
+                </button>
+              )}
               <button
                 type="button"
                 onClick={sendScenario}
-                disabled={loading}
+                disabled={loading || (isFreeform && !customMessage.trim())}
                 className="text-xs px-4 py-1.5 bg-cyan-700 hover:bg-cyan-600 disabled:opacity-50 text-white font-bold uppercase tracking-wide"
               >
                 {loading ? 'Calling GM…' : 'Send to /api/gm'}

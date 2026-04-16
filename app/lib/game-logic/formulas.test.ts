@@ -114,6 +114,7 @@ describe('Property 12: Derived Stats Calculation', () => {
             skills: [],
             damage,
             isStunned: false,
+            conditions: [],
             hitLocations: {
               Head: { location: [1], stoppingPower: 0, ablation: 0 },
               Torso: { location: [2, 4], stoppingPower: 0, ablation: 0 },
@@ -419,6 +420,7 @@ describe('getStabilizationMedicBonus', () => {
       ],
       damage: 20,
       isStunned: false,
+      conditions: [],
       hitLocations: {
         Head: { location: [1], stoppingPower: 0, ablation: 0 },
         Torso: { location: [2, 4], stoppingPower: 0, ablation: 0 },

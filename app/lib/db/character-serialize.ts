@@ -33,6 +33,7 @@ export function serializeCharacterForDb(c: Character): Record<string, unknown> {
     skills: c.skills,
     damage: c.damage,
     is_stunned: c.isStunned,
+    conditions: c.conditions,
     combat_modifiers: c.combatModifiers ?? { initiative: 0, stunSave: 0 },
     hit_locations: c.hitLocations,
     sdp: c.sdp,

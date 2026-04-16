@@ -1,7 +1,7 @@
 'use client';
 
-import React from 'react';
-import { Character } from '@/lib/types';
+import React, { useState } from 'react';
+import { Character, CharacterCondition } from '@/lib/types';
 import { useGameStore } from '@/lib/store/game-store';
 
 interface WoundTrackerProps {
@@ -9,9 +9,67 @@ interface WoundTrackerProps {
   editable: boolean;
 }
 
+const CONDITION_COLORS: Record<string, string> = {
+  unconscious: 'bg-purple-200 text-purple-800 border-purple-400',
+  asleep: 'bg-purple-200 text-purple-800 border-purple-400',
+  blinded: 'bg-yellow-200 text-yellow-900 border-yellow-500',
+  deafened: 'bg-yellow-200 text-yellow-900 border-yellow-500',
+  on_fire: 'bg-red-200 text-red-800 border-red-500',
+  poisoned: 'bg-green-200 text-green-800 border-green-500',
+  drugged: 'bg-green-200 text-green-800 border-green-500',
+  cyberpsychosis: 'bg-pink-200 text-pink-800 border-pink-500',
+};
+const DEFAULT_BADGE = 'bg-gray-200 text-gray-700 border-gray-400';
+
+const COMMON_CONDITIONS = [
+  'blinded', 'deafened', 'unconscious', 'asleep', 'on_fire',
+  'prone', 'grappled', 'poisoned', 'drugged', 'cyberpsychosis',
+];
+
 export function WoundTracker({ character, editable }: WoundTrackerProps) {
   const updateCharacterField = useGameStore((state) => state.updateCharacterField);
-  const { damage, derivedStats, isStunned } = character;
+  const { damage, derivedStats, isStunned, conditions } = character;
+
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [selectedCondition, setSelectedCondition] = useState(COMMON_CONDITIONS[0]);
+  const [customName, setCustomName] = useState('');
+  const [durationInput, setDurationInput] = useState('');
+
+  const isCustom = selectedCondition === '__custom';
+
+  const removeCondition = (name: string) => {
+    updateCharacterField(
+      character.id,
+      'conditions',
+      conditions.filter((c) => c.name !== name),
+    );
+  };
+
+  const addCondition = () => {
+    const name = (isCustom ? customName : selectedCondition).toLowerCase().trim().replace(/\s+/g, '_');
+    if (!name) return;
+    const dur = durationInput.trim() ? parseInt(durationInput, 10) : null;
+    const duration = dur !== null && Number.isFinite(dur) && dur > 0 ? dur : null;
+    const entry: CharacterCondition = { name, duration };
+
+    const idx = conditions.findIndex((c) => c.name === name);
+    let next: CharacterCondition[];
+    if (idx !== -1) {
+      next = [...conditions];
+      next[idx] = entry;
+    } else {
+      next = [...conditions, entry];
+    }
+    updateCharacterField(character.id, 'conditions', next);
+    setDurationInput('');
+    setCustomName('');
+    setShowAddForm(false);
+  };
+
+  const rollDuration = () => {
+    const roll = Math.floor(Math.random() * 6) + 1;
+    setDurationInput(String(roll));
+  };
   const stunSaveMod = character.combatModifiers?.stunSave ?? 0;
 
   const woundStates: Array<{ name: string; range: [number, number]; penalty: string }> = [
@@ -125,6 +183,99 @@ export function WoundTracker({ character, editable }: WoundTrackerProps) {
                   </span>
                 )}
               </span>
+            </div>
+          )}
+
+          {/* Condition badges */}
+          {conditions && conditions.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-1">
+              {conditions.map((cond) => (
+                <span
+                  key={cond.name}
+                  className={`text-[9px] font-bold uppercase px-1.5 py-0.5 border rounded-sm inline-flex items-center gap-0.5 ${
+                    CONDITION_COLORS[cond.name] ?? DEFAULT_BADGE
+                  }`}
+                >
+                  {cond.name.replace(/_/g, ' ')}
+                  {cond.duration != null && (
+                    <span className="opacity-70">({cond.duration}r)</span>
+                  )}
+                  {editable && (
+                    <button
+                      type="button"
+                      onClick={() => removeCondition(cond.name)}
+                      className="ml-0.5 leading-none opacity-60 hover:opacity-100"
+                      title={`Remove ${cond.name}`}
+                    >
+                      &times;
+                    </button>
+                  )}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* Add condition controls */}
+          {editable && !showAddForm && (
+            <button
+              type="button"
+              onClick={() => setShowAddForm(true)}
+              className="text-[10px] text-gray-400 hover:text-gray-600 mt-1 uppercase tracking-wide"
+            >
+              + Add condition
+            </button>
+          )}
+          {editable && showAddForm && (
+            <div className="mt-1 flex flex-wrap items-center gap-1">
+              <select
+                value={selectedCondition}
+                onChange={(e) => setSelectedCondition(e.target.value)}
+                className="text-[10px] border border-gray-400 bg-white px-1 py-0.5 rounded-sm"
+              >
+                {COMMON_CONDITIONS.filter((c) => !conditions.some((ex) => ex.name === c)).map((c) => (
+                  <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>
+                ))}
+                <option value="__custom">Custom...</option>
+              </select>
+              {isCustom && (
+                <input
+                  type="text"
+                  value={customName}
+                  onChange={(e) => setCustomName(e.target.value)}
+                  placeholder="name"
+                  className="text-[10px] border border-gray-400 px-1 py-0.5 w-16 rounded-sm"
+                />
+              )}
+              <input
+                type="number"
+                value={durationInput}
+                onChange={(e) => setDurationInput(e.target.value)}
+                placeholder="rounds"
+                min={1}
+                className="text-[10px] border border-gray-400 px-1 py-0.5 w-12 rounded-sm"
+              />
+              <button
+                type="button"
+                onClick={rollDuration}
+                className="text-[10px] px-1 py-0.5 border border-gray-400 bg-gray-50 hover:bg-gray-200 rounded-sm"
+                title="Roll 1d6 for duration"
+              >
+                1d6
+              </button>
+              <button
+                type="button"
+                onClick={addCondition}
+                className="text-[10px] px-1.5 py-0.5 bg-black text-white font-bold uppercase rounded-sm hover:bg-gray-800"
+              >
+                Add
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowAddForm(false)}
+                className="text-[10px] text-gray-400 hover:text-gray-600"
+              >
+                Cancel
+              </button>
             </div>
           )}
 

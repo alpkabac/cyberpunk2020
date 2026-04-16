@@ -206,7 +206,7 @@ export function applyStatModifiers(character: Character): void {
   }
 
   // Override EMP total with humanity-derived value
-  stats.emp.total = derived.currentEmp;
+  if (stats.emp) stats.emp.total = derived.currentEmp;
 }
 
 /**

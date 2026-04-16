@@ -32,6 +32,7 @@ const minimalCharacter = (id: string): Character => ({
   skills: [],
   damage: 0,
   isStunned: false,
+  conditions: [],
   hitLocations: {} as Character['hitLocations'],
   sdp: {
     sum: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },

@@ -193,4 +193,158 @@ export const GM_TOOL_DEFINITIONS = [
       },
     },
   },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'add_money',
+      description: 'Add eurobucks to a character (rewards, loot, payment received).',
+      parameters: {
+        type: 'object',
+        properties: {
+          character_id: { type: 'string' },
+          amount: { type: 'number', minimum: 0 },
+        },
+        required: ['character_id', 'amount'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'heal_damage',
+      description:
+        'Reduce damage points on a character (medical attention, rest, first aid). Heals by the given amount, clamped to 0.',
+      parameters: {
+        type: 'object',
+        properties: {
+          character_id: { type: 'string' },
+          amount: { type: 'number', minimum: 1, description: 'Damage points to heal' },
+        },
+        required: ['character_id', 'amount'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'roll_dice',
+      description:
+        'Roll dice server-side (for NPC actions, random events, hit location, etc.). Posts the result as a chat message. Formula examples: 1d10, 3d6, 2d6+3, 1d10x10. Prefix with flat: for non-exploding d10 (saves).',
+      parameters: {
+        type: 'object',
+        properties: {
+          formula: { type: 'string', description: 'Dice formula, e.g. 1d10, 3d6+2, flat:1d10' },
+          reason: { type: 'string', description: 'Why this roll is being made' },
+          character_id: { type: 'string', description: 'Optional: character or NPC performing the roll' },
+        },
+        required: ['formula'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'equip_item',
+      description:
+        'Toggle a character item equipped/unequipped. Triggers armor SP recalculation for hit locations.',
+      parameters: {
+        type: 'object',
+        properties: {
+          character_id: { type: 'string' },
+          item_id: { type: 'string' },
+          equipped: { type: 'boolean', description: 'true to equip, false to unequip' },
+        },
+        required: ['character_id', 'item_id', 'equipped'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'modify_skill',
+      description:
+        'Set a skill value by skill name (case-insensitive match). Use for IP spending, training, or temporary bonuses. Value 0–10.',
+      parameters: {
+        type: 'object',
+        properties: {
+          character_id: { type: 'string' },
+          skill_name: { type: 'string', description: 'Skill name (case-insensitive)' },
+          new_value: { type: 'number', minimum: 0, maximum: 10, description: 'New skill value' },
+        },
+        required: ['character_id', 'skill_name', 'new_value'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'update_ammo',
+      description:
+        'Set shots remaining for a weapon. Pass shots_left for an absolute value, or reload:true to restore to full magazine capacity.',
+      parameters: {
+        type: 'object',
+        properties: {
+          character_id: { type: 'string' },
+          weapon_id: { type: 'string', description: 'Item ID of the weapon' },
+          shots_left: { type: 'number', minimum: 0, description: 'New shots remaining' },
+          reload: { type: 'boolean', description: 'If true, restore to full magazine (ignores shots_left)' },
+        },
+        required: ['character_id', 'weapon_id'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'set_condition',
+      description:
+        'Add or remove a persistent status condition on a character. "stunned" toggles only isStunned (not stored in conditions[]). Other conditions are persisted in conditions[] with optional duration and synced to all clients. Specify duration_rounds when CP2020 rules define one (e.g. Dazzle grenade = blinded 12 rounds, Sonic grenade = deafened 12 rounds, Incendiary = on_fire 9 rounds). CP2020 conditions: unconscious, asleep, blinded, on_fire, grappled, prone, deafened, poisoned, drugged, cyberpsychosis.',
+      parameters: {
+        type: 'object',
+        properties: {
+          character_id: { type: 'string' },
+          condition: {
+            type: 'string',
+            description: 'Condition name (e.g. stunned, unconscious, asleep, blinded, on_fire, grappled, prone, deafened, poisoned, drugged, cyberpsychosis)',
+          },
+          active: { type: 'boolean', description: 'true to apply, false to remove' },
+          duration_rounds: {
+            type: 'integer',
+            description: 'Optional duration in combat rounds (~3s each). Omit or null for indefinite conditions. CP2020 "turns" = 3 rounds.',
+          },
+        },
+        required: ['character_id', 'condition', 'active'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'update_summary',
+      description:
+        'Update the session summary text. Use to persist important story events so context survives long sessions.',
+      parameters: {
+        type: 'object',
+        properties: {
+          summary: { type: 'string', description: 'New session summary text (replaces existing)' },
+        },
+        required: ['summary'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'add_chat_as_npc',
+      description: 'Post an in-character dialogue line from a named NPC to the session chat.',
+      parameters: {
+        type: 'object',
+        properties: {
+          npc_name: { type: 'string', description: 'Display name of the NPC speaking' },
+          text: { type: 'string', description: 'What the NPC says' },
+        },
+        required: ['npc_name', 'text'],
+      },
+    },
+  },
 ];

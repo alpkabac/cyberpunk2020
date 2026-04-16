@@ -57,6 +57,7 @@ const minimalChar = (id: string): Character => ({
   skills: [],
   damage: 0,
   isStunned: false,
+  conditions: [],
   hitLocations: {
     Head: { location: [1], stoppingPower: 0, ablation: 0 },
     Torso: { location: [2, 3, 4], stoppingPower: 0, ablation: 0 },

@@ -514,8 +514,16 @@ This implementation plan breaks down the design into discrete coding tasks. The 
 
   - [x] 10.7 Create tool-executor.ts for tool calling
     - Define tool schemas with validation
-    - Implement tool handlers: apply_damage, deduct_money, add_item, remove_item, request_roll, move_token, generate_scenery, play_narration, lookup_rules, update_character_field
+    - Implement tool handlers (18 tools total):
+      - **Core:** apply_damage, deduct_money, add_item, remove_item, request_roll, move_token, generate_scenery, play_narration, lookup_rules, update_character_field
+      - **Extended:** add_money, heal_damage, roll_dice (server-side for NPCs), equip_item, modify_skill, update_ammo, set_condition (with duration_rounds), update_summary, add_chat_as_npc
+    - **Deferred tools** (to be added when their dependencies exist):
+      - `add_token` / `remove_token` — blocked on Task 14 (Map & Token UI); `move_token` already works against the `tokens` table
+      - `spawn_npc` — see Task 19; requires character creation logic and GM-owned character rows
+      - `start_combat` / `advance_round` / `end_combat` — see Task 20; requires turn tracker / initiative system
     - **`request_roll`:** surface to the client as guidance (open dice roller, suggested formula)—does not replace player agency or enforce server-side randomness
+    - **`roll_dice`:** server-side dice for NPC actions, random events; result posted to chat
+    - **`set_condition`:** persistent status effects with optional duration (rounds); "stunned" toggles `isStunned` only, all other conditions stored in `conditions[]` JSONB
     - Validate parameters before execution
     - Execute state mutations and update database (Realtime propagates via `postgres_changes`)
     - _Requirements: 3.2, 3.3, 3.4_
@@ -550,6 +558,44 @@ This implementation plan breaks down the design into discrete coding tasks. The 
     - **Property 31: Tool Call Error Logging**
     - **Validates: Requirements 16.1**
     - **COMPLETED:** `app/lib/gm/gm.property.test.ts` (validation surface); route logs failed tools with `console.error`
+
+  - [x] 10.13 Implement persistent conditions system
+    - [x] 10.13.1 Add conditions JSONB column to characters table
+      - Created migration `003_character_conditions.sql` adding `conditions JSONB DEFAULT '[]'`
+      - Updated `schema.sql` for fresh installs
+      - **COMPLETED:** `app/lib/database/migrations/003_character_conditions.sql`
+
+    - [x] 10.13.2 Add CharacterCondition type with duration tracking
+      - `CharacterCondition { name: string; duration: number | null }` — duration in CP2020 rounds (~3s)
+      - Updated `Character.conditions` from `string[]` to `CharacterCondition[]`
+      - Updated serializer/deserializer with safe migration of legacy bare strings
+      - **COMPLETED:** `app/lib/types.ts`, `app/lib/realtime/db-mapper.ts`, `app/lib/db/character-serialize.ts`
+
+    - [x] 10.13.3 Add set_condition tool with duration support
+      - `set_condition` tool accepts optional `duration_rounds` parameter
+      - "stunned" toggles only `isStunned` (no conditions[] entry); "asleep"/"unconscious" also set `isStunned`
+      - Conditions persisted on character row, synced via Realtime to all clients
+      - Chat message posted with duration info (e.g. "Condition **blinded** applied to V (12 rounds)")
+      - AI instructed to specify duration when CP2020 rules define one (e.g. Dazzle=12r, Sonic=12r, Incendiary=9r)
+      - **COMPLETED:** `app/lib/gm/character-mutations.ts`, `app/lib/gm/tool-executor.ts`, `app/lib/gm/tool-definitions.ts`, `app/lib/gm/context-builder.ts`
+
+    - [x] 10.13.4 Add condition badges and manual add/remove UI to WoundTracker
+      - Color-coded condition badges with duration display (e.g. `BLINDED (12r)`)
+      - Remove button (x) on each badge when editable
+      - Add condition form: dropdown of common CP2020 conditions + custom option, duration input, 1d6 roll button
+      - **COMPLETED:** `app/components/character/WoundTracker.tsx`
+
+  - [x] 10.14 Create GM scenarios test page
+    - Dev page at `/gm-scenarios` for testing AI-GM tool calls with predefined scenarios
+    - 16 scenarios covering all tools: combat, money, healing, dice, equipment, skills, ammo, conditions, NPC dialogue, session summary, multi-tool chains, freeform
+    - Sends requests to `/api/gm` and displays narration + tool results
+    - **COMPLETED:** `app/app/gm-scenarios/GmScenariosClient.tsx`, `app/app/gm-scenarios/page.tsx`
+
+  - [x] 10.15 Fix defensive stats deserialization
+    - Replaced unsafe cast in `characterRowToCharacter` with `safeStats()` parser
+    - Each stat key validated individually; missing/malformed stats fall back to `createStatBlock(1, 0)`
+    - Added guard in `applyStatModifiers` for missing `stats.emp`
+    - **COMPLETED:** `app/lib/realtime/db-mapper.ts`, `app/lib/game-logic/formulas.ts`
 
 - [ ] 11. Checkpoint - Validate AI-GM integration
   - Ensure all tests pass, ask the user if questions arise.
@@ -638,6 +684,13 @@ This implementation plan breaks down the design into discrete coding tasks. The 
     - AI-GM `move_token` tool updates the same rows
     - _Requirements: 8.3, 8.4_
 
+  - [ ] 14.5 Add `add_token` and `remove_token` AI tools _(deferred — blocked on 14.1–14.4)_
+    - `add_token`: AI places a new token on the map (NPC, object, hazard marker) — inserts row into `tokens` table
+    - `remove_token`: AI removes a token from the map (NPC defeated, object destroyed) — deletes row from `tokens` table
+    - `move_token` already exists in tool-executor.ts and tool-definitions.ts; these two complete the set
+    - **Current state:** `move_token` tool is implemented and functional against the `tokens` DB table; the Map UI (14.1–14.2) and token rows are not yet in active use
+    - _Requirements: 8.2, 8.3_
+
 - [ ] 15. Implement authentication and authorization
   - [ ] 15.1 Set up Supabase Auth
     - Configure email/password authentication
@@ -702,62 +755,126 @@ This implementation plan breaks down the design into discrete coding tasks. The 
     - Set up error tracking (Sentry or similar)
     - _Requirements: 16.1_
 
-- [ ] 18. Create rule files for lorebook
+- [ ] 18. Create rule files for lorebook _(deferred — engine complete, content expansion needed)_
+    - **Current state:** Lorebook engine fully implemented (Task 10.3): keyword matching, priority sorting, token budget enforcement, `lookup_rules` tool. Only 4 basic rules exist in `app/lib/gm/lore/default-rules.json` (core-attributes, fnff-damage, netrunning-basic, economy-eurobucks).
+    - **Format:** Rules live as JSON entries in `default-rules.json` with `{ id, keywords[], priority, content }`. Task originally called for separate `.md` files with YAML frontmatter — either approach works, but the current JSON format is already wired into `lorebook.ts`.
+
   - [ ] 18.1 Write core rule files
-    - combat-basics.md: turn order, actions, initiative
-    - damage-pipeline.md: damage calculation steps
-    - skill-checks.md: DC table, modifiers
+    - combat-basics: turn order, actions per round, initiative (REF + 1d10), fumble tables
+    - damage-pipeline: hit roll → location → SP → BTM → wound track → stun/death saves
+    - skill-checks: DC table (Easy 10, Average 15, Difficult 20, Very Difficult 25, Nearly Impossible 30), modifiers
     - _Requirements: 4.5_
 
   - [ ] 18.2 Write topic rule files
-    - ranged-combat.md: range DCs, fire modes, modifiers
-    - melee-combat.md: melee attacks, martial arts
-    - autofire.md: full auto, burst, suppressive fire
-    - netrunning.md: interface, programs, NET combat
-    - cyberware-rules.md: humanity loss, installation
-    - vehicle-combat.md: vehicle stats, chases
-    - shopping.md: availability, costs, haggling
+    - ranged-combat: range DCs by weapon type, fire modes (single/burst/full-auto), aimed shots, cover modifiers
+    - melee-combat: melee attacks, martial arts actions and bonuses, grappling
+    - autofire: full auto hit calculation (1 hit per point over DC), burst fire, suppressive fire zones
+    - netrunning: interface skill, programs, ICE types, NET architecture, Netrunner actions per turn
+    - cyberware-rules: humanity cost, installation difficulty, therapy, cyberpsychosis threshold
+    - vehicle-combat: vehicle SP/SDP, control rolls, chase rules, ramming
+    - shopping: availability rolls by city size, street deals, fixer contacts, cost modifiers
+    - grenades-explosives: blast radius, dazzle/flashbang/smoke/incendiary/frag effects and durations
+    - drugs-pharmaceuticals: common drugs (speedheal, stim, dorph), effects, addiction, overdose
     - _Requirements: 4.5_
 
   - [ ] 18.3 Add keyword metadata to all rule files
-    - Add YAML frontmatter with keywords, priority, max_tokens
+    - Ensure each rule has comprehensive `keywords[]` for reliable matching
+    - Set appropriate `priority` (higher = injected first under budget)
+    - Test against common player queries to verify coverage
     - _Requirements: 4.1_
 
-- [ ] 19. Polish UI and styling
-  - [ ] 19.1 Apply cyberpunk theme to all components
+- [ ] 19. Implement NPC spawning system _(deferred)_
+  - GM AI tool to create NPC character sheets on-the-fly during a session
+  - **Depends on:** Task 14 (Map & Tokens) for optional token placement, schema support for GM-owned characters
+
+  - [ ] 19.1 Add GM ownership model for characters
+    - Schema change: allow `user_id` to be null or a GM sentinel value for NPC rows
+    - Update RLS policies so GM can read/write NPC characters in their sessions
+    - Update `characterRowToCharacter` to flag NPC characters (e.g. `isNpc: boolean`)
+
+  - [ ] 19.2 Create NPC role templates
+    - Define stat/skill/equipment templates for common CP2020 roles: Solo, Netrunner, Techie, Fixer, Nomad, Corp, Cop, etc.
+    - Each template provides baseline stats, role skill, typical weapons/armor, and a threat-level scaler
+    - Source from CP2020 NPC stat blocks in `CP2020Gameplay.md` / `CP2020Character.md`
+
+  - [ ] 19.3 Implement `spawn_npc` AI tool
+    - Accepts parameters: name, role, approximate threat level, optional stat overrides
+    - Populates Character from role template, inserts into `characters` table linked to current session
+    - Syncs via Realtime to all clients
+    - Optionally places a token on the map if Task 14 is complete (`add_token` call)
+    - Post chat message announcing the NPC (e.g. "A **Corporate Solo** appears — Viktor, armed with an FN-RAL")
+
+  - [ ] 19.4 Add NPC management UI
+    - GM-visible NPC list in the session room (distinct from player characters)
+    - Quick-edit panel for NPC stats/equipment
+    - Remove/archive NPC button
+
+- [ ] 20. Implement turn tracker / initiative system _(deferred)_
+  - Track combat rounds and initiative order within a session
+  - **Depends on:** Task 12 (Chat Interface) for round announcements
+
+  - [ ] 20.1 Design initiative data model
+    - `combat_state` on session or separate table: round counter, active character index
+    - `initiative_entries`: character_id, initiative roll (REF + 1d10), sort order
+    - Persisted in Postgres, synced via Realtime
+
+  - [ ] 20.2 Implement `start_combat` AI tool
+    - Roll initiative for all characters in the session (REF + 1d10 per CP2020)
+    - Create initiative order, set round to 1
+    - Post initiative results to chat
+
+  - [ ] 20.3 Implement `advance_round` AI tool
+    - Increment round counter
+    - Auto-decrement `duration` on all `CharacterCondition` entries across session characters
+    - Remove expired conditions (duration reaches 0), post removals to chat
+    - Post round summary (e.g. "— Round 3 begins — Blinded cleared from V")
+
+  - [ ] 20.4 Implement `end_combat` AI tool
+    - Clear initiative order and combat state
+    - Optionally clear temporary combat-only conditions
+    - Post combat-end narration to chat
+
+  - [ ] 20.5 Build initiative tracker UI
+    - Initiative sidebar/bar showing turn order with active character highlight
+    - Round counter display
+    - Manual "next turn" / "advance round" buttons for GM
+    - Visual indicator on character sheets when it's their turn
+
+- [ ] 21. Polish UI and styling
+  - [ ] 21.1 Apply cyberpunk theme to all components
     - Use color palette from Foundry SCSS
     - Add grid patterns and neon accents
     - Use OpenSans-ExtraBold font
     - _Requirements: 14.1, 14.2, 14.3, 14.4_
 
-  - [ ] 19.2 Make UI responsive
+  - [ ] 21.2 Make UI responsive
     - Test on desktop and tablet screens
     - Adjust layouts for different screen sizes
     - _Requirements: 14.5_
 
-  - [ ] 19.3 Add loading states and animations
+  - [ ] 21.3 Add loading states and animations
     - Show loading spinners during AI-GM responses
     - Add dice roll animations
     - Add token movement animations
 
-- [ ] 20. Final checkpoint - Integration testing
+- [ ] 22. Final checkpoint - Integration testing
   - Test complete game flow: character creation → combat → shopping → session save/load
   - Test multiplayer with multiple clients
   - Test voice input and TTS narration
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 21. Deployment preparation
-  - [ ] 21.1 Set up production environment variables
+- [ ] 23. Deployment preparation
+  - [ ] 23.1 Set up production environment variables
     - Configure secrets on the target host (VPS process manager, Docker, or Vercel/hosting dashboard)
     - Configure Supabase production database and Realtime
     - _Requirements: 18.2_
 
-  - [ ] 21.2 Deploy Next.js (VPS or cloud)
+  - [ ] 23.2 Deploy Next.js (VPS or cloud)
     - **Preferred:** build and run Next.js on a VPS (Node, systemd, PM2, or Docker) for predictable API + long-running behavior
     - **Alternative:** Vercel or similar if compatible with the chosen stack
     - _Requirements: 18.1_
 
-  - [ ] 21.3 Write deployment documentation
+  - [ ] 23.3 Write deployment documentation
     - Document setup steps
     - Document environment variables
     - Document database schema setup

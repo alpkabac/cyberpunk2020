@@ -4,8 +4,9 @@
 -- This schema defines all tables for the multiplayer AI-GM application
 -- Run this in your Supabase SQL editor to set up the database
 --
--- If you already applied an older schema.sql, run:
+-- If you already applied an older schema.sql, run the migrations in order:
 --   migrations/001_character_sheet_columns.sql
+--   migrations/003_character_conditions.sql
 -- to add the same columns without recreating tables.
 
 -- Enable UUID extension
@@ -89,6 +90,7 @@ CREATE TABLE IF NOT EXISTS characters (
   -- Wound tracking
   damage INTEGER DEFAULT 0,
   is_stunned BOOLEAN NOT NULL DEFAULT FALSE,
+  conditions JSONB DEFAULT '[]'::jsonb,
 
   combat_modifiers JSONB DEFAULT '{"initiative":0,"stunSave":0}'::jsonb,
   
@@ -359,6 +361,7 @@ COMMENT ON COLUMN characters.special_ability IS 'Role special ability: { name, v
 COMMENT ON COLUMN characters.reputation IS 'Reputation (REP)';
 COMMENT ON COLUMN characters.improvement_points IS 'Improvement Points (IP)';
 COMMENT ON COLUMN characters.is_stunned IS 'Stun state after failed stun save';
+COMMENT ON COLUMN characters.conditions IS 'Active status conditions (string[]), e.g. ["unconscious","on_fire"]. Stun is tracked via is_stunned.';
 COMMENT ON COLUMN characters.combat_modifiers IS 'Optional initiative / stun save bonuses: { initiative, stunSave }';
 COMMENT ON COLUMN programs.program_class IS 'Net program class (matches app Program.programClass)';
 COMMENT ON COLUMN programs.options IS 'Program options array (matches app Program.options)';

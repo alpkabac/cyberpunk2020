@@ -2,7 +2,7 @@
  * Pure character updates for server-side GM tools (mirrors client store logic where needed).
  */
 
-import type { Character, Item, ItemType, Zone } from '../types';
+import type { Character, CharacterCondition, Item, ItemType, Weapon, Zone } from '../types';
 import {
   applyStatModifiers,
   calculateDamage,
@@ -115,6 +115,107 @@ export function applyGmRemoveItem(character: Character, itemId: string): Charact
   return recalcCharacterForGm({
     ...character,
     items: character.items.filter((i) => i.id !== itemId),
+  });
+}
+
+export function applyGmAddMoney(character: Character, amount: number): Character {
+  const n = Math.max(0, Math.floor(amount));
+  return recalcCharacterForGm({
+    ...character,
+    eurobucks: character.eurobucks + n,
+  });
+}
+
+export function applyGmHealDamage(character: Character, amount: number): Character {
+  const n = Math.max(0, Math.floor(amount));
+  return recalcCharacterForGm({
+    ...character,
+    damage: Math.max(0, character.damage - n),
+  });
+}
+
+export function applyGmEquipItem(
+  character: Character,
+  itemId: string,
+  equipped: boolean,
+): Character | null {
+  const idx = character.items.findIndex((i) => i.id === itemId);
+  if (idx === -1) return null;
+
+  const updatedItems = [...character.items];
+  updatedItems[idx] = { ...updatedItems[idx], equipped };
+
+  return recalcCharacterForGm({ ...character, items: updatedItems });
+}
+
+export function applyGmModifySkill(
+  character: Character,
+  skillName: string,
+  newValue: number,
+): Character | null {
+  const lower = skillName.toLowerCase();
+  const idx = character.skills.findIndex((s) => s.name.toLowerCase() === lower);
+  if (idx === -1) return null;
+
+  const updatedSkills = [...character.skills];
+  updatedSkills[idx] = { ...updatedSkills[idx], value: Math.max(0, Math.min(10, Math.floor(newValue))) };
+
+  return recalcCharacterForGm({ ...character, skills: updatedSkills });
+}
+
+export function applyGmUpdateAmmo(
+  character: Character,
+  weaponId: string,
+  shotsLeft: number | null,
+  reload: boolean,
+): Character | null {
+  const idx = character.items.findIndex((i) => i.id === weaponId && i.type === 'weapon');
+  if (idx === -1) return null;
+
+  const weapon = character.items[idx] as unknown as Weapon;
+  const newShots = reload ? weapon.shots : Math.max(0, Math.min(weapon.shots, Math.floor(shotsLeft ?? weapon.shotsLeft)));
+
+  const updatedItems = [...character.items];
+  updatedItems[idx] = { ...weapon, shotsLeft: newShots } as unknown as Item;
+
+  return recalcCharacterForGm({ ...character, items: updatedItems });
+}
+
+/**
+ * Apply or remove a persistent condition. "stunned" is rejected here — callers
+ * must handle it via isStunned directly. "asleep" also sets isStunned (sleep =
+ * unconscious in CP2020). All other conditions go into the conditions[] array.
+ */
+export function applyGmSetCondition(
+  character: Character,
+  condition: string,
+  active: boolean,
+  durationRounds: number | null = null,
+): Character {
+  const lower = condition.toLowerCase().trim();
+
+  const alsoSetsStunned = lower === 'asleep' || lower === 'unconscious';
+
+  const existing: CharacterCondition[] = character.conditions ?? [];
+  let nextConditions: CharacterCondition[];
+
+  if (active) {
+    const entry: CharacterCondition = { name: lower, duration: durationRounds };
+    const idx = existing.findIndex((c) => c.name === lower);
+    if (idx !== -1) {
+      nextConditions = [...existing];
+      nextConditions[idx] = entry;
+    } else {
+      nextConditions = [...existing, entry];
+    }
+  } else {
+    nextConditions = existing.filter((c) => c.name !== lower);
+  }
+
+  return recalcCharacterForGm({
+    ...character,
+    conditions: nextConditions,
+    ...(alsoSetsStunned ? { isStunned: active } : {}),
   });
 }
 

@@ -233,30 +233,6 @@ export function SkillsTab({ character, editable }: SkillsTabProps) {
             onChange={(e) => setAddSkillSearch(e.target.value)}
             className="w-full border border-black px-2 py-1"
           />
-          <div className="border-t border-green-700 pt-2">
-            <div className="text-xs font-bold uppercase text-green-900 mb-1">Know Language (CP2020)</div>
-            <p className="text-xs text-gray-700 mb-2">
-              One skill per language. Stored as <code className="bg-white px-0.5">{KNOW_LANGUAGE_SKILL_PREFIX}</code>
-              … so names stay consistent in multiplayer sync.
-            </p>
-            <div className="flex flex-wrap gap-2 items-center">
-              <input
-                type="text"
-                placeholder="e.g. Japanese, Spanish, Streetslang…"
-                value={knowLanguageLabel}
-                onChange={(e) => setKnowLanguageLabel(e.target.value)}
-                className="flex-1 min-w-[160px] border border-black px-2 py-1 text-sm"
-              />
-              <button
-                type="button"
-                onClick={handleAddKnowLanguage}
-                disabled={!knowLanguageLabel.trim()}
-                className="border-2 border-black px-3 py-1 text-sm font-bold uppercase bg-white hover:bg-green-100 disabled:opacity-50"
-              >
-                Add language
-              </button>
-            </div>
-          </div>
           <div className="max-h-40 overflow-y-auto space-y-1">
             {availableSkills.slice(0, 20).map((def) => (
               <button
@@ -278,6 +254,25 @@ export function SkillsTab({ character, editable }: SkillsTabProps) {
                 + Create custom skill: <span className="font-bold">{addSkillSearch}</span>
               </button>
             )}
+          </div>
+          <div className="flex items-center gap-2 border-t border-green-300 pt-2">
+            <span className="text-xs font-bold uppercase text-green-800 whitespace-nowrap">+ Language:</span>
+            <input
+              type="text"
+              placeholder="e.g. Japanese, Spanish…"
+              value={knowLanguageLabel}
+              onChange={(e) => setKnowLanguageLabel(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleAddKnowLanguage(); }}
+              className="flex-1 min-w-[120px] border border-green-400 px-2 py-0.5 text-sm"
+            />
+            <button
+              type="button"
+              onClick={handleAddKnowLanguage}
+              disabled={!knowLanguageLabel.trim()}
+              className="border border-green-600 px-2 py-0.5 text-xs font-bold uppercase bg-white hover:bg-green-100 disabled:opacity-40"
+            >
+              Add
+            </button>
           </div>
         </div>
       )}

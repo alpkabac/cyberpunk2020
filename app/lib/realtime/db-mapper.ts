@@ -2,7 +2,8 @@
  * Map Supabase snake_case rows to app TypeScript models.
  */
 
-import type { Character, ChatMessage, RoleType, Scene, SessionSettings, Token } from '../types';
+import type { Character, CharacterCondition, ChatMessage, RoleType, Scene, SessionSettings, Stats, StatBlock, Token } from '../types';
+import { createStatBlock } from '../types';
 
 function num(v: unknown, fallback = 0): number {
   if (typeof v === 'number' && !Number.isNaN(v)) return v;
@@ -24,6 +25,47 @@ function tsToMs(v: unknown): number {
   }
   if (v instanceof Date) return v.getTime();
   return Date.now();
+}
+
+const STAT_KEYS: Array<keyof Stats> = ['int', 'ref', 'tech', 'cool', 'attr', 'luck', 'ma', 'bt', 'emp'];
+
+function safeStatBlock(v: unknown): StatBlock {
+  if (v && typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    return {
+      base: num(o.base, 1),
+      tempMod: num(o.tempMod, 0),
+      cyberMod: num(o.cyberMod, 0),
+      armorMod: num(o.armorMod, 0),
+      woundMod: num(o.woundMod, 0),
+      total: num(o.total, num(o.base, 1) + num(o.tempMod, 0)),
+    };
+  }
+  return createStatBlock(1, 0);
+}
+
+function safeStats(v: unknown): Stats {
+  const raw = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
+  const out = {} as Record<keyof Stats, StatBlock>;
+  for (const key of STAT_KEYS) {
+    out[key] = safeStatBlock(raw[key]);
+  }
+  return out as Stats;
+}
+
+function safeConditions(v: unknown): CharacterCondition[] {
+  if (!Array.isArray(v)) return [];
+  return v.map((entry) => {
+    if (typeof entry === 'string') return { name: entry, duration: null };
+    if (entry && typeof entry === 'object') {
+      const o = entry as Record<string, unknown>;
+      return {
+        name: typeof o.name === 'string' ? o.name : String(o.name ?? ''),
+        duration: typeof o.duration === 'number' && Number.isFinite(o.duration) ? o.duration : null,
+      };
+    }
+    return { name: String(entry), duration: null };
+  }).filter((c) => c.name.length > 0);
 }
 
 const DEFAULT_SCENE: Scene = {
@@ -79,13 +121,14 @@ export function characterRowToCharacter(row: Record<string, unknown>): Character
     role,
     age: num(row.age, 25),
     points: num(row.points, 0),
-    stats: (row.stats as Character['stats']) ?? ({} as Character['stats']),
+    stats: safeStats(row.stats),
     specialAbility: (row.special_ability as Character['specialAbility']) ?? { name: '', value: 0 },
     reputation: num(row.reputation, 0),
     improvementPoints: num(row.improvement_points, 0),
     skills: Array.isArray(row.skills) ? (row.skills as Character['skills']) : [],
     damage: num(row.damage, 0),
     isStunned: Boolean(row.is_stunned),
+    conditions: safeConditions(row.conditions),
     hitLocations: (row.hit_locations as Character['hitLocations']) ?? ({} as Character['hitLocations']),
     sdp: (row.sdp as Character['sdp']) ?? {
       sum: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },

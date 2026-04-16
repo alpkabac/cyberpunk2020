@@ -96,6 +96,12 @@ export const ROLE_SPECIAL_ABILITIES: Record<RoleType, string> = {
   Medtechie: 'Medical Tech',
 };
 
+export interface CharacterCondition {
+  name: string;
+  /** Remaining rounds (null = indefinite / manual removal only). */
+  duration: number | null;
+}
+
 export interface Character {
   id: string;
   userId: string;
@@ -128,6 +134,8 @@ export interface Character {
   // Wound tracking
   damage: number;
   isStunned: boolean;
+  /** Persistent status conditions. Stun is tracked via isStunned only. */
+  conditions: CharacterCondition[];
 
   // Hit locations with SP
   hitLocations: Record<Zone, HitLocation>;

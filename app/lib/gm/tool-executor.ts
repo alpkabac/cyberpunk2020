@@ -8,12 +8,19 @@ import { saveCharacterToSupabase } from '../db/character-serialize';
 import { parseSceneJson } from '../realtime/db-mapper';
 import {
   applyGmAddItem,
+  applyGmAddMoney,
   applyGmDamage,
   applyGmDeductMoney,
+  applyGmEquipItem,
   applyGmFieldUpdate,
+  applyGmHealDamage,
+  applyGmModifySkill,
   applyGmRemoveItem,
+  applyGmSetCondition,
+  applyGmUpdateAmmo,
   normalizeIncomingItem,
 } from './character-mutations';
+import { rollDice } from '../game-logic/dice';
 import type { LoreRule } from './lorebook';
 import { lookupRulesText } from './lorebook';
 
@@ -29,7 +36,16 @@ export type GmToolName =
   | 'generate_scenery'
   | 'play_narration'
   | 'lookup_rules'
-  | 'update_character_field';
+  | 'update_character_field'
+  | 'add_money'
+  | 'heal_damage'
+  | 'roll_dice'
+  | 'equip_item'
+  | 'modify_skill'
+  | 'update_ammo'
+  | 'set_condition'
+  | 'update_summary'
+  | 'add_chat_as_npc';
 
 export interface ToolExecutorContext {
   supabase: SupabaseClient;
@@ -159,6 +175,86 @@ export function validateGmToolParameters(name: string, raw: unknown): { ok: true
       }
       if (!('value' in raw)) return { ok: false, error: 'value is required' };
       return { ok: true, name: 'update_character_field', args: raw };
+    }
+    case 'add_money': {
+      const character_id = str(raw.character_id, 'character_id');
+      if (typeof character_id !== 'string') return { ok: false, error: character_id.error };
+      const amount = num(raw.amount, 'amount');
+      if (typeof amount !== 'number') return { ok: false, error: amount.error };
+      if (amount < 0) return { ok: false, error: 'amount must be non-negative' };
+      return { ok: true, name: 'add_money', args: raw };
+    }
+    case 'heal_damage': {
+      const character_id = str(raw.character_id, 'character_id');
+      if (typeof character_id !== 'string') return { ok: false, error: character_id.error };
+      const amount = num(raw.amount, 'amount');
+      if (typeof amount !== 'number') return { ok: false, error: amount.error };
+      if (amount < 1) return { ok: false, error: 'amount must be at least 1' };
+      return { ok: true, name: 'heal_damage', args: raw };
+    }
+    case 'roll_dice': {
+      const formula = str(raw.formula, 'formula');
+      if (typeof formula !== 'string') return { ok: false, error: formula.error };
+      return { ok: true, name: 'roll_dice', args: raw };
+    }
+    case 'equip_item': {
+      const character_id = str(raw.character_id, 'character_id');
+      if (typeof character_id !== 'string') return { ok: false, error: character_id.error };
+      const item_id = str(raw.item_id, 'item_id');
+      if (typeof item_id !== 'string') return { ok: false, error: item_id.error };
+      if (typeof raw.equipped !== 'boolean') return { ok: false, error: 'equipped must be a boolean' };
+      return { ok: true, name: 'equip_item', args: raw };
+    }
+    case 'modify_skill': {
+      const character_id = str(raw.character_id, 'character_id');
+      if (typeof character_id !== 'string') return { ok: false, error: character_id.error };
+      const skill_name = str(raw.skill_name, 'skill_name');
+      if (typeof skill_name !== 'string') return { ok: false, error: skill_name.error };
+      const new_value = num(raw.new_value, 'new_value');
+      if (typeof new_value !== 'number') return { ok: false, error: new_value.error };
+      if (new_value < 0 || new_value > 10) return { ok: false, error: 'new_value must be 0–10' };
+      return { ok: true, name: 'modify_skill', args: raw };
+    }
+    case 'update_ammo': {
+      const character_id = str(raw.character_id, 'character_id');
+      if (typeof character_id !== 'string') return { ok: false, error: character_id.error };
+      const weapon_id = str(raw.weapon_id, 'weapon_id');
+      if (typeof weapon_id !== 'string') return { ok: false, error: weapon_id.error };
+      const isReload = raw.reload === true;
+      if (!isReload) {
+        if (raw.shots_left === undefined || raw.shots_left === null) {
+          return { ok: false, error: 'Either shots_left or reload:true is required' };
+        }
+        const sl = num(raw.shots_left, 'shots_left');
+        if (typeof sl !== 'number') return { ok: false, error: sl.error };
+        if (sl < 0) return { ok: false, error: 'shots_left must be non-negative' };
+      }
+      return { ok: true, name: 'update_ammo', args: raw };
+    }
+    case 'set_condition': {
+      const character_id = str(raw.character_id, 'character_id');
+      if (typeof character_id !== 'string') return { ok: false, error: character_id.error };
+      const condition = str(raw.condition, 'condition');
+      if (typeof condition !== 'string') return { ok: false, error: condition.error };
+      if (typeof raw.active !== 'boolean') return { ok: false, error: 'active must be a boolean' };
+      if (raw.duration_rounds !== undefined && raw.duration_rounds !== null) {
+        if (typeof raw.duration_rounds !== 'number' || !Number.isInteger(raw.duration_rounds) || raw.duration_rounds < 1) {
+          return { ok: false, error: 'duration_rounds must be a positive integer or omitted' };
+        }
+      }
+      return { ok: true, name: 'set_condition', args: raw };
+    }
+    case 'update_summary': {
+      const summary = str(raw.summary, 'summary');
+      if (typeof summary !== 'string') return { ok: false, error: summary.error };
+      return { ok: true, name: 'update_summary', args: raw };
+    }
+    case 'add_chat_as_npc': {
+      const npc_name = str(raw.npc_name, 'npc_name');
+      if (typeof npc_name !== 'string') return { ok: false, error: npc_name.error };
+      const text = str(raw.text, 'text');
+      if (typeof text !== 'string') return { ok: false, error: text.error };
+      return { ok: true, name: 'add_chat_as_npc', args: raw };
     }
     default:
       return { ok: false, error: `Unknown tool: ${name}` };
@@ -321,6 +417,136 @@ export async function executeGmTool(
       const { error } = await saveCharacterToSupabase(ctx.supabase, updated);
       if (error) return { ok: false, name, error: error.message };
       return { ok: true, name, result: { character_id: id, path } };
+    }
+    case 'add_money': {
+      const id = String(args.character_id);
+      const c = ctx.charactersById.get(id);
+      if (!c) return { ok: false, name, error: `Character not in session: ${id}` };
+      const updated = applyGmAddMoney(c, Number(args.amount));
+      ctx.charactersById.set(id, updated);
+      const { error } = await saveCharacterToSupabase(ctx.supabase, updated);
+      if (error) return { ok: false, name, error: error.message };
+      return { ok: true, name, result: { character_id: id, eurobucks: updated.eurobucks } };
+    }
+    case 'heal_damage': {
+      const id = String(args.character_id);
+      const c = ctx.charactersById.get(id);
+      if (!c) return { ok: false, name, error: `Character not in session: ${id}` };
+      const updated = applyGmHealDamage(c, Number(args.amount));
+      ctx.charactersById.set(id, updated);
+      const { error } = await saveCharacterToSupabase(ctx.supabase, updated);
+      if (error) return { ok: false, name, error: error.message };
+      return { ok: true, name, result: { character_id: id, damage: updated.damage, woundState: updated.derivedStats?.woundState } };
+    }
+    case 'roll_dice': {
+      const formula = String(args.formula);
+      const reason = optStr(args.reason) ?? '';
+      const characterId = optStr(args.character_id);
+      const result = rollDice(formula);
+      if (!result) return { ok: false, name, error: `Invalid dice formula: ${formula}` };
+      const label = characterId
+        ? `Roll (${formula})${reason ? ` — ${reason}` : ''}`
+        : `Roll (${formula})${reason ? ` — ${reason}` : ''}`;
+      const text = `${label}: **${result.total}** [${result.rolls.join(', ')}]${result.hadExplodingD10 ? ' (exploding!)' : ''}`;
+      const err = await insertChatMessage(ctx.supabase, ctx.sessionId, 'Game Master', text, 'roll', {
+        kind: 'gm_roll',
+        formula,
+        reason,
+        total: result.total,
+        rolls: result.rolls,
+        hadExplodingD10: result.hadExplodingD10,
+        characterId: characterId ?? null,
+      });
+      if (err) return { ok: false, name, error: err.message };
+      return { ok: true, name, result: { formula, total: result.total, rolls: result.rolls, hadExplodingD10: result.hadExplodingD10 } };
+    }
+    case 'equip_item': {
+      const id = String(args.character_id);
+      const c = ctx.charactersById.get(id);
+      if (!c) return { ok: false, name, error: `Character not in session: ${id}` };
+      const updated = applyGmEquipItem(c, String(args.item_id), Boolean(args.equipped));
+      if (!updated) return { ok: false, name, error: `Item not found: ${args.item_id}` };
+      ctx.charactersById.set(id, updated);
+      const { error } = await saveCharacterToSupabase(ctx.supabase, updated);
+      if (error) return { ok: false, name, error: error.message };
+      return { ok: true, name, result: { character_id: id, item_id: args.item_id, equipped: args.equipped } };
+    }
+    case 'modify_skill': {
+      const id = String(args.character_id);
+      const c = ctx.charactersById.get(id);
+      if (!c) return { ok: false, name, error: `Character not in session: ${id}` };
+      const updated = applyGmModifySkill(c, String(args.skill_name), Number(args.new_value));
+      if (!updated) return { ok: false, name, error: `Skill not found: ${args.skill_name}` };
+      ctx.charactersById.set(id, updated);
+      const { error } = await saveCharacterToSupabase(ctx.supabase, updated);
+      if (error) return { ok: false, name, error: error.message };
+      return { ok: true, name, result: { character_id: id, skill_name: args.skill_name, new_value: args.new_value } };
+    }
+    case 'update_ammo': {
+      const id = String(args.character_id);
+      const c = ctx.charactersById.get(id);
+      if (!c) return { ok: false, name, error: `Character not in session: ${id}` };
+      const isReload = args.reload === true;
+      const shotsLeft = typeof args.shots_left === 'number' ? args.shots_left : null;
+      const updated = applyGmUpdateAmmo(c, String(args.weapon_id), shotsLeft, isReload);
+      if (!updated) return { ok: false, name, error: `Weapon not found: ${args.weapon_id}` };
+      ctx.charactersById.set(id, updated);
+      const { error } = await saveCharacterToSupabase(ctx.supabase, updated);
+      if (error) return { ok: false, name, error: error.message };
+      const weapon = updated.items.find((i) => i.id === String(args.weapon_id));
+      return { ok: true, name, result: { character_id: id, weapon_id: args.weapon_id, shots_left: weapon ? (weapon as unknown as { shotsLeft: number }).shotsLeft : null } };
+    }
+    case 'set_condition': {
+      const id = String(args.character_id);
+      const c = ctx.charactersById.get(id);
+      if (!c) return { ok: false, name, error: `Character not in session: ${id}` };
+      const condition = String(args.condition).toLowerCase().trim();
+      const active = Boolean(args.active);
+      const durationRounds = typeof args.duration_rounds === 'number' && Number.isFinite(args.duration_rounds)
+        ? Math.floor(args.duration_rounds)
+        : null;
+
+      let updated: Character;
+      if (condition === 'stunned') {
+        updated = applyGmFieldUpdate(c, 'isStunned', active);
+      } else {
+        updated = applyGmSetCondition(c, condition, active, durationRounds);
+      }
+      ctx.charactersById.set(id, updated);
+      const { error } = await saveCharacterToSupabase(ctx.supabase, updated);
+      if (error) return { ok: false, name, error: error.message };
+
+      const verb = active ? 'applied to' : 'removed from';
+      const durLabel = active && durationRounds ? ` (${durationRounds} rounds)` : '';
+      const err = await insertChatMessage(
+        ctx.supabase,
+        ctx.sessionId,
+        'Game Master',
+        `Condition **${condition}** ${verb} ${c.name}${durLabel}.`,
+        'system',
+        { kind: 'condition_change', characterId: id, condition, active, duration_rounds: durationRounds },
+      );
+      if (err) return { ok: false, name, error: err.message };
+      return { ok: true, name, result: { character_id: id, condition, active, duration_rounds: durationRounds, conditions: updated.conditions } };
+    }
+    case 'update_summary': {
+      const summary = String(args.summary);
+      const { error } = await ctx.supabase
+        .from('sessions')
+        .update({ session_summary: summary })
+        .eq('id', ctx.sessionId);
+      if (error) return { ok: false, name, error: error.message };
+      return { ok: true, name, result: { updated: true } };
+    }
+    case 'add_chat_as_npc': {
+      const npcName = String(args.npc_name);
+      const text = String(args.text);
+      const err = await insertChatMessage(ctx.supabase, ctx.sessionId, npcName, text, 'narration', {
+        kind: 'npc_dialogue',
+        npcName,
+      });
+      if (err) return { ok: false, name, error: err.message };
+      return { ok: true, name, result: { npc_name: npcName, posted: true } };
     }
     default:
       return { ok: false, name, error: 'Unhandled tool' };
