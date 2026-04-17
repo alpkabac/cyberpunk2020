@@ -42,6 +42,7 @@ const minimalChar = (id: string): Character => ({
   name: 'Test',
   type: 'character',
   isNpc: false,
+  team: '',
   imageUrl: '',
   role: 'Solo',
   age: 20,
@@ -322,6 +323,9 @@ describe('Property 6: Tool parameter validation', () => {
     expect(validateGmToolParameters('spawn_npc', { place_token: 'yes' }).ok).toBe(false);
     expect(validateGmToolParameters('spawn_npc', { stat_overrides: { ref: 1 } }).ok).toBe(false);
     expect(validateGmToolParameters('spawn_npc', { stat_overrides: { refx: 5 } }).ok).toBe(false);
+    expect(validateGmToolParameters('spawn_npc', { team: 'party' }).ok).toBe(true);
+    expect(validateGmToolParameters('spawn_npc', { team: 1 }).ok).toBe(false);
+    expect(validateGmToolParameters('spawn_npc', { team: 'x'.repeat(65) }).ok).toBe(false);
   });
 
   it('spawn_random_npc mirrors spawn_npc validation', () => {
@@ -374,6 +378,22 @@ describe('Property 6: Tool parameter validation', () => {
         name: 'Y',
         role: 'Solo',
         special_ability: { name: '', value: 1 },
+      }).ok,
+    ).toBe(false);
+    expect(
+      validateGmToolParameters('spawn_unique_npc', {
+        name: 'Backup',
+        role: 'Cop',
+        special_ability: { name: 'Authority', value: 5 },
+        team: 'party',
+      }).ok,
+    ).toBe(true);
+    expect(
+      validateGmToolParameters('spawn_unique_npc', {
+        name: 'X',
+        role: 'Solo',
+        special_ability: { name: 'CS', value: 4 },
+        team: 1,
       }).ok,
     ).toBe(false);
   });

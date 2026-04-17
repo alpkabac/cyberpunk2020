@@ -75,6 +75,7 @@ export function CharacterDemoClient() {
       name: 'Johnny Silverhand',
       type: 'character',
       isNpc: false,
+      team: 'party',
       imageUrl: '',
       role: 'Rockerboy',
       age: 32,

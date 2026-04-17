@@ -19,6 +19,9 @@ import {
   LIFEPATH_VALUED_POSSESSION,
 } from '@/lib/data/lifepath-options';
 
+/** Same id = allies on the tactical map; GM uses this with cover hints and LOS. */
+const TEAM_PRESETS = ['party', 'hostile', 'neutral', 'ally', 'police', 'corp'] as const;
+
 interface LifeTabProps {
   character: Character;
   editable: boolean;
@@ -156,6 +159,12 @@ function SectionTitle({
 export function LifeTab({ character, editable }: LifeTabProps) {
   const updateCharacterField = useGameStore((state) => state.updateCharacterField);
   const lifepath = ensureLifepath(character);
+  const teamRaw = (character.team ?? '').trim();
+  const defaultTeam = character.type === 'npc' ? 'hostile' : 'party';
+  const teamEffective = teamRaw || defaultTeam;
+  const teamSelectValue = TEAM_PRESETS.includes(teamEffective as (typeof TEAM_PRESETS)[number])
+    ? teamEffective
+    : '__custom__';
 
   const updateField = (path: string, value: unknown) => {
     if (!editable) return;
@@ -192,6 +201,63 @@ export function LifeTab({ character, editable }: LifeTabProps) {
         <strong>Lifepath</strong> defines look, roots, and what drives your character. Dropdowns list CP2020
         table options; pick <strong>Custom</strong> to type freely. Hover labels for rule reminders.
       </p>
+
+      <section>
+        <SectionTitle tooltip="Same team id = allies on the map. Different teams = enemies for AI cover suggestions and line-of-sight. Leave blank to use defaults: PCs party, NPCs hostile.">
+          Tactical team
+        </SectionTitle>
+        <p className="text-xs text-gray-600 mb-2">
+          Used for the battle map and AI GM: who shares a side, and who counts as hostile for cover and LOS hints.
+          Empty sheet defaults to <strong>{defaultTeam}</strong> for this character type.
+        </p>
+        <div className="flex flex-col gap-2 max-w-md">
+          {editable ? (
+            <>
+              <div className="flex flex-col gap-1">
+                <label className="font-bold uppercase text-xs">Preset or custom</label>
+                <select
+                  value={teamSelectValue}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === '__custom__') {
+                      updateCharacterField(character.id, 'team', '');
+                      return;
+                    }
+                    updateCharacterField(character.id, 'team', v);
+                  }}
+                  className="border border-black px-2 py-1 text-sm bg-white"
+                >
+                  <option value="__custom__">— Custom / blank (use default) —</option>
+                  {TEAM_PRESETS.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {(teamSelectValue === '__custom__' || !TEAM_PRESETS.includes(teamEffective as (typeof TEAM_PRESETS)[number])) && (
+                <div className="flex flex-col gap-1">
+                  <label className="font-bold uppercase text-xs">Custom team id</label>
+                  <input
+                    type="text"
+                    value={teamRaw}
+                    onChange={(e) => updateCharacterField(character.id, 'team', e.target.value)}
+                    className="border border-black px-2 py-1 text-sm"
+                    placeholder={defaultTeam}
+                  />
+                </div>
+              )}
+            </>
+          ) : (
+            <span className="text-sm">
+              <strong>{teamEffective}</strong>
+              {!teamRaw && (
+                <span className="text-gray-500 ml-1">(default for {character.type === 'npc' ? 'NPC' : 'PC'})</span>
+              )}
+            </span>
+          )}
+        </div>
+      </section>
 
       {/* Style */}
       <section>

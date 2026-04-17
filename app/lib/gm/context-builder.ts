@@ -4,12 +4,14 @@
 
 import type { Character, ChatMessage, CombatState, MapCoverRegion, Scene, SessionSettings, Token } from '../types';
 import { estimateTokens } from './lorebook';
+import { effectiveCharacterTeam } from '../game-logic/teams';
 import {
   MAP_GRID_DEFAULT_COLS,
   MAP_GRID_DEFAULT_ROWS,
   normalizeGridDimension,
   pctToCell,
 } from '../map/grid';
+import { buildTacticalCoverHints } from '../map/tactical-cover-hint';
 import { CP2020_COVER_TYPES, coverTypeLabel } from '../map/cover-types';
 import { parseSessionSettingsJson } from '../realtime/db-mapper';
 
@@ -23,7 +25,8 @@ Output engaging but concise narration; use tools for concrete state changes (dam
 For character tools (apply_damage, deduct_money, add_money, heal_damage, add_item, remove_item, equip_item, modify_skill, adjust_improvement_points, update_ammo, set_condition, update_character_field), pass \`character_id\` from that JSON. Prefer the character whose \`name\` matches CURRENT_MESSAGE_SPEAKER when it clearly refers to the acting player; if there is only one PC (type "character"), use that id; if several PCs could apply, ask which **character by name**, never ask the human to paste a UUID.
 For move_token, add_token, and remove_token, use token ids from MAP_TOKENS_JSON when present; if missing, describe map changes in narration and avoid guessing ids.
 **Tactical map:** TACTICAL_GRID_JSON gives cols, rows, snap_to_grid, and meters_per_square. MAP_TOKENS_JSON lists each token's x,y (0–100% of map width/height) plus cell_column and cell_row (0-based) on that grid—use cells for range, flanking, and movement. When snap_to_grid is true, the client snaps positions to cell centers; pass x,y as percentages (cell center ≈ ((col+0.5)/cols)*100 for x, ((row+0.5)/rows)*100 for y).
-**Cover:** MAP_COVER_JSON lists drawn cover zones (grid cell ranges) and CP2020 **SP** values from the Common Cover table (Friday Night Firefight). Use these when narrating hits through cover, penetration, and line of sight.
+**Teams:** CHARACTERS_JSON includes \`team\` (effective id). Same team = allies; different team = enemies for tactical purposes. Empty sheet team defaults PCs to \`party\` and NPCs to \`hostile\`. MAP_TOKENS_JSON repeats \`team\` when the token is linked to a sheet.
+**Cover & LOS:** MAP_COVER_JSON lists drawn cover zones (grid cell ranges) and CP2020 **SP** values from the Common Cover table (Friday Night Firefight). Use these when narrating hits through cover, penetration, and line of sight. **TACTICAL_COVER_HINT_JSON** (when non-empty) lists tokens with hostile line-of-sight relations and server-suggested x,y cell centers that put drawn cover between that token and as many enemies as possible—prefer those coordinates when you move someone to take cover (still respect fiction, movement limits, and snap_to_grid).
 If CHARACTERS_JSON is empty, the session has no sheets synced yet—say that and skip character tools.
 
 **Money:** Use \`add_money\` to reward eurobucks (payment, loot, rewards). Use \`deduct_money\` to subtract (purchases, bribes, fees). Never use update_character_field for eurobucks—use the dedicated tools.
@@ -51,7 +54,7 @@ Use \`roll_dice\` to roll server-side for NPCs, random encounters, hit location,
 
 **Combat tracker snapshot:** \`COMBAT_TRACKER_JSON\` (when \`inCombat\` is true) lists initiative order and, for each combatant, \`isStunned\`, \`isStabilized\`, \`woundState\`, \`damage\`, and \`deathSaveTarget\` merged from the live sheet—use it so narration matches the table. If \`startOfTurnSavesPendingFor\` is set, that character's **start-of-turn stun recovery / ongoing death save** is still being resolved in the client; keep your narration compatible with CP2020 until that flag clears (see lore \`start-of-turn-saves\`). When a player asks the GM to override a **stun** outcome, weigh the fiction but default to the rules unless the table clearly agrees to a fiat.
 
-**NPCs:** Use \`spawn_random_npc\` (or equivalent \`spawn_npc\`) for **generic** CP2020 **Fast Character System** mooks: 2D6 stats, 40-pt career, book armor/weapon table; optional \`stat_overrides\` (2–10), \`threat\`, \`announce\`, \`place_token\`. For **named or boss NPCs** where you must set the sheet yourself (custom stats, special ability label, arbitrary skills including homebrew names, cyberware/weapons with specific stats), use \`spawn_unique_npc\` with \`name\`, \`role\`, \`special_ability\`, optional \`stats\`, \`skills[]\`, \`items[]\`, and optional \`announcement_text\`. Use \`add_chat_as_npc\` for dialogue-only when no sheet is needed.
+**NPCs:** Use \`spawn_random_npc\` (or equivalent \`spawn_npc\`) for **generic** CP2020 **Fast Character System** mooks: 2D6 stats, 40-pt career, book armor/weapon table; optional \`stat_overrides\` (2–10), \`threat\`, \`announce\`, \`place_token\`, \`team\` (defaults **hostile**—set \`party\` or a shared id for allies). For **named or boss NPCs** where you must set the sheet yourself (custom stats, special ability label, arbitrary skills including homebrew names, cyberware/weapons with specific stats), use \`spawn_unique_npc\` with \`name\`, \`role\`, \`special_ability\`, optional \`stats\`, \`skills[]\`, \`items[]\`, optional \`announcement_text\`, and optional \`team\`. Use \`add_chat_as_npc\` for dialogue-only when no sheet is needed.
 
 **Session memory:** Use \`update_summary\` to persist important story events to the session summary. Do this after major plot beats, completed objectives, or significant revelations. The summary survives across long sessions when old chat messages are trimmed.
 
@@ -70,6 +73,8 @@ export interface CompactCharacterPayload {
   conditions: Array<{ name: string; duration: number | null }>;
   eurobucks: number;
   improvementPoints: number;
+  /** Effective tactical team (sheet value or default party/hostile). */
+  team: string;
   woundState: string | undefined;
   stats: Record<string, { total: number }>;
   /** Include id + linkedStat so request_roll can use skill_id + character_id. */
@@ -116,6 +121,7 @@ export function serializeCharacterForLlm(c: Character): CompactCharacterPayload 
     conditions: c.conditions ?? [],
     eurobucks: c.eurobucks,
     improvementPoints: c.improvementPoints,
+    team: effectiveCharacterTeam(c),
     woundState: c.derivedStats?.woundState,
     stats,
     skills,
@@ -151,6 +157,8 @@ export interface MapTokenForLlm {
   cell_column: number;
   /** 0-based row on the tactical grid (see TACTICAL_GRID_JSON.rows). */
   cell_row: number;
+  /** Effective team when linked to a sheet; null if token has no character_id. */
+  team: string | null;
 }
 
 export interface TacticalGridForLlm {
@@ -194,11 +202,17 @@ export function serializeMapCoverForLlm(regions: MapCoverRegion[]): MapCoverRegi
   });
 }
 
-export function serializeTokensForLlm(tokens: Token[], settings: SessionSettings): MapTokenForLlm[] {
+export function serializeTokensForLlm(
+  tokens: Token[],
+  settings: SessionSettings,
+  characters?: Character[],
+): MapTokenForLlm[] {
   const cols = normalizeGridDimension(settings.mapGridCols, MAP_GRID_DEFAULT_COLS);
   const rows = normalizeGridDimension(settings.mapGridRows, MAP_GRID_DEFAULT_ROWS);
+  const byId = characters ? new Map(characters.map((c) => [c.id, c])) : null;
   return tokens.map((t) => {
     const { c, r } = pctToCell(t.x, t.y, cols, rows);
+    const linked = t.characterId && byId?.get(t.characterId);
     return {
       id: t.id,
       name: t.name,
@@ -208,6 +222,7 @@ export function serializeTokensForLlm(tokens: Token[], settings: SessionSettings
       character_id: t.characterId ?? null,
       cell_column: c,
       cell_row: r,
+      team: linked ? effectiveCharacterTeam(linked) : null,
     };
   });
 }
@@ -350,9 +365,16 @@ export function buildGmUserContent(input: BuildContextInput): string {
   const settings = input.sessionSettings ?? parseSessionSettingsJson(null);
   const charsJson = JSON.stringify(input.characters.map(serializeCharacterForLlm));
   const sceneJson = JSON.stringify(sceneToPayload(input.activeScene));
-  const mapTokensJson = JSON.stringify(serializeTokensForLlm(input.mapTokens, settings));
+  const mapTokensJson = JSON.stringify(serializeTokensForLlm(input.mapTokens, settings, input.characters));
   const tacticalGridJson = JSON.stringify(tacticalGridPayloadFromSettings(settings));
   const mapCoverJson = JSON.stringify(serializeMapCoverForLlm(input.mapCoverRegions ?? []));
+  const coverHints = buildTacticalCoverHints({
+    characters: input.characters,
+    tokens: input.mapTokens,
+    mapCoverRegions: input.mapCoverRegions ?? [],
+    sessionSettings: settings,
+  });
+  const tacticalCoverHintJson = JSON.stringify(coverHints);
   const combatTrackerJson = JSON.stringify(
     buildCombatTrackerContextPayload(input.combatState ?? null, input.characters),
   );
@@ -366,6 +388,7 @@ export function buildGmUserContent(input: BuildContextInput): string {
     `ACTIVE_SCENE_JSON: ${sceneJson}`,
     `TACTICAL_GRID_JSON: ${tacticalGridJson}`,
     `MAP_COVER_JSON: ${mapCoverJson}`,
+    `TACTICAL_COVER_HINT_JSON: ${tacticalCoverHintJson}`,
     `MAP_TOKENS_JSON: ${mapTokensJson}`,
     `COMBAT_TRACKER_JSON: ${combatTrackerJson}`,
     `CHARACTERS_JSON: ${charsJson}`,

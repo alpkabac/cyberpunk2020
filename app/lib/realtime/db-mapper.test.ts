@@ -10,6 +10,7 @@ const minimalChar = (id: string): Character => ({
   name: 'N',
   type: 'npc',
   isNpc: true,
+  team: 'hostile',
   imageUrl: '',
   role: 'Solo',
   age: 30,

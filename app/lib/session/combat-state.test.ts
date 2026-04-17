@@ -16,6 +16,7 @@ function testChar(id: string, name: string): Character {
     name,
     type: 'character',
     isNpc: false,
+    team: '',
     imageUrl: '',
     role: 'Solo',
     age: 25,

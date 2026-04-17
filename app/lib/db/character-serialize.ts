@@ -22,6 +22,7 @@ export function serializeCharacterForDb(c: Character): Record<string, unknown> {
   return {
     name: c.name,
     type: c.type,
+    team: c.team ?? '',
     image_url: c.imageUrl,
     role: c.role,
     age: c.age,

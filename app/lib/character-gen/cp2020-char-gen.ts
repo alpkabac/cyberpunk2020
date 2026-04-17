@@ -512,6 +512,7 @@ export function generateCp2020Character(input: GenerateCp2020CharacterInput): Ch
     name,
     type: typ,
     isNpc: typ === 'npc',
+    team: typ === 'npc' ? 'hostile' : 'party',
     imageUrl: '',
     role,
     age: input.age ?? 20 + rollD6(rng) + rollD6(rng),

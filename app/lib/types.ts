@@ -110,6 +110,11 @@ export interface Character {
   type: 'character' | 'npc';
   /** True when `type === 'npc'`; duplicated for LLM payloads and clarity (Task 19.1). */
   isNpc: boolean;
+  /**
+   * Tactical team id (shared string = allies). Empty uses defaults: PCs `party`, NPCs `hostile`.
+   * Used for map enemy detection and GM cover suggestions.
+   */
+  team: string;
   imageUrl: string;
 
   // Info

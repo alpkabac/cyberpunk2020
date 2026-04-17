@@ -22,6 +22,7 @@ const minimalCharacter = (id: string): Character => ({
   name: 'n',
   type: 'character',
   isNpc: false,
+  team: '',
   imageUrl: '',
   role: 'Solo',
   age: 20,

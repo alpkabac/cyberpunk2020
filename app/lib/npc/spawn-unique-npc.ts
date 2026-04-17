@@ -193,6 +193,8 @@ export interface BuildUniqueGmNpcInput {
   damage: number;
   imageUrl: string;
   combatModifiers?: Character['combatModifiers'];
+  /** Tactical team id; default hostile. */
+  team?: string;
 }
 
 const EMPTY_HIT: Character['hitLocations'] = {
@@ -205,6 +207,7 @@ const EMPTY_HIT: Character['hitLocations'] = {
 };
 
 export function buildUniqueGmNpc(input: BuildUniqueGmNpcInput): Character {
+  const teamId = (input.team ?? '').trim() || 'hostile';
   const defaultStat = 6;
   const stats: Stats = {} as Stats;
   for (const k of STAT_KEYS) {
@@ -238,6 +241,7 @@ export function buildUniqueGmNpc(input: BuildUniqueGmNpcInput): Character {
     name: input.name,
     type: 'npc',
     isNpc: true,
+    team: teamId,
     imageUrl: input.imageUrl,
     role: input.role,
     age: input.age,

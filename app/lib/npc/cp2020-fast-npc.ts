@@ -392,6 +392,8 @@ export interface BuildFastSystemNpcInput {
   /** Optional per-stat overrides (2–10) applied after threat scaling. */
   statOverrides?: Partial<Record<keyof Stats, number>>;
   age?: number;
+  /** Tactical team id; default hostile. */
+  team?: string;
 }
 
 export interface FastSystemNpcResult {
@@ -401,6 +403,7 @@ export interface FastSystemNpcResult {
 
 export function buildFastSystemNpc(input: BuildFastSystemNpcInput): FastSystemNpcResult {
   const { sessionId, name, role, threat, rng } = input;
+  const teamId = (input.team ?? '').trim() || 'hostile';
   const bases = {} as Record<keyof Stats, number>;
   for (const k of STAT_ORDER) {
     bases[k] = rollStat2d6(rng);
@@ -445,6 +448,7 @@ export function buildFastSystemNpc(input: BuildFastSystemNpcInput): FastSystemNp
     name,
     type: 'npc',
     isNpc: true,
+    team: teamId,
     imageUrl: '',
     role,
     age: input.age ?? 22 + rollD6(rng) + rollD6(rng) + rollD6(rng),

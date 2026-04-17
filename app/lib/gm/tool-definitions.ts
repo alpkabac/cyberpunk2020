@@ -160,7 +160,7 @@ export const GM_TOOL_DEFINITIONS = [
     function: {
       name: 'move_token',
       description:
-        'Move a map token to x,y as percentages of map width/height (0–100). TACTICAL_GRID_JSON (user message) defines cols/rows and snap; MAP_TOKENS_JSON includes cell_column/cell_row per token.',
+        'Move a map token to x,y as percentages of map width/height (0–100). TACTICAL_GRID_JSON defines cols/rows and snap; MAP_TOKENS_JSON has cell_column/cell_row and team. To break LOS from enemies, prefer x,y from TACTICAL_COVER_HINT_JSON.suggestions when present (cover between this token and hostile teams per CHARACTERS_JSON/MAP_TOKENS_JSON).',
       parameters: {
         type: 'object',
         properties: {
@@ -545,6 +545,11 @@ export const GM_TOOL_DEFINITIONS = [
             type: 'boolean',
             description: 'If true (default), post a system line introducing the NPC (name, role, threat, gear)',
           },
+          team: {
+            type: 'string',
+            description:
+              'Tactical team id (same string as allies on CHARACTERS_JSON). Default hostile. Use party, police, corp, etc. for friendlies or neutrals.',
+          },
         },
         required: [],
       },
@@ -596,6 +601,11 @@ export const GM_TOOL_DEFINITIONS = [
           announce: {
             type: 'boolean',
             description: 'If true (default), post a system line introducing the NPC',
+          },
+          team: {
+            type: 'string',
+            description:
+              'Tactical team id (allies share the same string). Default hostile; set party or a custom id for friendlies.',
           },
         },
         required: [],
@@ -684,6 +694,11 @@ export const GM_TOOL_DEFINITIONS = [
           },
           place_token: { type: 'boolean', description: 'Default true: GM map token' },
           announce: { type: 'boolean', description: 'Default true: post intro to chat' },
+          team: {
+            type: 'string',
+            description:
+              'Tactical team id (allies share the same string). Default hostile; use party, police, etc. for friendlies.',
+          },
         },
         required: ['name', 'role', 'special_ability'],
       },

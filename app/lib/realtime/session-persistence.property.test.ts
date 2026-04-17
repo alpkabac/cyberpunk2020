@@ -48,6 +48,7 @@ function characterToRow(c: Character): Record<string, unknown> {
     combat_modifiers: c.combatModifiers ?? null,
     netrun_deck: c.netrunDeck ?? null,
     lifepath: c.lifepath ?? null,
+    team: c.team ?? '',
     image_url: c.imageUrl,
   };
 }
@@ -80,7 +81,7 @@ function chatMessageToRow(m: ChatMessage): Record<string, unknown> {
 // fast-check arbitraries
 // ---------------------------------------------------------------------------
 
-const ROLES: RoleType[] = ['Solo', 'Netrunner', 'Techie', 'MedTechie', 'Media', 'Cop', 'Corp', 'Fixer', 'Nomad', 'Rockerboy'];
+const ROLES: RoleType[] = ['Solo', 'Netrunner', 'Techie', 'Medtechie', 'Media', 'Cop', 'Corp', 'Fixer', 'Nomad', 'Rockerboy'];
 
 const arbRole = fc.constantFrom(...ROLES);
 const arbCharType = fc.constantFrom('character', 'npc') as fc.Arbitrary<'character' | 'npc'>;
@@ -92,6 +93,7 @@ const arbCharacter: fc.Arbitrary<Character> = fc.record({
   name: fc.string({ minLength: 1, maxLength: 40 }),
   type: arbCharType,
   isNpc: fc.constant(false), // derived; will be re-derived from type
+  team: fc.string({ maxLength: 32 }),
   imageUrl: fc.constant(''),
   role: arbRole,
   age: fc.integer({ min: 16, max: 60 }),
@@ -115,7 +117,13 @@ const arbCharacter: fc.Arbitrary<Character> = fc.record({
   combatModifiers: fc.constant(undefined),
   netrunDeck: fc.constant(null),
   lifepath: fc.constant(null),
-}).map((c) => ({ ...c, isNpc: c.type === 'npc' }));
+}).map(
+  (c): Character => ({
+    ...c,
+    isNpc: c.type === 'npc',
+    skills: [],
+  }),
+);
 
 const arbToken: fc.Arbitrary<Token> = fc.record({
   id: fc.uuid(),
@@ -159,6 +167,7 @@ describe('Property 1: Session Persistence Round-Trip — Character', () => {
         expect(restored.eurobucks).toBe(original.eurobucks);
         expect(restored.reputation).toBe(original.reputation);
         expect(restored.improvementPoints).toBe(original.improvementPoints);
+        expect(restored.team).toBe(original.team);
       }),
       { numRuns: 100 },
     );

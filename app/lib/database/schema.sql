@@ -125,6 +125,9 @@ CREATE TABLE IF NOT EXISTS characters (
   
   -- Lifepath
   lifepath JSONB,
+
+  -- Tactical team (same string = allies; empty = default party/hostile)
+  team TEXT NOT NULL DEFAULT '',
   
   -- Timestamps
   created_at TIMESTAMPTZ DEFAULT NOW(),

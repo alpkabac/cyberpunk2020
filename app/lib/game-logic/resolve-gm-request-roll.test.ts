@@ -22,6 +22,7 @@ function minimalChar(overrides: Partial<Character> = {}): Character {
     name: 'Test',
     type: 'character',
     isNpc: false,
+    team: '',
     imageUrl: '',
     role: 'Solo',
     age: 20,

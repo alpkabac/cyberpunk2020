@@ -378,6 +378,7 @@ export function mergeCharacterRowWithRealtime(existing: Character, row: Record<s
   if (!('netrun_deck' in row)) out.netrunDeck = existing.netrunDeck;
   if (!('lifepath' in row)) out.lifepath = existing.lifepath;
   if (!('combat_modifiers' in row)) out.combatModifiers = existing.combatModifiers;
+  if (!('team' in row)) out.team = existing.team;
   return out;
 }
 
@@ -392,6 +393,7 @@ export function characterRowToCharacter(row: Record<string, unknown>): Character
     name: str(row.name),
     type: typ,
     isNpc: typ === 'npc',
+    team: typeof row.team === 'string' ? row.team : '',
     imageUrl: str(row.image_url),
     role,
     age: num(row.age, 25),

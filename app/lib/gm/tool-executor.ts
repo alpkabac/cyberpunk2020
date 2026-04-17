@@ -119,6 +119,15 @@ function optStr(v: unknown): string | undefined {
 
 const STAT_KEYS_FOR_GM = new Set<string>(['int', 'ref', 'tech', 'cool', 'attr', 'luck', 'ma', 'bt', 'emp']);
 
+/** Optional `team` on spawn tools: trimmed tactical id, default hostile, max 64 chars. */
+function resolvedSpawnTeam(raw: Record<string, unknown>): string {
+  const v = raw.team;
+  if (v === undefined || v === null) return 'hostile';
+  if (typeof v !== 'string') return 'hostile';
+  const t = v.trim().slice(0, 64);
+  return t.length > 0 ? t : 'hostile';
+}
+
 function validateFastSpawnNpcArgs(raw: Record<string, unknown>): { ok: true } | { ok: false; error: string } {
   if (raw.name !== undefined && raw.name !== null && typeof raw.name !== 'string') {
     return { ok: false, error: 'name must be a string if provided' };
@@ -150,6 +159,10 @@ function validateFastSpawnNpcArgs(raw: Record<string, unknown>): { ok: true } | 
       const n = Math.floor(val);
       if (n < 2 || n > 10) return { ok: false, error: `stat_overrides.${k} must be between 2 and 10` };
     }
+  }
+  if (raw.team !== undefined && raw.team !== null) {
+    if (typeof raw.team !== 'string') return { ok: false, error: 'team must be a string if provided' };
+    if (raw.team.length > 64) return { ok: false, error: 'team must be at most 64 characters' };
   }
   return { ok: true };
 }
@@ -522,6 +535,10 @@ export function validateGmToolParameters(name: string, raw: unknown): { ok: true
       }
       if (raw.announce !== undefined && typeof raw.announce !== 'boolean') {
         return { ok: false, error: 'announce must be a boolean if provided' };
+      }
+      if (raw.team !== undefined && raw.team !== null) {
+        if (typeof raw.team !== 'string') return { ok: false, error: 'team must be a string if provided' };
+        if (raw.team.length > 64) return { ok: false, error: 'team must be at most 64 characters' };
       }
       return { ok: true, name: 'spawn_unique_npc', args: raw };
     }
@@ -1074,6 +1091,7 @@ export async function executeGmTool(
           ? (args.stat_overrides as Partial<Record<keyof Stats, number>>)
           : undefined;
 
+      const team = resolvedSpawnTeam(args as Record<string, unknown>);
       const { character: built, gearSummary } = buildFastSystemNpc({
         sessionId: ctx.sessionId,
         name: baseName,
@@ -1081,6 +1099,7 @@ export async function executeGmTool(
         threat: threatRaw,
         rng,
         statOverrides,
+        team,
       });
 
       const persisted = await persistNewNpcWithOptionalToken(ctx, built, placeToken, rng);
@@ -1107,6 +1126,7 @@ export async function executeGmTool(
           threat: threatRaw,
           gear_summary: gearSummary,
           token_id,
+          team: saved.team,
         },
       };
     }
@@ -1158,10 +1178,12 @@ export async function executeGmTool(
       }
 
       const sa = args.special_ability as Record<string, unknown>;
+      const team = resolvedSpawnTeam(args as Record<string, unknown>);
       const built = buildUniqueGmNpc({
         sessionId: ctx.sessionId,
         name: displayName,
         role,
+        team,
         stats: statsPartial,
         specialAbility: {
           name: String(sa.name),
@@ -1216,6 +1238,7 @@ export async function executeGmTool(
           token_id,
           item_count: saved.items.length,
           skill_count: saved.skills.length,
+          team: saved.team,
         },
       };
     }
