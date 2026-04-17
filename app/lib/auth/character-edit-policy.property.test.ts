@@ -58,4 +58,26 @@ describe('Property 29: Character ownership (edit policy mirrors RLS)', () => {
       { numRuns: 50 },
     );
   });
+
+  it('session creator may edit unclaimed player characters; others may not', () => {
+    fc.assert(
+      fc.property(fc.uuid(), fc.uuid(), (gmId, otherId) => {
+        fc.pre(gmId !== otherId);
+        const gmOk = characterRowEditableByUser({
+          viewerUserId: gmId,
+          characterUserId: null,
+          characterType: 'character',
+          sessionCreatorId: gmId,
+        });
+        const otherDenied = characterRowEditableByUser({
+          viewerUserId: otherId,
+          characterUserId: null,
+          characterType: 'character',
+          sessionCreatorId: gmId,
+        });
+        return gmOk === true && otherDenied === false;
+      }),
+      { numRuns: 50 },
+    );
+  });
 });

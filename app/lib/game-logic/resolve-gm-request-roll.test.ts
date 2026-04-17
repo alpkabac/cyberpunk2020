@@ -21,6 +21,7 @@ function minimalChar(overrides: Partial<Character> = {}): Character {
     sessionId: 's',
     name: 'Test',
     type: 'character',
+    isNpc: false,
     imageUrl: '',
     role: 'Solo',
     age: 20,

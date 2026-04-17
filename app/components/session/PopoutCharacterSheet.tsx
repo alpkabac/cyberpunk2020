@@ -7,6 +7,8 @@ type PopoutCharacterSheetProps = {
   title: string;
   children: React.ReactNode;
   onDock: () => void;
+  /** e.g. Remove NPC — rendered before “Dock sheet” */
+  headerExtra?: React.ReactNode;
 };
 
 const MIN_W = 380;
@@ -15,7 +17,7 @@ const MIN_H = 360;
 /**
  * Floating, draggable character sheet with a resize handle (session room).
  */
-export function PopoutCharacterSheet({ title, children, onDock }: PopoutCharacterSheetProps) {
+export function PopoutCharacterSheet({ title, children, onDock, headerExtra }: PopoutCharacterSheetProps) {
   const [pos, setPos] = useState({ x: 64, y: 72 });
   const [size, setSize] = useState({ w: 900, h: 620 });
   const dragRef = useRef<{ startX: number; startY: number; ox: number; oy: number } | null>(null);
@@ -80,14 +82,17 @@ export function PopoutCharacterSheet({ title, children, onDock }: PopoutCharacte
         className="shrink-0 flex items-center justify-between gap-2 px-3 py-2 bg-zinc-900 border-b border-zinc-700 cursor-grab active:cursor-grabbing select-none"
         onMouseDown={onHeaderMouseDown}
       >
-        <span className="text-xs font-bold uppercase tracking-wide text-cyan-400/90 truncate">{title}</span>
-        <button
-          type="button"
-          onClick={onDock}
-          className="text-[10px] uppercase font-bold px-2 py-1 rounded border border-zinc-600 text-zinc-200 hover:bg-zinc-800 shrink-0 cursor-pointer"
-        >
-          Dock sheet
-        </button>
+        <span className="text-xs font-bold uppercase tracking-wide text-cyan-400/90 truncate min-w-0">{title}</span>
+        <div className="flex items-center gap-2 shrink-0">
+          {headerExtra}
+          <button
+            type="button"
+            onClick={onDock}
+            className="text-[10px] uppercase font-bold px-2 py-1 rounded border border-zinc-600 text-zinc-200 hover:bg-zinc-800 cursor-pointer"
+          >
+            Dock sheet
+          </button>
+        </div>
       </div>
       <div className="flex-1 min-h-0 overflow-auto relative">{children}</div>
       <button

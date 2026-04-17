@@ -46,14 +46,16 @@ export const GM_TOOL_DEFINITIONS = [
     type: 'function' as const,
     function: {
       name: 'add_item',
-      description: 'Add a gear item to a character inventory.',
+      description:
+        'Add a typed gear item to a character inventory. For weapons include weapon_type, damage, shots, rof, range, accuracy; for armor include coverage with zone stopping power; for cyberware include cyberware_type and humanity_loss.',
       parameters: {
         type: 'object',
         properties: {
           character_id: { type: 'string' },
           item: {
             type: 'object',
-            description: 'Item fields; id optional (server-generated if omitted)',
+            description:
+              'Item fields. id optional (server-generated if omitted). Include type-specific fields: weapon → weapon_type, damage (e.g. "4d6"), shots, shots_left, rof, range, accuracy, ap, ammo_type, attack_skill, is_auto_capable; armor → coverage (object with zone keys: head/torso/r_arm/l_arm/r_leg/l_leg each having stopping_power and ablation), encumbrance; cyberware → cyberware_type, surgery_code, humanity_cost, humanity_loss, stat_mods.',
             properties: {
               id: { type: 'string' },
               name: { type: 'string' },
@@ -67,6 +69,38 @@ export const GM_TOOL_DEFINITIONS = [
               weight: { type: 'number' },
               equipped: { type: 'boolean' },
               source: { type: 'string' },
+              weapon_type: {
+                type: 'string',
+                description:
+                  'Weapon category. Values: pistol, smg, shotgun, assault_rifle, rifle, heavy, melee, exotic, grenade, bow',
+              },
+              damage: { type: 'string', description: 'Dice expression e.g. "3d6+3", "8d10"' },
+              shots: { type: 'number', description: 'Magazine size' },
+              shots_left: { type: 'number', description: 'Current ammo; defaults to shots if omitted' },
+              rof: { type: 'number', description: 'Rate of fire' },
+              range: { type: 'number', description: 'Effective range in metres' },
+              accuracy: { type: 'number', description: 'Accuracy modifier' },
+              ap: { type: 'boolean', description: 'Armour piercing' },
+              ammo_type: { type: 'string' },
+              attack_skill: { type: 'string', description: 'Governing skill name e.g. "Heavy Weapons"' },
+              is_auto_capable: { type: 'boolean' },
+              coverage: {
+                type: 'object',
+                description:
+                  'Armor coverage by body zone. Keys MUST be: Head, Torso, rArm, lArm, rLeg, lLeg (exact case). Each zone: { stopping_power: number, ablation: number }.',
+              },
+              encumbrance: { type: 'number' },
+              cyberware_type: {
+                type: 'string',
+                description: 'e.g. "implant", "weapon", "neural", "optic", "body", "limb"',
+              },
+              surgery_code: { type: 'string', description: 'M / MA / N / EX' },
+              humanity_cost: { type: 'string', description: 'e.g. "2d6"' },
+              humanity_loss: { type: 'number' },
+              stat_mods: {
+                type: 'object',
+                description: 'Stat bonuses granted by the cyberware e.g. { "ref": 2 }',
+              },
             },
             required: ['name', 'type'],
           },
@@ -382,6 +416,197 @@ export const GM_TOOL_DEFINITIONS = [
           summary: { type: 'string', description: 'New session summary text (replaces existing)' },
         },
         required: ['summary'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'spawn_npc',
+      description:
+        'Same as spawn_random_npc: disposable CP2020 **Fast Character System** NPC (2D6 stats, 40-pt career, book armor/weapon table). Prefer spawn_random_npc for name clarity. For named bosses or canon characters with GM-defined stats/skills/gear, use spawn_unique_npc instead.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: {
+            type: 'string',
+            description: 'Display name; omit for an auto-generated label (role + number)',
+          },
+          role: {
+            type: 'string',
+            enum: ['Solo', 'Rockerboy', 'Netrunner', 'Media', 'Nomad', 'Fixer', 'Cop', 'Corp', 'Techie', 'Medtechie'],
+            description: 'CP2020 role; omit for a random role',
+          },
+          threat: {
+            type: 'string',
+            enum: ['mook', 'average', 'capable', 'elite'],
+            description:
+              'Power tier: shifts all stats (−1 mook … +2 elite), then applies stat_overrides. Capable/elite add 2D10 pickup skill points (Fast NPC advanced package).',
+          },
+          stat_overrides: {
+            type: 'object',
+            description: 'Optional base stats 2–10 after threat adjustment (keys: int, ref, tech, cool, attr, luck, ma, bt, emp)',
+            properties: {
+              int: { type: 'number' },
+              ref: { type: 'number' },
+              tech: { type: 'number' },
+              cool: { type: 'number' },
+              attr: { type: 'number' },
+              luck: { type: 'number' },
+              ma: { type: 'number' },
+              bt: { type: 'number' },
+              emp: { type: 'number' },
+            },
+          },
+          place_token: {
+            type: 'boolean',
+            description: 'If true (default), add a GM token on the map at a random position',
+          },
+          announce: {
+            type: 'boolean',
+            description: 'If true (default), post a system line introducing the NPC (name, role, threat, gear)',
+          },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'spawn_random_npc',
+      description:
+        'Create a **generic** CP2020 NPC via the book Fast Character System (random or guided mooks, guards, crowd). Random 2D6 stats, career package, table gear. Use spawn_unique_npc for important named NPCs (bosses, Adam Smasher–style builds) where you set stats, special ability name/value, custom skills, and items.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: {
+            type: 'string',
+            description: 'Display name; omit for an auto-generated label (role + number)',
+          },
+          role: {
+            type: 'string',
+            enum: ['Solo', 'Rockerboy', 'Netrunner', 'Media', 'Nomad', 'Fixer', 'Cop', 'Corp', 'Techie', 'Medtechie'],
+            description: 'CP2020 role; omit for a random role',
+          },
+          threat: {
+            type: 'string',
+            enum: ['mook', 'average', 'capable', 'elite'],
+            description:
+              'Power tier: shifts all stats (−1 mook … +2 elite), then applies stat_overrides. Capable/elite add 2D10 pickup skill points.',
+          },
+          stat_overrides: {
+            type: 'object',
+            description: 'Optional base stats 2–10 after threat adjustment (keys: int, ref, tech, cool, attr, luck, ma, bt, emp)',
+            properties: {
+              int: { type: 'number' },
+              ref: { type: 'number' },
+              tech: { type: 'number' },
+              cool: { type: 'number' },
+              attr: { type: 'number' },
+              luck: { type: 'number' },
+              ma: { type: 'number' },
+              bt: { type: 'number' },
+              emp: { type: 'number' },
+            },
+          },
+          place_token: {
+            type: 'boolean',
+            description: 'If true (default), add a GM token on the map at a random position',
+          },
+          announce: {
+            type: 'boolean',
+            description: 'If true (default), post a system line introducing the NPC',
+          },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'spawn_unique_npc',
+      description:
+        'Create a **GM-authored** NPC sheet: you choose base stats (2–10 each, default 6), special ability name and value, arbitrary skills (including custom skill names and linked stats), and items. Use for bosses, legend NPCs, or any character where random Fast generation is wrong. Items: type weapon supports weapon_type, damage (dice string e.g. "4d6"), range, shots, rof, ap, attack_skill; type armor supports coverage object with keys Head/Torso/rArm/lArm/rLeg/lLeg each having stopping_power and ablation; type cyberware supports cyberware_type, humanity_loss, stat_mods. Then use add_item if you need to refine gear after spawn.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Display name (required)' },
+          role: {
+            type: 'string',
+            enum: ['Solo', 'Rockerboy', 'Netrunner', 'Media', 'Nomad', 'Fixer', 'Cop', 'Corp', 'Techie', 'Medtechie'],
+            description: 'Sheet role (defines typical hooks; you still set special_ability freely)',
+          },
+          stats: {
+            type: 'object',
+            description: 'Optional bases 2–10; omitted stats default to 6',
+            properties: {
+              int: { type: 'number' },
+              ref: { type: 'number' },
+              tech: { type: 'number' },
+              cool: { type: 'number' },
+              attr: { type: 'number' },
+              luck: { type: 'number' },
+              ma: { type: 'number' },
+              bt: { type: 'number' },
+              emp: { type: 'number' },
+            },
+          },
+          special_ability: {
+            type: 'object',
+            description: 'Role special line on the sheet (e.g. Combat Sense 10, or a custom label for homebrew)',
+            properties: {
+              name: { type: 'string' },
+              value: { type: 'number', description: '0–10' },
+            },
+            required: ['name', 'value'],
+          },
+          skills: {
+            type: 'array',
+            description: 'Skill rows; use any skill name. linked_stat defaults to ref, category defaults to Custom',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string' },
+                value: { type: 'number', description: '0–10' },
+                linked_stat: {
+                  type: 'string',
+                  enum: ['int', 'ref', 'tech', 'cool', 'attr', 'luck', 'ma', 'bt', 'emp'],
+                },
+                category: { type: 'string' },
+                is_chipped: { type: 'boolean' },
+                is_special_ability: { type: 'boolean' },
+              },
+              required: ['name', 'value'],
+            },
+          },
+          items: {
+            type: 'array',
+            description: 'Gear rows (weapon/armor/cyberware/misc/vehicle/program). See tool description for fields.',
+            items: { type: 'object' },
+          },
+          age: { type: 'number' },
+          reputation: { type: 'number' },
+          improvement_points: { type: 'number' },
+          eurobucks: { type: 'number' },
+          damage: { type: 'number', description: 'Starting wound track 0–41' },
+          image_url: { type: 'string' },
+          combat_modifiers: {
+            type: 'object',
+            properties: {
+              initiative: { type: 'number' },
+              stun_save: { type: 'number' },
+            },
+          },
+          announcement_text: {
+            type: 'string',
+            description: 'Optional custom system chat line; default summarizes name, role, and gear',
+          },
+          place_token: { type: 'boolean', description: 'Default true: GM map token' },
+          announce: { type: 'boolean', description: 'Default true: post intro to chat' },
+        },
+        required: ['name', 'role', 'special_ability'],
       },
     },
   },

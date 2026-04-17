@@ -16,6 +16,8 @@ import { createDefaultPostgresHandlersForGameStore } from '@/lib/realtime/apply-
 import { useGameStore } from '@/lib/store/game-store';
 import type { SessionRealtimeHandle } from '@/lib/realtime/session-channel';
 import { isValidSessionUuid, setDevSessionId } from '@/lib/dev/dev-session-storage';
+import { generateCp2020Character, randomRole } from '@/lib/character-gen/cp2020-char-gen';
+import { serializeCharacterForDb } from '@/lib/db/character-serialize';
 
 const TAB_LABEL_KEY = 'realtime-test-tab-label';
 const noopSubscribe = () => () => {};
@@ -243,13 +245,22 @@ export function RealtimeTestClient() {
   const ensureCharacter = async (): Promise<string | null> => {
     if (!sessionId || !user) return null;
     if (characters.length > 0) return characters[0].id;
+    const rng = Math.random;
+    const c = generateCp2020Character({
+      sessionId,
+      userId: user.id,
+      name: charName.trim() || 'Tab Tester',
+      role: randomRole(rng),
+      method: 'random',
+      rng,
+    });
     const { data, error } = await supabase
       .from('characters')
       .insert({
         session_id: sessionId,
         user_id: user.id,
-        name: charName || 'Tab Tester',
         type: 'character',
+        ...serializeCharacterForDb({ ...c, name: charName.trim() || c.name }),
       })
       .select('id')
       .single();

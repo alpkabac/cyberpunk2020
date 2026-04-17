@@ -21,6 +21,7 @@ const minimalCharacter = (id: string): Character => ({
   sessionId: 's',
   name: 'n',
   type: 'character',
+  isNpc: false,
   imageUrl: '',
   role: 'Solo',
   age: 20,

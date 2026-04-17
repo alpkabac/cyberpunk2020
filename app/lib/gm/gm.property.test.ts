@@ -36,6 +36,7 @@ const minimalChar = (id: string): Character => ({
   sessionId: 's',
   name: 'Test',
   type: 'character',
+  isNpc: false,
   imageUrl: '',
   role: 'Solo',
   age: 20,
@@ -209,6 +210,79 @@ describe('Property 6: Tool parameter validation', () => {
     expect(validateGmToolParameters('request_roll', { roll_kind: 'skill', character_id: 'c' }).ok).toBe(
       false,
     );
+  });
+
+  it('accepts spawn_npc with optional fields and stat_overrides', () => {
+    expect(validateGmToolParameters('spawn_npc', {}).ok).toBe(true);
+    expect(
+      validateGmToolParameters('spawn_npc', {
+        name: 'Viktor',
+        role: 'Fixer',
+        threat: 'capable',
+        place_token: false,
+        announce: true,
+        stat_overrides: { ref: 8, cool: 7 },
+      }).ok,
+    ).toBe(true);
+    expect(validateGmToolParameters('spawn_npc', { threat: 'boss' }).ok).toBe(false);
+    expect(validateGmToolParameters('spawn_npc', { role: 'Dragon' }).ok).toBe(false);
+    expect(validateGmToolParameters('spawn_npc', { place_token: 'yes' }).ok).toBe(false);
+    expect(validateGmToolParameters('spawn_npc', { stat_overrides: { ref: 1 } }).ok).toBe(false);
+    expect(validateGmToolParameters('spawn_npc', { stat_overrides: { refx: 5 } }).ok).toBe(false);
+  });
+
+  it('spawn_random_npc mirrors spawn_npc validation', () => {
+    expect(validateGmToolParameters('spawn_random_npc', {}).ok).toBe(true);
+    expect(
+      validateGmToolParameters('spawn_random_npc', {
+        threat: 'elite',
+        stat_overrides: { int: 8 },
+      }).ok,
+    ).toBe(true);
+    expect(validateGmToolParameters('spawn_random_npc', { threat: 'boss' }).ok).toBe(false);
+  });
+
+  it('accepts spawn_unique_npc with required fields and skills/items', () => {
+    expect(
+      validateGmToolParameters('spawn_unique_npc', {
+        name: 'Adam Smasher',
+        role: 'Solo',
+        special_ability: { name: 'Combat Sense', value: 10 },
+      }).ok,
+    ).toBe(true);
+    expect(
+      validateGmToolParameters('spawn_unique_npc', {
+        name: 'X',
+        role: 'Fixer',
+        special_ability: { name: 'Streetdeal', value: 8 },
+        stats: { ref: 10, bt: 12 },
+      }).ok,
+    ).toBe(false);
+    expect(
+      validateGmToolParameters('spawn_unique_npc', {
+        name: 'X',
+        role: 'Fixer',
+        special_ability: { name: 'Custom', value: 5 },
+        skills: [
+          { name: 'Borgware integration', value: 9, linked_stat: 'tech', category: 'Custom' },
+        ],
+        items: [{ name: 'Malorian', type: 'weapon', damage: '4d6+4', weapon_type: 'Pistol' }],
+      }).ok,
+    ).toBe(true);
+    expect(
+      validateGmToolParameters('spawn_unique_npc', {
+        name: '',
+        role: 'Solo',
+        special_ability: { name: 'X', value: 1 },
+      }).ok,
+    ).toBe(false);
+    expect(
+      validateGmToolParameters('spawn_unique_npc', {
+        name: 'Y',
+        role: 'Solo',
+        special_ability: { name: '', value: 1 },
+      }).ok,
+    ).toBe(false);
   });
 });
 

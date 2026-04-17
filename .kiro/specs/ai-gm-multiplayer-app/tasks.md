@@ -732,20 +732,23 @@ This implementation plan breaks down the design into discrete coding tasks. The 
     - **Validates: Requirements 15.4**
     - **COMPLETED:** `lib/auth/session-creator-policy.property.test.ts`
 
-- [ ] 16. Implement session persistence
-  - [ ] 16.1 Add session save functionality
+- [x] 16. Implement session persistence
+  - [x] 16.1 Add session save functionality
     - Save all characters, map state, chat history to database
     - Trigger save after significant changes
     - _Requirements: 11.1, 11.2_
+    - **COMPLETED:** With Supabase Realtime, all writes (character updates via `/api/gm` tool calls and store mutations, token moves, chat messages) persist directly to Postgres — there is no separate "save" action; Postgres is always authoritative. `mergeCharacterRowWithRealtime` in `db-mapper.ts` prevents partial UPDATE replicas from wiping unchanged JSONB columns.
 
-  - [ ] 16.2 Add session load functionality
+  - [x] 16.2 Add session load functionality
     - Load session data from database
     - Restore characters, map, chat history to store
     - _Requirements: 11.3_
+    - **COMPLETED:** `fetchSessionSnapshot()` in `lib/realtime/session-load.ts` fetches sessions, characters, tokens, and chat_messages in parallel. `connectSessionRealtime()` in `session-channel.ts` always calls `refreshFromDatabase` before subscribing. `createDefaultPostgresHandlersForGameStore()` in `apply-realtime-to-store.ts` wires `postgres_changes` events for all four tables into the Zustand game store. `attachSessionRealtimeRecovery()` triggers a full refetch + resubscribe on `window.online` and tab-visibility-change.
 
-  - [ ]* 16.3 Write property test for session persistence round-trip
+  - [x]* 16.3 Write property test for session persistence round-trip
     - **Property 1: Session Persistence Round-Trip**
     - **Validates: Requirements 1.4, 11.1, 11.2, 11.3**
+    - **COMPLETED:** `lib/realtime/session-persistence.property.test.ts` — 6 property tests (100 runs each) verifying that `characterRowToCharacter`, `tokenRowToToken`, and `chatRowToMessage` are left-inverses of their row-serialisation counterparts; includes idempotency test for the Character mapper. Existing `session-sync.property.test.ts` covers Property 22 (reconnect state sync) and Property 23 (optimistic rollback).
 
 - [ ] 17. Add error handling and validation
   - [ ] 17.1 Add input validation to all API routes
@@ -800,31 +803,42 @@ This implementation plan breaks down the design into discrete coding tasks. The 
     - Test against common player queries to verify coverage
     - _Requirements: 4.1_
 
-- [ ] 19. Implement NPC spawning system _(deferred)_
+  - [ ] 18.4 AI tracks and awards Improvement Points (IP) when appropriate
+    - Extend GM system prompt / `context-builder` so the model considers CP2020-style IP awards (danger, goals achieved, strong roleplay, session milestones) and applies them at sensible breakpoints (e.g. end of a job, session wrap-up), not every trivial chat turn.
+    - Persist changes via existing tools: `update_character_field` on `improvementPoints` (absolute) or add a small `adjust_improvement_points` tool (delta + `character_id` + short reason) if relative updates are safer.
+    - Add or extend a lorebook rule entry (e.g. `improvement-points`) with Referee guideline ranges so `lookup_rules` and injection stay consistent across sessions.
+    - Post a brief chat or system line when IP changes (who, +N, why) so the table can audit awards.
+    - _Requirements: 4.1, 4.5_
+
+- [x] 19. Implement NPC spawning system
   - GM AI tool to create NPC character sheets on-the-fly during a session
   - **Depends on:** Task 14 (Map & Tokens) for optional token placement, schema support for GM-owned characters
 
-  - [ ] 19.1 Add GM ownership model for characters
+  - [x] 19.1 Add GM ownership model for characters
     - Schema change: allow `user_id` to be null or a GM sentinel value for NPC rows
     - Update RLS policies so GM can read/write NPC characters in their sessions
     - Update `characterRowToCharacter` to flag NPC characters (e.g. `isNpc: boolean`)
+    - **COMPLETED:** `Character.isNpc` in `app/lib/types.ts`; `characterRowToCharacter` sets `isNpc` from `type === 'npc'`; migrations/RLS for NPC/session GM access (`006_character_ownership_and_claim.sql`, `rls-policies.sql`)
 
-  - [ ] 19.2 Create NPC role templates
+  - [x] 19.2 Create NPC role templates
     - Define stat/skill/equipment templates for common CP2020 roles: Solo, Netrunner, Techie, Fixer, Nomad, Corp, Cop, etc.
     - Each template provides baseline stats, role skill, typical weapons/armor, and a threat-level scaler
     - Source from CP2020 NPC stat blocks in `CP2020Gameplay.md` / `CP2020Character.md`
+    - **COMPLETED:** CP2020 Fast Character System in `app/lib/npc/cp2020-fast-npc.ts` (2D6 stats + threat tiers, 40-pt career, armor/weapon d10 table, capable/elite pickup); tests in `cp2020-fast-npc.test.ts`
 
-  - [ ] 19.3 Implement `spawn_npc` AI tool
+  - [x] 19.3 Implement `spawn_npc` AI tool
     - Accepts parameters: name, role, approximate threat level, optional stat overrides
     - Populates Character from role template, inserts into `characters` table linked to current session
     - Syncs via Realtime to all clients
     - Optionally places a token on the map if Task 14 is complete (`add_token` call)
     - Post chat message announcing the NPC (e.g. "A **Corporate Solo** appears — Viktor, armed with an FN-RAL")
+    - **COMPLETED:** `spawn_npc` in `app/lib/gm/tool-definitions.ts` + `tool-executor.ts` (`stat_overrides`, `place_token`, `announce`); `formatNpcSpawnAnnouncement`; GM context in `context-builder.ts`
 
-  - [ ] 19.4 Add NPC management UI
+  - [x] 19.4 Add NPC management UI
     - GM-visible NPC list in the session room (distinct from player characters)
     - Quick-edit panel for NPC stats/equipment
     - Remove/archive NPC button
+    - **COMPLETED:** `SessionRoomClient.tsx` — NPC list with GM remove (×), wound-track quick adjust (−5/−1/+1/+5) with optimistic `updateNPC` + rollback on DB error
 
 - [ ] 20. Implement turn tracker / initiative system _(deferred)_
   - Track combat rounds and initiative order within a session

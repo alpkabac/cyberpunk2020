@@ -108,6 +108,8 @@ export interface Character {
   sessionId: string;
   name: string;
   type: 'character' | 'npc';
+  /** True when `type === 'npc'`; duplicated for LLM payloads and clarity (Task 19.1). */
+  isNpc: boolean;
   imageUrl: string;
 
   // Info

@@ -14,6 +14,8 @@ import { useSessionRealtimeSync } from '@/lib/hooks/useSessionRealtimeSync';
 import { useCharacterCloudSync } from '@/lib/hooks/useCharacterCloudSync';
 import { useShallow } from 'zustand/react/shallow';
 import type { Character } from '@/lib/types';
+import { generateCp2020Character, randomRole } from '@/lib/character-gen/cp2020-char-gen';
+import { serializeCharacterForDb } from '@/lib/db/character-serialize';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -38,6 +40,9 @@ export function SessionRoomClient() {
 
   // Sheet drawer: collapsed by default
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [claimError, setClaimError] = useState<string | null>(null);
+  const [gmGenBusy, setGmGenBusy] = useState(false);
+  const [npcRemoveBusy, setNpcRemoveBusy] = useState(false);
 
   // Token context card (left-click)
   const [contextTokenId, setContextTokenId] = useState<string | null>(null);
@@ -141,6 +146,7 @@ export function SessionRoomClient() {
       if (!user) return false;
       if (c.userId === user.id) return true;
       if (c.type === 'npc' && isGm) return true;
+      if (c.type === 'character' && isGm && (!c.userId || c.userId === '')) return true;
       return false;
     },
     [user, isGm],
@@ -200,6 +206,88 @@ export function SessionRoomClient() {
       controlled_by: 'player',
     });
   }, [myCharacter, sessionId]);
+
+  const handleClaimCharacter = useCallback(
+    async (characterId: string) => {
+      if (!user) return;
+      setClaimError(null);
+      const { error } = await supabase.rpc('claim_session_character', { p_character_id: characterId });
+      if (error) setClaimError(error.message);
+    },
+    [user],
+  );
+
+  const handleGmAddCp2020Pc = useCallback(async () => {
+    if (!sessionId || !user || !isGm) return;
+    setGmGenBusy(true);
+    setClaimError(null);
+    try {
+      const rng = Math.random;
+      const role = randomRole(rng);
+      const tag = `${Math.floor(rng() * 89 + 10)}`;
+      const c = generateCp2020Character({
+        sessionId,
+        name: `${role.slice(0, 3).toUpperCase()}-${tag}`,
+        role,
+        method: 'random',
+        rng,
+      });
+      const { error } = await supabase.from('characters').insert({
+        session_id: sessionId,
+        user_id: null,
+        type: 'character',
+        ...serializeCharacterForDb(c),
+      });
+      if (error) setClaimError(error.message);
+    } finally {
+      setGmGenBusy(false);
+    }
+  }, [sessionId, user, isGm]);
+
+  const patchNpcDamage = useCallback(
+    async (delta: number) => {
+      const sel = selectedCharacter;
+      if (!isGm || !sel || sel.type !== 'npc' || !sessionId) return;
+      const next = Math.max(0, Math.min(41, sel.damage + delta));
+      if (next === sel.damage) return;
+      setClaimError(null);
+      const store = useGameStore.getState();
+      store.beginOptimisticCharacterEdit(sel.id);
+      store.updateNPC(sel.id, { damage: next });
+      const { error } = await supabase
+        .from('characters')
+        .update({ damage: next })
+        .eq('id', sel.id)
+        .eq('session_id', sessionId);
+      if (error) {
+        store.rollbackOptimisticCharacterEdit(sel.id);
+        setClaimError(error.message);
+      } else {
+        store.clearOptimisticCharacterBackup(sel.id);
+      }
+    },
+    [isGm, selectedCharacter, sessionId],
+  );
+
+  const handleRemoveNpc = useCallback(
+    async (npcId: string) => {
+      if (!user || !sessionId) return;
+      if (!window.confirm('Remove this NPC from the session? Linked map tokens are removed too.')) return;
+      setClaimError(null);
+      setNpcRemoveBusy(true);
+      try {
+        const { error } = await supabase.from('characters').delete().eq('id', npcId).eq('session_id', sessionId);
+        if (error) setClaimError(error.message);
+        else if (resolvedCharacterId === npcId) {
+          router.replace(`/session/${sessionId}`, { scroll: false });
+          setSelectedId(null);
+        }
+      } finally {
+        setNpcRemoveBusy(false);
+      }
+    },
+    [user, sessionId, resolvedCharacterId, router],
+  );
 
   const signIn = async () => {
     setAuthError(null);
@@ -305,13 +393,19 @@ export function SessionRoomClient() {
 
           {user && cloudHydrated && !loadError && (
             <>
+              {claimError && (
+                <p className="text-xs text-red-400 border border-red-900/40 rounded p-2 bg-red-950/25">{claimError}</p>
+              )}
               <div>
                 <h2 className="text-[10px] uppercase text-zinc-500 mb-2 tracking-wider">Characters</h2>
                 <ul className="space-y-1">
                   {characters.allIds.map((id) => {
                     const c = characters.byId[id];
+                    const unclaimed = c.type === 'character' && (!c.userId || c.userId === '');
+                    const canClaim =
+                      !!user && !isGm && unclaimed && !myCharacter;
                     return (
-                      <li key={id}>
+                      <li key={id} className="space-y-1">
                         <button
                           type="button"
                           onClick={() => selectCharacter(id)}
@@ -323,11 +417,33 @@ export function SessionRoomClient() {
                         >
                           {c.name}
                           <span className="text-zinc-600 text-[10px] ml-1">PC</span>
+                          {unclaimed && (
+                            <span className="text-amber-600/90 text-[10px] ml-1">· open</span>
+                          )}
                         </button>
+                        {canClaim && (
+                          <button
+                            type="button"
+                            onClick={() => void handleClaimCharacter(id)}
+                            className="w-full text-[11px] uppercase tracking-wide py-1 rounded border border-amber-800/60 text-amber-200 hover:bg-amber-950/40"
+                          >
+                            Claim this character
+                          </button>
+                        )}
                       </li>
                     );
                   })}
                 </ul>
+                {isGm && (
+                  <button
+                    type="button"
+                    disabled={gmGenBusy}
+                    onClick={() => void handleGmAddCp2020Pc()}
+                    className="mt-2 w-full text-[11px] uppercase tracking-wide py-1.5 rounded border border-violet-700/50 text-violet-200 hover:bg-violet-950/40 disabled:opacity-50"
+                  >
+                    {gmGenBusy ? 'Generating…' : 'Add CP2020 PC (random, unclaimed)'}
+                  </button>
+                )}
               </div>
               {npcs.allIds.length > 0 && (
                 <div>
@@ -336,11 +452,11 @@ export function SessionRoomClient() {
                     {npcs.allIds.map((id) => {
                       const c = npcs.byId[id];
                       return (
-                        <li key={id}>
+                        <li key={id} className="flex gap-1 items-stretch">
                           <button
                             type="button"
                             onClick={() => selectCharacter(id)}
-                            className={`w-full text-left text-sm px-2 py-1.5 rounded border transition-colors ${
+                            className={`flex-1 min-w-0 text-left text-sm px-2 py-1.5 rounded border transition-colors ${
                               resolvedCharacterId === id
                                 ? 'border-amber-700 bg-amber-950/40 text-amber-100'
                                 : 'border-transparent hover:border-zinc-600 text-zinc-300 hover:bg-zinc-900'
@@ -349,10 +465,64 @@ export function SessionRoomClient() {
                             {c.name}
                             <span className="text-zinc-600 text-[10px] ml-1">NPC</span>
                           </button>
+                          {user && (
+                            <button
+                              type="button"
+                              title="Remove NPC"
+                              className="shrink-0 px-2 text-xs text-red-400 border border-red-900/50 rounded hover:bg-red-950/40 disabled:opacity-50"
+                              disabled={npcRemoveBusy}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void handleRemoveNpc(id);
+                              }}
+                            >
+                              ×
+                            </button>
+                          )}
                         </li>
                       );
                     })}
                   </ul>
+                  {isGm && selectedCharacter?.type === 'npc' && (
+                    <div className="mt-3 rounded border border-amber-900/40 bg-amber-950/20 p-2 space-y-2">
+                      <p className="text-[10px] uppercase text-amber-600/90 tracking-wide">
+                        GM · {selectedCharacter.name}
+                      </p>
+                      <p className="text-[10px] text-zinc-500">
+                        Wound track: {selectedCharacter.damage}/41
+                      </p>
+                      <div className="flex flex-wrap gap-1">
+                        <button
+                          type="button"
+                          className="text-[10px] uppercase px-2 py-1 rounded border border-zinc-600 text-zinc-300 hover:bg-zinc-800"
+                          onClick={() => void patchNpcDamage(-5)}
+                        >
+                          −5
+                        </button>
+                        <button
+                          type="button"
+                          className="text-[10px] uppercase px-2 py-1 rounded border border-zinc-600 text-zinc-300 hover:bg-zinc-800"
+                          onClick={() => void patchNpcDamage(-1)}
+                        >
+                          −1
+                        </button>
+                        <button
+                          type="button"
+                          className="text-[10px] uppercase px-2 py-1 rounded border border-zinc-600 text-zinc-300 hover:bg-zinc-800"
+                          onClick={() => void patchNpcDamage(1)}
+                        >
+                          +1
+                        </button>
+                        <button
+                          type="button"
+                          className="text-[10px] uppercase px-2 py-1 rounded border border-zinc-600 text-zinc-300 hover:bg-zinc-800"
+                          onClick={() => void patchNpcDamage(5)}
+                        >
+                          +5
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
               {allPlayableIds.length === 0 && (
@@ -403,12 +573,14 @@ export function SessionRoomClient() {
           {/* ── Sheet toggle bar ── */}
           {user && cloudHydrated && !loadError && resolvedCharacterId && selectedCharacter && (
             <div className="rounded border border-zinc-800 bg-zinc-900/40 overflow-hidden">
-              <button
-                type="button"
-                onClick={() => setSheetOpen((v) => !v)}
-                className="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-left hover:bg-zinc-800/40 transition-colors"
-              >
-                <div className="flex items-center gap-2 min-w-0">
+              {/* Outer row — never a <button> so action buttons inside are valid */}
+              <div className="w-full flex items-center justify-between gap-2 px-3 py-2.5">
+                {/* Left: name + labels — clicking here toggles the sheet */}
+                <button
+                  type="button"
+                  onClick={() => setSheetOpen((v) => !v)}
+                  className="flex items-center gap-2 min-w-0 flex-1 text-left hover:opacity-80 transition-opacity"
+                >
                   <span className="text-sm font-semibold text-zinc-100 truncate">{selectedCharacter.name}</span>
                   <span className="text-[10px] text-zinc-500 hidden sm:block">
                     · Stats · Skills · Combat · Gear
@@ -418,34 +590,52 @@ export function SessionRoomClient() {
                       View only
                     </span>
                   )}
-                </div>
+                </button>
+                {/* Right: action buttons + chevron */}
                 <div className="flex items-center gap-2 shrink-0">
+                  {sheetOpen && !sheetPopout && selectedCharacter?.type === 'npc' && user && (
+                    <button
+                      type="button"
+                      disabled={npcRemoveBusy}
+                      title="Delete this NPC from the session"
+                      className="text-[10px] uppercase font-bold px-2 py-1 rounded border border-red-800/60 text-red-300 hover:bg-red-950/45 disabled:opacity-50"
+                      onClick={() => void handleRemoveNpc(selectedCharacter.id)}
+                    >
+                      {npcRemoveBusy ? '…' : 'Remove NPC'}
+                    </button>
+                  )}
                   {sheetOpen && !sheetPopout && (
-                    <span
-                      role="button"
-                      tabIndex={0}
+                    <button
+                      type="button"
                       className="text-[10px] uppercase font-bold px-2 py-1 rounded border border-cyan-700/50 text-cyan-300 hover:bg-cyan-950/40"
-                      onClick={(e) => { e.stopPropagation(); setSheetPopout(true); setSheetOpen(false); }}
-                      onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); setSheetPopout(true); setSheetOpen(false); } }}
+                      onClick={() => { setSheetPopout(true); setSheetOpen(false); }}
                     >
                       Pop out
-                    </span>
+                    </button>
                   )}
-                  {sheetPopout ? (
-                    <span className="text-[10px] text-violet-400">Floating ↗</span>
-                  ) : (
-                    <svg
-                      className={`w-4 h-4 text-zinc-400 transition-transform duration-150 ${sheetOpen ? 'rotate-180' : ''}`}
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                    </svg>
-                  )}
+                  {/* Chevron — clicking also toggles */}
+                  <button
+                    type="button"
+                    onClick={() => setSheetOpen((v) => !v)}
+                    className="hover:opacity-80 transition-opacity"
+                    aria-label={sheetOpen ? 'Collapse sheet' : 'Expand sheet'}
+                  >
+                    {sheetPopout ? (
+                      <span className="text-[10px] text-violet-400">Floating ↗</span>
+                    ) : (
+                      <svg
+                        className={`w-4 h-4 text-zinc-400 transition-transform duration-150 ${sheetOpen ? 'rotate-180' : ''}`}
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                      </svg>
+                    )}
+                  </button>
                 </div>
-              </button>
+              </div>
 
               {/* Collapsible sheet body */}
               {sheetOpen && !sheetPopout && (
@@ -502,6 +692,19 @@ export function SessionRoomClient() {
           <PopoutCharacterSheet
             title={selectedCharacter.name}
             onDock={() => setSheetPopout(false)}
+            headerExtra={
+              selectedCharacter.type === 'npc' && user ? (
+                <button
+                  type="button"
+                  disabled={npcRemoveBusy}
+                  title="Delete this NPC from the session"
+                  className="text-[10px] uppercase font-bold px-2 py-1 rounded border border-red-800/60 text-red-300 hover:bg-red-950/45 disabled:opacity-50 cursor-pointer"
+                  onClick={() => void handleRemoveNpc(selectedCharacter.id)}
+                >
+                  {npcRemoveBusy ? '…' : 'Remove NPC'}
+                </button>
+              ) : undefined
+            }
           >
             <CharacterSheet characterId={resolvedCharacterId} editable={canEditSheet} />
           </PopoutCharacterSheet>
@@ -512,6 +715,19 @@ export function SessionRoomClient() {
         <PopoutCharacterSheet
           title={tokenSheetCharacter.name}
           onDock={() => setTokenSheetPopoutId(null)}
+          headerExtra={
+            tokenSheetCharacter.type === 'npc' && user ? (
+              <button
+                type="button"
+                disabled={npcRemoveBusy}
+                title="Delete this NPC from the session"
+                className="text-[10px] uppercase font-bold px-2 py-1 rounded border border-red-800/60 text-red-300 hover:bg-red-950/45 disabled:opacity-50 cursor-pointer"
+                onClick={() => void handleRemoveNpc(tokenSheetCharacter.id)}
+              >
+                {npcRemoveBusy ? '…' : 'Remove NPC'}
+              </button>
+            ) : undefined
+          }
         >
           <CharacterSheet
             characterId={tokenSheetCharacter.id}

@@ -3,8 +3,8 @@
  */
 
 import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
-import type { Character, Token } from '../types';
-import { characterRowToCharacter, tokenRowToToken } from './db-mapper';
+import type { Token } from '../types';
+import { tokenRowToToken } from './db-mapper';
 import { BROADCAST_EVENTS } from './realtime-events';
 
 const CHANNEL_PREFIX = 'session:';
@@ -13,8 +13,9 @@ export interface PostgresChangeHandlers {
   onSessionChange?: (row: Record<string, unknown>) => void;
   onCharacterChange?: (args: {
     eventType: 'INSERT' | 'UPDATE' | 'DELETE';
-    newRecord: Character | null;
-    oldRecord: Character | null;
+    /** Raw Postgres row (may omit unchanged columns on UPDATE). */
+    newRow: Record<string, unknown> | null;
+    oldRow: Record<string, unknown> | null;
   }) => void;
   onTokenChange?: (args: {
     eventType: 'INSERT' | 'UPDATE' | 'DELETE';
@@ -51,12 +52,21 @@ function mapCharacterPayload(payload: {
 }, sessionId: string, handlers: PostgresChangeHandlers | undefined) {
   if (!handlers?.onCharacterChange) return;
   const eventType = payload.eventType as 'INSERT' | 'UPDATE' | 'DELETE';
-  const row = payload.new ?? payload.old;
-  if (row && String(row.session_id) !== sessionId) return;
 
-  const newRecord = payload.new ? characterRowToCharacter(payload.new) : null;
-  const oldRecord = payload.old ? characterRowToCharacter(payload.old) : null;
-  handlers.onCharacterChange({ eventType, newRecord, oldRecord });
+  // For DELETE events Supabase sets payload.new to {} (empty object, not null).
+  // Using (payload.new ?? payload.old) picks up that empty object and its missing
+  // session_id causes the guard to drop the event. Use payload.old for DELETEs.
+  const rowForGuard = eventType === 'DELETE' ? payload.old : (payload.new ?? payload.old);
+
+  // session_id may be absent on DELETE when REPLICA IDENTITY DEFAULT is set
+  // (old row only carries the primary key). In that case trust the subscription filter.
+  if (rowForGuard && rowForGuard.session_id != null && String(rowForGuard.session_id) !== sessionId) return;
+
+  handlers.onCharacterChange({
+    eventType,
+    newRow: payload.new as Record<string, unknown> | null,
+    oldRow: payload.old as Record<string, unknown> | null,
+  });
 }
 
 function mapTokenPayload(payload: {
@@ -66,8 +76,9 @@ function mapTokenPayload(payload: {
 }, sessionId: string, handlers: PostgresChangeHandlers | undefined) {
   if (!handlers?.onTokenChange) return;
   const eventType = payload.eventType as 'INSERT' | 'UPDATE' | 'DELETE';
-  const row = payload.new ?? payload.old;
-  if (row && String(row.session_id) !== sessionId) return;
+
+  const rowForGuard = eventType === 'DELETE' ? payload.old : (payload.new ?? payload.old);
+  if (rowForGuard && rowForGuard.session_id != null && String(rowForGuard.session_id) !== sessionId) return;
 
   const newRecord = payload.new ? tokenRowToToken(payload.new) : null;
   const oldRecord = payload.old ? tokenRowToToken(payload.old) : null;

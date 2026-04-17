@@ -32,6 +32,7 @@ import {
 import { maxDamageFromDiceFormula } from '../game-logic/dice';
 import { getAmmoConsumed } from '../game-logic/lookups';
 import type { LoadedSessionSnapshot } from '../realtime/session-load';
+import { characterRowToCharacter, mergeCharacterRowWithRealtime } from '../realtime/db-mapper';
 
 // ============================================================================
 // State Interface
@@ -216,7 +217,7 @@ interface GameActions {
 
   // Supabase Realtime / session sync
   hydrateFromLoadedSnapshot: (snapshot: LoadedSessionSnapshot) => void;
-  applyRemoteCharacterUpsert: (character: Character) => void;
+  applyRemoteCharacterUpsert: (row: Record<string, unknown>) => void;
   removeRemoteCharacter: (characterId: string) => void;
   applyRemoteTokenUpsert: (token: Token) => void;
   removeRemoteToken: (tokenId: string) => void;
@@ -381,10 +382,18 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
 
   updateCharacter: (characterId, updates) =>
     set((state) => {
-      const character = state.characters.byId[characterId];
+      const character = state.characters.byId[characterId] ?? state.npcs.byId[characterId];
       if (!character) return state;
 
       const updated = recalcCharacter({ ...character, ...updates });
+      if (character.type === 'npc') {
+        return {
+          npcs: {
+            ...state.npcs,
+            byId: { ...state.npcs.byId, [characterId]: updated },
+          },
+        };
+      }
       return {
         characters: {
           ...state.characters,
@@ -478,18 +487,27 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
 
   deductMoney: (characterId, amount) =>
     set((state) => {
-      const character = state.characters.byId[characterId];
+      const character = state.characters.byId[characterId] ?? state.npcs.byId[characterId];
       if (!character) return state;
 
+      const next = {
+        ...character,
+        eurobucks: Math.max(0, character.eurobucks - amount),
+      };
+      if (character.type === 'npc') {
+        return {
+          npcs: {
+            ...state.npcs,
+            byId: { ...state.npcs.byId, [characterId]: recalcCharacter(next) },
+          },
+        };
+      }
       return {
         characters: {
           ...state.characters,
           byId: {
             ...state.characters.byId,
-            [characterId]: {
-              ...character,
-              eurobucks: Math.max(0, character.eurobucks - amount),
-            },
+            [characterId]: recalcCharacter(next),
           },
         },
       };
@@ -497,7 +515,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
 
   addItem: (characterId, item) =>
     set((state) => {
-      const character = state.characters.byId[characterId];
+      const character = state.characters.byId[characterId] ?? state.npcs.byId[characterId];
       if (!character) return state;
 
       const updated = recalcCharacter({
@@ -505,6 +523,14 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
         items: [...character.items, item],
       });
 
+      if (character.type === 'npc') {
+        return {
+          npcs: {
+            ...state.npcs,
+            byId: { ...state.npcs.byId, [characterId]: updated },
+          },
+        };
+      }
       return {
         characters: {
           ...state.characters,
@@ -515,7 +541,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
 
   removeItem: (characterId, itemId) =>
     set((state) => {
-      const character = state.characters.byId[characterId];
+      const character = state.characters.byId[characterId] ?? state.npcs.byId[characterId];
       if (!character) return state;
 
       const updated = recalcCharacter({
@@ -523,6 +549,14 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
         items: character.items.filter((item) => item.id !== itemId),
       });
 
+      if (character.type === 'npc') {
+        return {
+          npcs: {
+            ...state.npcs,
+            byId: { ...state.npcs.byId, [characterId]: updated },
+          },
+        };
+      }
       return {
         characters: {
           ...state.characters,
@@ -533,7 +567,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
 
   sellItem: (characterId, itemId, sellFraction = 0.5) =>
     set((state) => {
-      const character = state.characters.byId[characterId];
+      const character = state.characters.byId[characterId] ?? state.npcs.byId[characterId];
       if (!character) return state;
 
       const item = character.items.find((i) => i.id === itemId);
@@ -547,6 +581,14 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
         items: character.items.filter((i) => i.id !== itemId),
       });
 
+      if (character.type === 'npc') {
+        return {
+          npcs: {
+            ...state.npcs,
+            byId: { ...state.npcs.byId, [characterId]: updated },
+          },
+        };
+      }
       return {
         characters: {
           ...state.characters,
@@ -557,7 +599,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
 
   updateCharacterField: (characterId, path, value) =>
     set((state) => {
-      const character = state.characters.byId[characterId];
+      const character = state.characters.byId[characterId] ?? state.npcs.byId[characterId];
       if (!character) return state;
 
       const pathParts = path.split('.');
@@ -575,6 +617,14 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
 
       const updated = recalcCharacter(updatedCharacter);
 
+      if (character.type === 'npc') {
+        return {
+          npcs: {
+            ...state.npcs,
+            byId: { ...state.npcs.byId, [characterId]: updated },
+          },
+        };
+      }
       return {
         characters: {
           ...state.characters,
@@ -586,7 +636,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
   // Skill actions
   addSkill: (characterId, skill) =>
     set((state) => {
-      const character = state.characters.byId[characterId];
+      const character = state.characters.byId[characterId] ?? state.npcs.byId[characterId];
       if (!character) return state;
 
       const updated = recalcCharacter({
@@ -594,6 +644,14 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
         skills: [...character.skills, skill],
       });
 
+      if (character.type === 'npc') {
+        return {
+          npcs: {
+            ...state.npcs,
+            byId: { ...state.npcs.byId, [characterId]: updated },
+          },
+        };
+      }
       return {
         characters: {
           ...state.characters,
@@ -604,7 +662,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
 
   updateSkill: (characterId, skillId, updates) =>
     set((state) => {
-      const character = state.characters.byId[characterId];
+      const character = state.characters.byId[characterId] ?? state.npcs.byId[characterId];
       if (!character) return state;
 
       const updated = recalcCharacter({
@@ -612,6 +670,14 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
         skills: character.skills.map((s) => (s.id === skillId ? { ...s, ...updates } : s)),
       });
 
+      if (character.type === 'npc') {
+        return {
+          npcs: {
+            ...state.npcs,
+            byId: { ...state.npcs.byId, [characterId]: updated },
+          },
+        };
+      }
       return {
         characters: {
           ...state.characters,
@@ -622,7 +688,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
 
   removeSkill: (characterId, skillId) =>
     set((state) => {
-      const character = state.characters.byId[characterId];
+      const character = state.characters.byId[characterId] ?? state.npcs.byId[characterId];
       if (!character) return state;
 
       const updated = recalcCharacter({
@@ -630,6 +696,14 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
         skills: character.skills.filter((s) => s.id !== skillId),
       });
 
+      if (character.type === 'npc') {
+        return {
+          npcs: {
+            ...state.npcs,
+            byId: { ...state.npcs.byId, [characterId]: updated },
+          },
+        };
+      }
       return {
         characters: {
           ...state.characters,
@@ -641,7 +715,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
   // Weapon actions
   fireWeapon: (characterId, weaponId, mode) => {
     const state = get();
-    const character = state.characters.byId[characterId];
+    const character = state.characters.byId[characterId] ?? state.npcs.byId[characterId];
     if (!character) return false;
 
     const weaponIdx = character.items.findIndex((i) => i.id === weaponId && i.type === 'weapon');
@@ -661,22 +735,34 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
       shotsLeft: weapon.shotsLeft - ammoNeeded,
     } as unknown as Item;
 
-    set((s) => ({
-      characters: {
-        ...s.characters,
-        byId: {
-          ...s.characters.byId,
-          [characterId]: { ...character, items: updatedItems },
-        },
-      },
-    }));
+    const isNpc = character.type === 'npc';
+    const updated = recalcCharacter({ ...character, items: updatedItems });
+
+    set((s) =>
+      isNpc
+        ? {
+            npcs: {
+              ...s.npcs,
+              byId: { ...s.npcs.byId, [characterId]: updated },
+            },
+          }
+        : {
+            characters: {
+              ...s.characters,
+              byId: {
+                ...s.characters.byId,
+                [characterId]: updated,
+              },
+            },
+          },
+    );
 
     return true;
   },
 
   reloadWeapon: (characterId, weaponId) =>
     set((state) => {
-      const character = state.characters.byId[characterId];
+      const character = state.characters.byId[characterId] ?? state.npcs.byId[characterId];
       if (!character) return state;
 
       const updatedItems = character.items.map((item) => {
@@ -687,12 +773,22 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
         return item;
       });
 
+      const updated = recalcCharacter({ ...character, items: updatedItems });
+
+      if (character.type === 'npc') {
+        return {
+          npcs: {
+            ...state.npcs,
+            byId: { ...state.npcs.byId, [characterId]: updated },
+          },
+        };
+      }
       return {
         characters: {
           ...state.characters,
           byId: {
             ...state.characters.byId,
-            [characterId]: { ...character, items: updatedItems },
+            [characterId]: updated,
           },
         },
       };
@@ -858,7 +954,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     })),
 
   applyStunSaveRollResult: (characterId, flatRollTotal) => {
-    const char = get().characters.byId[characterId];
+    const char = get().characters.byId[characterId] ?? get().npcs.byId[characterId];
     if (!char?.derivedStats) return;
     const bonus = char.combatModifiers?.stunSave ?? 0;
     const target = char.derivedStats.stunSaveTarget + bonus;
@@ -867,7 +963,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
   },
 
   applyDeathSaveRollResult: (characterId, flatRollTotal) => {
-    const char = get().characters.byId[characterId];
+    const char = get().characters.byId[characterId] ?? get().npcs.byId[characterId];
     if (!char?.derivedStats) return;
     const saveBonus = char.combatModifiers?.stunSave ?? 0;
     const target = char.derivedStats.deathSaveTarget + saveBonus;
@@ -1041,9 +1137,12 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
       };
     }),
 
-  applyRemoteCharacterUpsert: (character) =>
+  applyRemoteCharacterUpsert: (row) =>
     set((state) => {
-      const rec = recalcCharacter(character);
+      const parsed = characterRowToCharacter(row);
+      const existing = state.characters.byId[parsed.id] ?? state.npcs.byId[parsed.id];
+      const merged = existing ? mergeCharacterRowWithRealtime(existing, row) : parsed;
+      const rec = recalcCharacter(merged);
       if (rec.type === 'npc') {
         const exists = state.npcs.allIds.includes(rec.id);
         return {
@@ -1181,12 +1280,13 @@ export const selectCharacterById = (
   state: GameState & GameActions,
   characterId: string,
 ): Character | undefined => {
-  return state.characters.byId[characterId];
+  return state.characters.byId[characterId] ?? state.npcs.byId[characterId];
 };
 
 export const selectSelectedCharacter = (state: GameState & GameActions): Character | undefined => {
   if (!state.ui.selectedCharacterId) return undefined;
-  return state.characters.byId[state.ui.selectedCharacterId];
+  const id = state.ui.selectedCharacterId;
+  return state.characters.byId[id] ?? state.npcs.byId[id];
 };
 
 export const selectAllNPCs = (state: GameState & GameActions): Character[] => {
@@ -1231,7 +1331,9 @@ export const selectCharacterDerivedStats = (
   state: GameState & GameActions,
   characterId: string,
 ): DerivedStats | undefined => {
-  return state.characters.byId[characterId]?.derivedStats;
+  return (
+    state.characters.byId[characterId]?.derivedStats ?? state.npcs.byId[characterId]?.derivedStats
+  );
 };
 
 export const selectCanAfford = (
@@ -1239,7 +1341,7 @@ export const selectCanAfford = (
   characterId: string,
   cost: number,
 ): boolean => {
-  const character = state.characters.byId[characterId];
+  const character = state.characters.byId[characterId] ?? state.npcs.byId[characterId];
   if (!character) return false;
   return character.eurobucks >= cost;
 };

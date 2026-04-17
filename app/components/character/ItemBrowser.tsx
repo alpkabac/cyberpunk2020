@@ -216,7 +216,9 @@ export function ItemBrowser({ characterId, onClose }: ItemBrowserProps) {
 
   const addItem = useGameStore((state) => state.addItem);
   const deductMoney = useGameStore((state) => state.deductMoney);
-  const character = useGameStore((state) => state.characters.byId[characterId]);
+  const character = useGameStore(
+    (state) => state.characters.byId[characterId] ?? state.npcs.byId[characterId],
+  );
 
   const showBanner = (msg: string, kind: 'ok' | 'bad') => {
     setBanner({ msg, kind });

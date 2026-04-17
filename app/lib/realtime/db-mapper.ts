@@ -2,8 +2,215 @@
  * Map Supabase snake_case rows to app TypeScript models.
  */
 
-import type { Character, CharacterCondition, ChatMessage, RoleType, Scene, SessionSettings, Stats, StatBlock, Token } from '../types';
+import type {
+  Armor,
+  Character,
+  CharacterCondition,
+  ChatMessage,
+  Cyberware,
+  Item,
+  Program,
+  RoleType,
+  Scene,
+  SessionSettings,
+  Stats,
+  StatBlock,
+  Token,
+  Vehicle,
+  Weapon,
+  WeaponType,
+  Zone,
+} from '../types';
 import { createStatBlock } from '../types';
+
+const WEAPON_TYPES: WeaponType[] = ['Pistol', 'SMG', 'Shotgun', 'Rifle', 'Heavy', 'Melee', 'Exotic'];
+const ZONES: Zone[] = ['Head', 'Torso', 'rArm', 'lArm', 'rLeg', 'lLeg'];
+
+function newItemId(): string {
+  const c = globalThis.crypto;
+  if (c && 'randomUUID' in c && typeof c.randomUUID === 'function') return c.randomUUID();
+  return `item-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
+
+function parseWeaponType(v: unknown): WeaponType {
+  const s = typeof v === 'string' ? v.trim() : '';
+  return WEAPON_TYPES.includes(s as WeaponType) ? (s as WeaponType) : 'Exotic';
+}
+
+function parseConceal(v: unknown): Weapon['concealability'] {
+  const s = typeof v === 'string' ? v : 'J';
+  return ['P', 'J', 'L', 'N'].includes(s) ? (s as Weapon['concealability']) : 'J';
+}
+
+function parseAvail(v: unknown): Weapon['availability'] {
+  const s = typeof v === 'string' ? v : 'E';
+  return ['E', 'C', 'R', 'P'].includes(s) ? (s as Weapon['availability']) : 'E';
+}
+
+function parseRel(v: unknown): Weapon['reliability'] {
+  const s = typeof v === 'string' ? v : 'ST';
+  return ['VR', 'ST', 'UR'].includes(s) ? (s as Weapon['reliability']) : 'ST';
+}
+
+function normalizeZoneSp(raw: unknown): { stoppingPower: number; ablation: number } {
+  if (!raw || typeof raw !== 'object') return { stoppingPower: 0, ablation: 0 };
+  const o = raw as Record<string, unknown>;
+  const sp = num(o.stoppingPower ?? o.stopping_power, 0);
+  const ab = num(o.ablation, 0);
+  return { stoppingPower: sp, ablation: ab };
+}
+
+/** Coerce JSONB / legacy rows into app Item shapes so Combat/Gear tabs recognize weapons & armor. */
+export function normalizeCharacterItems(raw: unknown): Item[] {
+  if (raw == null) return [];
+  let data: unknown = raw;
+  if (typeof raw === 'string') {
+    try {
+      data = JSON.parse(raw) as unknown;
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(data)) return [];
+
+  const out: Item[] = [];
+  for (const el of data) {
+    const item = normalizeOneItem(el);
+    if (item) out.push(item);
+  }
+  return out;
+}
+
+export function normalizeOneItem(entry: unknown): Item | null {
+  if (!entry || typeof entry !== 'object') return null;
+  const o = entry as Record<string, unknown>;
+
+  const declared = typeof o.type === 'string' ? o.type.toLowerCase().trim() : '';
+  const isKnown =
+    declared === 'weapon' ||
+    declared === 'armor' ||
+    declared === 'cyberware' ||
+    declared === 'vehicle' ||
+    declared === 'program' ||
+    declared === 'misc';
+
+  let typeRaw: string = isKnown ? declared : '';
+  if (!typeRaw) {
+    if (o.weapon_type != null || o.weaponType != null) {
+      typeRaw = 'weapon';
+    } else if (typeof o.damage === 'string' && (o.rof != null || o.shots != null || o.accuracy != null)) {
+      typeRaw = 'weapon';
+    } else if (o.coverage != null && typeof o.coverage === 'object') {
+      typeRaw = 'armor';
+    } else if (o.cyberware_type != null || o.cyberwareType != null) {
+      typeRaw = 'cyberware';
+    } else if (o.vehicle_type != null || o.vehicleType != null) {
+      typeRaw = 'vehicle';
+    } else if (o.program_type != null || o.programType != null) {
+      typeRaw = 'program';
+    } else {
+      typeRaw = 'misc';
+    }
+  }
+
+  const base = {
+    id: str(o.id, newItemId()),
+    name: str(o.name, 'Item'),
+    flavor: str(o.flavor, ''),
+    notes: str(o.notes, ''),
+    cost: num(o.cost, 0),
+    weight: num(o.weight, 0),
+    equipped: o.equipped !== false,
+    source: str(o.source, ''),
+  };
+
+  if (typeRaw === 'weapon') {
+    const w: Weapon = {
+      ...base,
+      type: 'weapon',
+      weaponType: parseWeaponType(o.weaponType ?? o.weapon_type),
+      accuracy: num(o.accuracy, 0),
+      concealability: parseConceal(o.concealability),
+      availability: parseAvail(o.availability),
+      ammoType: str(o.ammoType ?? o.ammo_type, ''),
+      damage: str(o.damage, '2d6'),
+      ap: Boolean(o.ap),
+      shotsLeft: num(o.shotsLeft ?? o.shots_left, num(o.shots, 0)),
+      shots: num(o.shots, 0),
+      rof: num(o.rof, 0),
+      reliability: parseRel(o.reliability),
+      range: num(o.range, 0),
+      attackType: str(o.attackType ?? o.attack_type, 'ranged'),
+      attackSkill: str(o.attackSkill ?? o.attack_skill, 'Handgun'),
+      isAutoCapable: Boolean(o.isAutoCapable ?? o.is_auto_capable),
+    };
+    return w;
+  }
+
+  if (typeRaw === 'armor') {
+    const covRaw = o.coverage;
+    const coverage = {} as Armor['coverage'];
+    if (covRaw && typeof covRaw === 'object') {
+      const cr = covRaw as Record<string, unknown>;
+      for (const z of ZONES) {
+        const block = cr[z];
+        coverage[z] = normalizeZoneSp(block);
+      }
+    } else {
+      for (const z of ZONES) coverage[z] = { stoppingPower: 0, ablation: 0 };
+    }
+    const a: Armor = {
+      ...base,
+      type: 'armor',
+      coverage,
+      encumbrance: num(o.encumbrance, 0),
+    };
+    return a;
+  }
+
+  if (typeRaw === 'cyberware') {
+    const cw: Cyberware = {
+      ...base,
+      type: 'cyberware',
+      surgCode: str(o.surgCode ?? o.surg_code, 'M'),
+      humanityCost: str(o.humanityCost ?? o.humanity_cost, ''),
+      humanityLoss: num(o.humanityLoss ?? o.humanity_loss, 0),
+      cyberwareType: str(o.cyberwareType ?? o.cyberware_type, 'implant'),
+    };
+    if (o.statMods && typeof o.statMods === 'object') cw.statMods = o.statMods as Cyberware['statMods'];
+    if (o.stat_mods && typeof o.stat_mods === 'object') cw.statMods = o.stat_mods as Cyberware['statMods'];
+    return cw;
+  }
+
+  if (typeRaw === 'vehicle') {
+    const v: Vehicle = {
+      ...base,
+      type: 'vehicle',
+      vehicleType: str(o.vehicleType ?? o.vehicle_type, ''),
+      topSpeed: num(o.topSpeed ?? o.top_speed, 0),
+      acceleration: num(o.acceleration, 0),
+      handling: num(o.handling, 0),
+      vehicleArmor: num(o.vehicleArmor ?? o.vehicle_armor, 0),
+      vehicleSdp: num(o.vehicleSdp ?? o.vehicle_sdp, 0),
+    };
+    return v;
+  }
+
+  if (typeRaw === 'program') {
+    const p: Program = {
+      ...base,
+      type: 'program',
+      programType: str(o.programType ?? o.program_type, ''),
+      strength: num(o.strength, 0),
+      muCost: num(o.muCost ?? o.mu_cost, 0),
+      programClass: str(o.programClass ?? o.program_class, ''),
+      options: Array.isArray(o.options) ? (o.options as string[]) : [],
+    };
+    return p;
+  }
+
+  return { ...base, type: 'misc' };
+}
 
 function num(v: unknown, fallback = 0): number {
   if (typeof v === 'number' && !Number.isNaN(v)) return v;
@@ -123,15 +330,38 @@ export function parseSessionSettingsJson(v: unknown): SessionSettings {
   };
 }
 
+/**
+ * Merge a possibly partial Realtime/Postgres row into an existing character.
+ * Without this, UPDATE replicas that omit unchanged JSON columns would map to
+ * empty skills/items and wipe the sheet.
+ */
+export function mergeCharacterRowWithRealtime(existing: Character, row: Record<string, unknown>): Character {
+  const incoming = characterRowToCharacter(row);
+  const out: Character = { ...existing, ...incoming };
+  if (!('items' in row)) out.items = existing.items;
+  if (!('skills' in row)) out.skills = existing.skills;
+  if (!('stats' in row)) out.stats = existing.stats;
+  if (!('hit_locations' in row)) out.hitLocations = existing.hitLocations;
+  if (!('special_ability' in row)) out.specialAbility = existing.specialAbility;
+  if (!('conditions' in row)) out.conditions = existing.conditions;
+  if (!('sdp' in row)) out.sdp = existing.sdp;
+  if (!('netrun_deck' in row)) out.netrunDeck = existing.netrunDeck;
+  if (!('lifepath' in row)) out.lifepath = existing.lifepath;
+  if (!('combat_modifiers' in row)) out.combatModifiers = existing.combatModifiers;
+  return out;
+}
+
 export function characterRowToCharacter(row: Record<string, unknown>): Character {
   const role = str(row.role, 'Solo') as RoleType;
 
+  const typ: Character['type'] = row.type === 'npc' ? 'npc' : 'character';
   return {
     id: str(row.id),
     userId: row.user_id != null ? str(row.user_id) : '',
     sessionId: str(row.session_id),
     name: str(row.name),
-    type: row.type === 'npc' ? 'npc' : 'character',
+    type: typ,
+    isNpc: typ === 'npc',
     imageUrl: str(row.image_url),
     role,
     age: num(row.age, 25),
@@ -150,7 +380,7 @@ export function characterRowToCharacter(row: Record<string, unknown>): Character
       current: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },
     },
     eurobucks: num(row.eurobucks, 0),
-    items: Array.isArray(row.items) ? (row.items as Character['items']) : [],
+    items: normalizeCharacterItems(row.items),
     combatModifiers: row.combat_modifiers as Character['combatModifiers'] | undefined,
     netrunDeck: (row.netrun_deck as Character['netrunDeck']) ?? null,
     lifepath: (row.lifepath as Character['lifepath']) ?? null,

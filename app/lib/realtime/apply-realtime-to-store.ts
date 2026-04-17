@@ -20,13 +20,13 @@ export function createDefaultPostgresHandlersForGameStore(): PostgresChangeHandl
       useGameStore.getState().setMapBackground(String(row.map_background_url ?? ''));
       useGameStore.getState().syncVoiceUiFromSessionSettings(settings);
     },
-    onCharacterChange: ({ eventType, newRecord, oldRecord }) => {
+    onCharacterChange: ({ eventType, newRow, oldRow }) => {
       if (eventType === 'DELETE') {
-        const id = oldRecord?.id;
-        if (id) useGameStore.getState().removeRemoteCharacter(id);
+        const id = oldRow?.id;
+        if (id) useGameStore.getState().removeRemoteCharacter(String(id));
         return;
       }
-      if (newRecord) useGameStore.getState().applyRemoteCharacterUpsert(newRecord);
+      if (newRow) useGameStore.getState().applyRemoteCharacterUpsert(newRow);
     },
     onTokenChange: ({ eventType, newRecord, oldRecord }) => {
       if (eventType === 'DELETE') {

@@ -74,6 +74,7 @@ export function CharacterDemoClient() {
       sessionId: 'demo-session',
       name: 'Johnny Silverhand',
       type: 'character',
+      isNpc: false,
       imageUrl: '',
       role: 'Rockerboy',
       age: 32,

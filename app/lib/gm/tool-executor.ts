@@ -3,9 +3,20 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Character, ChatMessage, Zone } from '../types';
-import { saveCharacterToSupabase } from '../db/character-serialize';
-import { parseSceneJson } from '../realtime/db-mapper';
+import type { Character, ChatMessage, RoleType, Stats, Zone } from '../types';
+import { saveCharacterToSupabase, serializeCharacterForDb } from '../db/character-serialize';
+import { characterRowToCharacter, normalizeOneItem, parseSceneJson } from '../realtime/db-mapper';
+import { ALL_ROLES, createCryptoRng, randomRole } from '../character-gen/cp2020-char-gen';
+import {
+  buildFastSystemNpc,
+  formatNpcSpawnAnnouncement,
+  type FastNpcThreat,
+} from '../npc/cp2020-fast-npc';
+import {
+  buildUniqueGmNpc,
+  formatUniqueNpcAnnouncement,
+  type UniqueGmSkillInput,
+} from '../npc/spawn-unique-npc';
 import {
   applyGmAddItem,
   applyGmAddMoney,
@@ -18,7 +29,6 @@ import {
   applyGmRemoveItem,
   applyGmSetCondition,
   applyGmUpdateAmmo,
-  normalizeIncomingItem,
 } from './character-mutations';
 import { rollDice } from '../game-logic/dice';
 import { resolveGmRequestRollForServer } from '../game-logic/resolve-gm-request-roll';
@@ -48,6 +58,9 @@ export type GmToolName =
   | 'update_ammo'
   | 'set_condition'
   | 'update_summary'
+  | 'spawn_npc'
+  | 'spawn_random_npc'
+  | 'spawn_unique_npc'
   | 'add_chat_as_npc';
 
 export interface ToolExecutorContext {
@@ -84,6 +97,43 @@ function optBool(v: unknown): boolean | undefined {
 function optStr(v: unknown): string | undefined {
   if (typeof v === 'string') return v;
   return undefined;
+}
+
+const STAT_KEYS_FOR_GM = new Set<string>(['int', 'ref', 'tech', 'cool', 'attr', 'luck', 'ma', 'bt', 'emp']);
+
+function validateFastSpawnNpcArgs(raw: Record<string, unknown>): { ok: true } | { ok: false; error: string } {
+  if (raw.name !== undefined && raw.name !== null && typeof raw.name !== 'string') {
+    return { ok: false, error: 'name must be a string if provided' };
+  }
+  if (raw.role !== undefined && raw.role !== null) {
+    if (typeof raw.role !== 'string' || !ALL_ROLES.includes(raw.role as RoleType)) {
+      return { ok: false, error: 'role must be a valid CP2020 role if provided' };
+    }
+  }
+  if (raw.threat !== undefined && raw.threat !== null) {
+    const t = String(raw.threat).toLowerCase();
+    if (!['mook', 'average', 'capable', 'elite'].includes(t)) {
+      return { ok: false, error: 'threat must be mook, average, capable, or elite' };
+    }
+  }
+  if (raw.place_token !== undefined && typeof raw.place_token !== 'boolean') {
+    return { ok: false, error: 'place_token must be a boolean if provided' };
+  }
+  if (raw.announce !== undefined && typeof raw.announce !== 'boolean') {
+    return { ok: false, error: 'announce must be a boolean if provided' };
+  }
+  if (raw.stat_overrides !== undefined && raw.stat_overrides !== null) {
+    if (!isRecord(raw.stat_overrides)) return { ok: false, error: 'stat_overrides must be an object' };
+    for (const [k, val] of Object.entries(raw.stat_overrides)) {
+      if (!STAT_KEYS_FOR_GM.has(k)) return { ok: false, error: `stat_overrides: unknown key ${k}` };
+      if (typeof val !== 'number' || !Number.isFinite(val)) {
+        return { ok: false, error: `stat_overrides.${k} must be a finite number` };
+      }
+      const n = Math.floor(val);
+      if (n < 2 || n > 10) return { ok: false, error: `stat_overrides.${k} must be between 2 and 10` };
+    }
+  }
+  return { ok: true };
 }
 
 /** Exported for property tests — validates shape before any DB work. */
@@ -310,6 +360,121 @@ export function validateGmToolParameters(name: string, raw: unknown): { ok: true
       if (typeof summary !== 'string') return { ok: false, error: summary.error };
       return { ok: true, name: 'update_summary', args: raw };
     }
+    case 'spawn_npc':
+    case 'spawn_random_npc': {
+      const v = validateFastSpawnNpcArgs(raw);
+      if (!v.ok) return v;
+      return { ok: true, name: name as GmToolName, args: raw };
+    }
+    case 'spawn_unique_npc': {
+      const n = str(raw.name, 'name');
+      if (typeof n !== 'string') return { ok: false, error: n.error };
+      if (!n.trim()) return { ok: false, error: 'name must not be empty' };
+      if (typeof raw.role !== 'string' || !ALL_ROLES.includes(raw.role as RoleType)) {
+        return { ok: false, error: 'role must be a valid CP2020 role' };
+      }
+      if (!isRecord(raw.special_ability)) return { ok: false, error: 'special_ability must be an object' };
+      const saName = str(raw.special_ability.name, 'special_ability.name');
+      if (typeof saName !== 'string') return { ok: false, error: saName.error };
+      if (!saName.trim()) return { ok: false, error: 'special_ability.name must not be empty' };
+      const saVal = num(raw.special_ability.value, 'special_ability.value');
+      if (typeof saVal !== 'number') return { ok: false, error: saVal.error };
+      if (saVal < 0 || saVal > 10) return { ok: false, error: 'special_ability.value must be 0–10' };
+
+      if (raw.stats !== undefined && raw.stats !== null) {
+        if (!isRecord(raw.stats)) return { ok: false, error: 'stats must be an object' };
+        for (const [k, val] of Object.entries(raw.stats)) {
+          if (!STAT_KEYS_FOR_GM.has(k)) return { ok: false, error: `stats: unknown key ${k}` };
+          if (typeof val !== 'number' || !Number.isFinite(val)) {
+            return { ok: false, error: `stats.${k} must be a finite number` };
+          }
+          const sn = Math.floor(val);
+          if (sn < 2 || sn > 10) return { ok: false, error: `stats.${k} must be between 2 and 10` };
+        }
+      }
+
+      if (raw.skills !== undefined && raw.skills !== null) {
+        if (!Array.isArray(raw.skills)) return { ok: false, error: 'skills must be an array' };
+        for (let i = 0; i < raw.skills.length; i++) {
+          const s = raw.skills[i];
+          if (!isRecord(s)) return { ok: false, error: `skills[${i}] must be an object` };
+          const snm = str(s.name, `skills[${i}].name`);
+          if (typeof snm !== 'string') return { ok: false, error: snm.error };
+          const sv = num(s.value, `skills[${i}].value`);
+          if (typeof sv !== 'number') return { ok: false, error: sv.error };
+          if (sv < 0 || sv > 10) return { ok: false, error: `skills[${i}].value must be 0–10` };
+          if (s.linked_stat !== undefined && s.linked_stat !== null) {
+            if (typeof s.linked_stat !== 'string' || !STAT_KEYS_FOR_GM.has(s.linked_stat)) {
+              return { ok: false, error: `skills[${i}].linked_stat must be a stat key` };
+            }
+          }
+          if (s.category !== undefined && s.category !== null && typeof s.category !== 'string') {
+            return { ok: false, error: `skills[${i}].category must be a string` };
+          }
+          if (s.is_chipped !== undefined && typeof s.is_chipped !== 'boolean') {
+            return { ok: false, error: `skills[${i}].is_chipped must be a boolean` };
+          }
+          if (s.is_special_ability !== undefined && typeof s.is_special_ability !== 'boolean') {
+            return { ok: false, error: `skills[${i}].is_special_ability must be a boolean` };
+          }
+        }
+      }
+
+      if (raw.items !== undefined && raw.items !== null && !Array.isArray(raw.items)) {
+        return { ok: false, error: 'items must be an array' };
+      }
+      if (raw.items !== undefined && raw.items !== null) {
+        for (let i = 0; i < raw.items.length; i++) {
+          if (!isRecord(raw.items[i])) return { ok: false, error: `items[${i}] must be an object` };
+        }
+      }
+
+      if (raw.age !== undefined && raw.age !== null) {
+        const a = num(raw.age, 'age');
+        if (typeof a !== 'number') return { ok: false, error: a.error };
+      }
+      if (raw.reputation !== undefined && raw.reputation !== null) {
+        const r = num(raw.reputation, 'reputation');
+        if (typeof r !== 'number') return { ok: false, error: r.error };
+      }
+      if (raw.improvement_points !== undefined && raw.improvement_points !== null) {
+        const ip = num(raw.improvement_points, 'improvement_points');
+        if (typeof ip !== 'number') return { ok: false, error: ip.error };
+      }
+      if (raw.eurobucks !== undefined && raw.eurobucks !== null) {
+        const e = num(raw.eurobucks, 'eurobucks');
+        if (typeof e !== 'number') return { ok: false, error: e.error };
+      }
+      if (raw.damage !== undefined && raw.damage !== null) {
+        const d = num(raw.damage, 'damage');
+        if (typeof d !== 'number') return { ok: false, error: d.error };
+        if (d < 0 || d > 41) return { ok: false, error: 'damage must be 0–41' };
+      }
+      if (raw.image_url !== undefined && raw.image_url !== null && typeof raw.image_url !== 'string') {
+        return { ok: false, error: 'image_url must be a string' };
+      }
+      if (raw.announcement_text !== undefined && raw.announcement_text !== null && typeof raw.announcement_text !== 'string') {
+        return { ok: false, error: 'announcement_text must be a string' };
+      }
+      if (raw.combat_modifiers !== undefined && raw.combat_modifiers !== null) {
+        if (!isRecord(raw.combat_modifiers)) return { ok: false, error: 'combat_modifiers must be an object' };
+        const cm = raw.combat_modifiers;
+        if (cm.initiative !== undefined && (typeof cm.initiative !== 'number' || !Number.isFinite(cm.initiative))) {
+          return { ok: false, error: 'combat_modifiers.initiative must be a number' };
+        }
+        const stun = cm.stun_save ?? cm.stunSave;
+        if (stun !== undefined && (typeof stun !== 'number' || !Number.isFinite(stun))) {
+          return { ok: false, error: 'combat_modifiers.stun_save must be a number' };
+        }
+      }
+      if (raw.place_token !== undefined && typeof raw.place_token !== 'boolean') {
+        return { ok: false, error: 'place_token must be a boolean if provided' };
+      }
+      if (raw.announce !== undefined && typeof raw.announce !== 'boolean') {
+        return { ok: false, error: 'announce must be a boolean if provided' };
+      }
+      return { ok: true, name: 'spawn_unique_npc', args: raw };
+    }
     case 'add_chat_as_npc': {
       const npc_name = str(raw.npc_name, 'npc_name');
       if (typeof npc_name !== 'string') return { ok: false, error: npc_name.error };
@@ -347,6 +512,50 @@ async function insertChatMessage(
     metadata,
   });
   return error ? new Error(error.message) : null;
+}
+
+async function persistNewNpcWithOptionalToken(
+  ctx: ToolExecutorContext,
+  built: Character,
+  placeToken: boolean,
+  rng: () => number,
+): Promise<
+  { ok: true; saved: Character; token_id: string | null } | { ok: false; error: string }
+> {
+  const row = {
+    id: built.id,
+    session_id: ctx.sessionId,
+    user_id: null,
+    type: 'npc' as const,
+    ...serializeCharacterForDb(built),
+  };
+  const { data, error } = await ctx.supabase.from('characters').insert(row).select('*').single();
+  if (error) return { ok: false, error: error.message };
+  const saved = characterRowToCharacter(data as Record<string, unknown>);
+  ctx.charactersById.set(saved.id, saved);
+
+  let token_id: string | null = null;
+  if (placeToken) {
+    const x = 15 + Math.floor(rng() * 70);
+    const y = 15 + Math.floor(rng() * 70);
+    const { data: tok, error: tokErr } = await ctx.supabase
+      .from('tokens')
+      .insert({
+        session_id: ctx.sessionId,
+        character_id: saved.id,
+        name: saved.name,
+        image_url: saved.imageUrl ?? '',
+        x,
+        y,
+        size: 50,
+        controlled_by: 'gm',
+      })
+      .select('id')
+      .single();
+    if (tokErr) return { ok: false, error: tokErr.message };
+    token_id = typeof tok?.id === 'string' ? tok.id : null;
+  }
+  return { ok: true, saved, token_id };
 }
 
 export async function executeGmTool(
@@ -395,8 +604,8 @@ export async function executeGmTool(
       if (!c) return { ok: false, name, error: `Character not in session: ${id}` };
       const rawItem = args.item as Record<string, unknown>;
       const itemId = typeof rawItem.id === 'string' && rawItem.id ? rawItem.id : crypto.randomUUID();
-      const item = normalizeIncomingItem(rawItem, itemId);
-      if (!item) return { ok: false, name, error: 'Invalid item.type' };
+      const item = normalizeOneItem({ ...rawItem, id: itemId });
+      if (!item) return { ok: false, name, error: 'Invalid item data' };
       const updated = applyGmAddItem(c, item);
       ctx.charactersById.set(id, updated);
       const { error } = await saveCharacterToSupabase(ctx.supabase, updated);
@@ -674,6 +883,171 @@ export async function executeGmTool(
         .eq('id', ctx.sessionId);
       if (error) return { ok: false, name, error: error.message };
       return { ok: true, name, result: { updated: true } };
+    }
+    case 'spawn_npc':
+    case 'spawn_random_npc': {
+      const rng = createCryptoRng();
+      const role: RoleType =
+        typeof args.role === 'string' && ALL_ROLES.includes(args.role as RoleType)
+          ? (args.role as RoleType)
+          : randomRole(rng);
+      const threatRaw = (typeof args.threat === 'string' ? args.threat : 'average').toLowerCase() as FastNpcThreat;
+      const baseName =
+        typeof args.name === 'string' && args.name.trim() !== ''
+          ? args.name.trim()
+          : `NPC ${role}-${Math.floor(rng() * 900 + 100)}`;
+      const placeToken = args.place_token !== false;
+      const doAnnounce = args.announce !== false;
+
+      const statOverrides =
+        args.stat_overrides && isRecord(args.stat_overrides)
+          ? (args.stat_overrides as Partial<Record<keyof Stats, number>>)
+          : undefined;
+
+      const { character: built, gearSummary } = buildFastSystemNpc({
+        sessionId: ctx.sessionId,
+        name: baseName,
+        role,
+        threat: threatRaw,
+        rng,
+        statOverrides,
+      });
+
+      const persisted = await persistNewNpcWithOptionalToken(ctx, built, placeToken, rng);
+      if (!persisted.ok) return { ok: false, name, error: persisted.error };
+      const { saved, token_id } = persisted;
+
+      if (doAnnounce) {
+        const line = formatNpcSpawnAnnouncement(saved, threatRaw, gearSummary);
+        const errAnn = await insertChatMessage(ctx.supabase, ctx.sessionId, 'Game Master', line, 'system', {
+          kind: 'npc_spawn',
+          character_id: saved.id,
+          threat: threatRaw,
+        });
+        if (errAnn) return { ok: false, name, error: errAnn.message };
+      }
+
+      return {
+        ok: true,
+        name: validated.name,
+        result: {
+          character_id: saved.id,
+          name: saved.name,
+          role: saved.role,
+          threat: threatRaw,
+          gear_summary: gearSummary,
+          token_id,
+        },
+      };
+    }
+    case 'spawn_unique_npc': {
+      const rng = createCryptoRng();
+      const role = args.role as RoleType;
+      const displayName = String(args.name).trim();
+      const placeToken = args.place_token !== false;
+      const doAnnounce = args.announce !== false;
+
+      const statsPartial =
+        args.stats && isRecord(args.stats)
+          ? (Object.fromEntries(
+              Object.entries(args.stats).filter(
+                ([k, v]) => STAT_KEYS_FOR_GM.has(k) && typeof v === 'number' && Number.isFinite(v),
+              ),
+            ) as Partial<Record<keyof Stats, number>>)
+          : {};
+
+      const skillsIn: UniqueGmSkillInput[] = [];
+      if (Array.isArray(args.skills)) {
+        for (const s of args.skills) {
+          if (!isRecord(s)) continue;
+          const linked = s.linked_stat;
+          skillsIn.push({
+            name: String(s.name),
+            value: Number(s.value),
+            linkedStat:
+              typeof linked === 'string' && STAT_KEYS_FOR_GM.has(linked) ? (linked as keyof Stats) : undefined,
+            category: typeof s.category === 'string' ? s.category : undefined,
+            isChipped: s.is_chipped === true,
+            isSpecialAbility: s.is_special_ability === true,
+          });
+        }
+      }
+
+      const itemBlobs: Record<string, unknown>[] = Array.isArray(args.items)
+        ? args.items.filter(isRecord)
+        : [];
+
+      let combatMods: Character['combatModifiers'] | undefined;
+      if (isRecord(args.combat_modifiers)) {
+        const cm = args.combat_modifiers;
+        const ini = typeof cm.initiative === 'number' && Number.isFinite(cm.initiative) ? cm.initiative : 0;
+        const stunRaw = cm.stun_save ?? cm.stunSave;
+        const stun =
+          typeof stunRaw === 'number' && Number.isFinite(stunRaw) ? stunRaw : 0;
+        combatMods = { initiative: ini, stunSave: stun };
+      }
+
+      const sa = args.special_ability as Record<string, unknown>;
+      const built = buildUniqueGmNpc({
+        sessionId: ctx.sessionId,
+        name: displayName,
+        role,
+        stats: statsPartial,
+        specialAbility: {
+          name: String(sa.name),
+          value: Number(sa.value),
+        },
+        skills: skillsIn,
+        items: itemBlobs,
+        age:
+          typeof args.age === 'number' && Number.isFinite(args.age)
+            ? Math.max(1, Math.floor(args.age))
+            : 30,
+        reputation:
+          typeof args.reputation === 'number' && Number.isFinite(args.reputation)
+            ? Math.floor(args.reputation)
+            : 0,
+        improvementPoints:
+          typeof args.improvement_points === 'number' && Number.isFinite(args.improvement_points)
+            ? Math.floor(args.improvement_points)
+            : 0,
+        eurobucks:
+          typeof args.eurobucks === 'number' && Number.isFinite(args.eurobucks)
+            ? Math.max(0, Math.floor(args.eurobucks))
+            : 0,
+        damage: typeof args.damage === 'number' && Number.isFinite(args.damage) ? Number(args.damage) : 0,
+        imageUrl: typeof args.image_url === 'string' ? args.image_url : '',
+        combatModifiers: combatMods,
+      });
+
+      const persisted = await persistNewNpcWithOptionalToken(ctx, built, placeToken, rng);
+      if (!persisted.ok) return { ok: false, name, error: persisted.error };
+      const { saved, token_id } = persisted;
+
+      if (doAnnounce) {
+        const customLine =
+          typeof args.announcement_text === 'string' && args.announcement_text.trim() !== ''
+            ? args.announcement_text.trim()
+            : formatUniqueNpcAnnouncement(saved);
+        const errAnn = await insertChatMessage(ctx.supabase, ctx.sessionId, 'Game Master', customLine, 'system', {
+          kind: 'npc_spawn_unique',
+          character_id: saved.id,
+        });
+        if (errAnn) return { ok: false, name, error: errAnn.message };
+      }
+
+      return {
+        ok: true,
+        name: validated.name,
+        result: {
+          character_id: saved.id,
+          name: saved.name,
+          role: saved.role,
+          token_id,
+          item_count: saved.items.length,
+          skill_count: saved.skills.length,
+        },
+      };
     }
     case 'add_chat_as_npc': {
       const npcName = String(args.npc_name);

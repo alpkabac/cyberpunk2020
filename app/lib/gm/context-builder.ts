@@ -35,7 +35,7 @@ Use \`roll_dice\` to roll server-side for NPCs, random encounters, hit location,
 
 **Conditions:** Use \`set_condition\` to apply or remove status effects. "stunned" toggles only the isStunned flag (not stored in conditions[]). Other conditions are persisted in the character's conditions array (with optional \`duration_rounds\`) and visible to all players. Specify \`duration_rounds\` when the CP2020 rules define one (Dazzle grenade = blinded 12 rounds, Sonic grenade = deafened 12 rounds, Incendiary = on_fire 9 rounds; 1 CP2020 "turn" = 3 rounds). Omit duration for indefinite conditions. CP2020-relevant conditions: unconscious, asleep (also sets isStunned), blinded, on_fire, grappled, prone, deafened, poisoned, drugged, cyberpsychosis.
 
-**NPC dialogue:** Use \`add_chat_as_npc\` to post in-character dialogue from a named NPC—distinct from your narration voice. Use this for important NPC speech that players should see attributed to that NPC.
+**NPCs:** Use \`spawn_random_npc\` (or equivalent \`spawn_npc\`) for **generic** CP2020 **Fast Character System** mooks: 2D6 stats, 40-pt career, book armor/weapon table; optional \`stat_overrides\` (2–10), \`threat\`, \`announce\`, \`place_token\`. For **named or boss NPCs** where you must set the sheet yourself (custom stats, special ability label, arbitrary skills including homebrew names, cyberware/weapons with specific stats), use \`spawn_unique_npc\` with \`name\`, \`role\`, \`special_ability\`, optional \`stats\`, \`skills[]\`, \`items[]\`, and optional \`announcement_text\`. Use \`add_chat_as_npc\` for dialogue-only when no sheet is needed.
 
 **Session memory:** Use \`update_summary\` to persist important story events to the session summary. Do this after major plot beats, completed objectives, or significant revelations. The summary survives across long sessions when old chat messages are trimmed.
 
@@ -46,6 +46,7 @@ export interface CompactCharacterPayload {
   id: string;
   name: string;
   type: Character['type'];
+  isNpc: boolean;
   role: Character['role'];
   damage: number;
   isStunned: boolean;
@@ -89,6 +90,7 @@ export function serializeCharacterForLlm(c: Character): CompactCharacterPayload 
     id: c.id,
     name: c.name,
     type: c.type,
+    isNpc: c.isNpc,
     role: c.role,
     damage: c.damage,
     isStunned: c.isStunned,
