@@ -56,6 +56,49 @@ describe('buildGmDiceRollMessage', () => {
     );
     expect(m!.playerMessage).toContain('Stun save');
   });
+
+  it('formats attack with DV as HIT or MISS and target', () => {
+    const hit = buildGmDiceRollMessage(
+      {
+        kind: 'attack',
+        characterId: 'c1',
+        weaponId: 'w1',
+        reliability: 'ST',
+        isMelee: false,
+        isAutoWeapon: false,
+        difficultyValue: 20,
+        rangeBracketLabel: 'Medium',
+        targetCharacterId: 'npc1',
+        targetName: 'Ganger',
+        sessionId: 's',
+        speakerName: 'Jane',
+      },
+      '1d10+12',
+      { total: 22, rolls: [10] },
+    );
+    expect(hit).not.toBeNull();
+    expect(hit!.playerMessage).toContain('**HIT**');
+    expect(hit!.playerMessage).toContain('vs DV **20**');
+    expect(hit!.playerMessage).toContain('Ganger');
+
+    const miss = buildGmDiceRollMessage(
+      {
+        kind: 'attack',
+        characterId: 'c1',
+        weaponId: 'w1',
+        reliability: 'ST',
+        isMelee: false,
+        isAutoWeapon: false,
+        difficultyValue: 25,
+        sessionId: 's',
+        speakerName: 'Jane',
+      },
+      '1d10+8',
+      { total: 15, rolls: [7] },
+    );
+    expect(miss).not.toBeNull();
+    expect(miss!.playerMessage).toContain('**MISS**');
+  });
 });
 
 describe('mergeVoiceAndQueuedRollsChronologically', () => {

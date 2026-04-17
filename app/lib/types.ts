@@ -508,6 +508,16 @@ export type DiceRollIntent =
       isMelee: boolean;
       /** True when weapon is auto-capable (reserved for future Foundry-style options). */
       isAutoWeapon: boolean;
+      /**
+       * When set (FNFF ranged bracket DC or melee default), total ≥ this means a hit vs that DV.
+       * Omit for legacy rolls / referee-only resolution.
+       */
+      difficultyValue?: number;
+      /** e.g. "Long" or "Melee (DV 10 default)" — shown in dice UI + GM message. */
+      rangeBracketLabel?: string;
+      /** Declared target of the attack (for messaging + Apply Damage routing). */
+      targetCharacterId?: string;
+      targetName?: string;
     } & DiceRollGmContext)
   /**
    * Medic roll on the medic's sheet: exploding 1d10 + TECH + medical skill ≥ `targetDamage`.

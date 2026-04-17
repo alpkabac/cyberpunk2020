@@ -287,6 +287,11 @@ export function getRangeBracket(distance: number, weaponRange: number): RangeBra
   return 'Extreme';
 }
 
+/** FNFF: attack succeeds when (1d10 + modifiers) total ≥ difficulty value (DV). */
+export function fnffAttackTotalMeetsDv(rollTotal: number, dv: number): boolean {
+  return rollTotal >= dv;
+}
+
 // ============================================================================
 // Ranged Combat Modifiers
 // ============================================================================

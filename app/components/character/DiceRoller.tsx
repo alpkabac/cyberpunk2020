@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { useGameStore } from '@/lib/store/game-store';
 import { rollDice } from '@/lib/game-logic/dice';
 import { resolveAttackFumbleOutcome } from '@/lib/game-logic/fumbles';
+import { fnffAttackTotalMeetsDv } from '@/lib/game-logic/lookups';
 import {
   buildGmDiceRollMessage,
   buildStunOverrideGmPayload,
@@ -456,6 +457,50 @@ export function DiceRoller() {
                   </p>
                 </div>
               )}
+              {lastRoll.intentSnapshot?.kind === 'attack' &&
+                typeof lastRoll.intentSnapshot.difficultyValue === 'number' && (
+                  <div
+                    className={`mt-3 text-left border-2 p-2 text-xs ${
+                      fnffAttackTotalMeetsDv(
+                        lastRoll.result.total,
+                        lastRoll.intentSnapshot.difficultyValue,
+                      )
+                        ? 'border-green-800 bg-green-50'
+                        : 'border-amber-900 bg-amber-50'
+                    }`}
+                  >
+                    <div className="font-bold uppercase text-gray-900">vs DV (FNFF)</div>
+                    <p className="text-gray-800">
+                      Total <strong>{lastRoll.result.total}</strong> vs DV{' '}
+                      <strong>{lastRoll.intentSnapshot.difficultyValue}</strong>
+                      {lastRoll.intentSnapshot.rangeBracketLabel && (
+                        <>
+                          {' '}
+                          · {lastRoll.intentSnapshot.rangeBracketLabel}
+                        </>
+                      )}
+                      {lastRoll.intentSnapshot.targetName && (
+                        <>
+                          {' '}
+                          · Target: <strong>{lastRoll.intentSnapshot.targetName}</strong>
+                        </>
+                      )}
+                    </p>
+                    <p className="font-semibold text-gray-900 mt-1">
+                      {fnffAttackTotalMeetsDv(
+                        lastRoll.result.total,
+                        lastRoll.intentSnapshot.difficultyValue,
+                      )
+                        ? 'HIT — you may resolve damage (location + armor) against the target.'
+                        : 'MISS — no damage from this roll unless the referee rules otherwise.'}
+                    </p>
+                    {fumbleLines && fumbleLines.length > 0 && (
+                      <p className="text-[10px] text-red-950 mt-1.5 border-t border-red-900/30 pt-1">
+                        Natural 1: resolve weapon fumble / jam even if the total reached the DV.
+                      </p>
+                    )}
+                  </div>
+                )}
               {lastRoll.result.hadExplodingD10 &&
                 !lastRoll.formula.toLowerCase().startsWith('flat:') && (
                   <div className="mt-3 text-left space-y-1">

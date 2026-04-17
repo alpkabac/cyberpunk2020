@@ -26,6 +26,8 @@ export interface DamageApplicatorPreset {
   /** Player took aimed shot and declared this zone (optional if they pick in-modal). */
   aimedLocation?: Zone;
   hitLocationMode?: HitLocationMode;
+  /** When set, damage is applied to this character/NPC instead of the open sheet’s character. */
+  targetCharacterId?: string;
 }
 
 function initialDamageAmount(preset: DamageApplicatorPreset | null | undefined): number {

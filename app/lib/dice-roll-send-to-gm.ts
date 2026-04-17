@@ -1,4 +1,5 @@
 import type { Character, DiceRollIntent, PendingRollForVoice, PendingVoiceGmPayload, RollResult } from '@/lib/types';
+import { fnffAttackTotalMeetsDv } from '@/lib/game-logic/lookups';
 
 /** Payload for POST `/api/gm` — stun override referee request (no roll). */
 export function buildStunOverrideGmPayload(params: {
@@ -104,6 +105,23 @@ export function buildGmDiceRollMessage(
   const speaker = intent.speakerName?.trim() || 'Player';
   const label = describeRollForGm(intent, formula);
   if (!label) return null;
+
+  if (intent.kind === 'attack' && typeof intent.difficultyValue === 'number') {
+    const hit = fnffAttackTotalMeetsDv(result.total, intent.difficultyValue);
+    const tgt = intent.targetName?.trim();
+    const tgtPart = tgt ? ` vs **${tgt}**` : '';
+    const dv = intent.difficultyValue;
+    const bracket =
+      intent.rangeBracketLabel?.trim() && intent.rangeBracketLabel.trim().length > 0
+        ? ` · ${intent.rangeBracketLabel.trim()}`
+        : '';
+    return {
+      sessionId,
+      speakerName: speaker,
+      playerMessage: `${speaker} rolled **${result.total}** for ${label}${tgtPart}${bracket} — **${hit ? 'HIT' : 'MISS'}** vs DV **${dv}** (${formula})`,
+    };
+  }
+
   return {
     sessionId,
     speakerName: speaker,

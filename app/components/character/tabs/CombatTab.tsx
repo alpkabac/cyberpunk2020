@@ -9,6 +9,7 @@ import { maxLayeredSP, getStabilizationMedicBonus } from '@/lib/game-logic/formu
 import {
   rangeBrackets,
   getRangeDistance,
+  getRangeBracket,
   reliabilityLabels,
   concealabilityLabels,
   hitLocationRollRanges,
@@ -48,6 +49,10 @@ export function CombatTab({ character, editable }: CombatTabProps) {
   const [stabilizationPatientId, setStabilizationPatientId] = useState(character.id);
   /** When aimed shot is checked, optional declared zone for Apply Damage preset. */
   const [aimedZoneByWeapon, setAimedZoneByWeapon] = useState<Record<string, string>>({});
+  /** Declared target for attack rolls + Apply Damage victim (session PCs/NPCs). */
+  const [combatTargetId, setCombatTargetId] = useState('');
+  /** Optional meters to target — updates range bracket for the expanded ranged weapon. */
+  const [combatDistanceMInput, setCombatDistanceMInput] = useState('');
 
   const openDiceRoller = useGameStore((state) => state.openDiceRoller);
   const sessionId = useGameStore((state) => state.session.id);
@@ -96,6 +101,16 @@ export function CombatTab({ character, editable }: CombatTabProps) {
 
   const stabilizationPatient =
     charactersById[stabilizationPatientId] ?? npcsById[stabilizationPatientId];
+
+  const resolveCombatTargetName = (id: string): string | undefined => {
+    const t = id.trim();
+    if (!t) return undefined;
+    const c = charactersById[t] ?? npcsById[t];
+    return c?.name;
+  };
+
+  const damagePresetVictim = (): { targetCharacterId?: string } =>
+    combatTargetId.trim() ? { targetCharacterId: combatTargetId.trim() } : {};
 
   const setCombatModifier = (key: 'initiative' | 'stunSave' | 'deathSave', value: number) => {
     const next = {
@@ -177,6 +192,18 @@ export function CombatTab({ character, editable }: CombatTabProps) {
     setRangedModToggles((prev) => ({ ...prev, [weaponId]: {} }));
   };
 
+  const attackIntentExtras = (bracket: RangeBracket) => {
+    const dv = rangeBrackets[bracket].dc;
+    const label = rangeBrackets[bracket].label;
+    const tid = combatTargetId.trim();
+    const name = tid ? resolveCombatTargetName(tid) : undefined;
+    return {
+      difficultyValue: dv,
+      rangeBracketLabel: label,
+      ...(tid && name ? { targetCharacterId: tid, targetName: name } : {}),
+    };
+  };
+
   // Roll attack: REF+skill+WA + ranged checklist (ranged only)
   const handleAttackRoll = (weapon: Weapon, bracket: RangeBracket) => {
     const base = getAttackSkillTotal(weapon);
@@ -190,6 +217,7 @@ export function CombatTab({ character, editable }: CombatTabProps) {
       reliability: weapon.reliability,
       isMelee: weapon.weaponType === 'Melee',
       isAutoWeapon,
+      ...attackIntentExtras(bracket),
       ...sheetRollContext(character, sessionId, `${weapon.name} attack`),
     });
   };
@@ -201,13 +229,26 @@ export function CombatTab({ character, editable }: CombatTabProps) {
       const base = getAttackSkillTotal(weapon);
       const modSum = weapon.weaponType === 'Melee' ? 0 : getRangedModSum(weapon.id);
       const isAutoWeapon = weapon.isAutoCapable || weapon.attackType === 'Auto';
+      const isMelee = weapon.weaponType === 'Melee';
+      const bracket: RangeBracket = isMelee
+        ? 'PointBlank'
+        : (selectedRangeByWeapon[weapon.id] ?? 'Close');
+      const dv = rangeBrackets[bracket].dc;
+      const rangeBracketLabel = isMelee
+        ? 'Melee (default DV 10)'
+        : rangeBrackets[bracket].label;
+      const tid = combatTargetId.trim();
+      const name = tid ? resolveCombatTargetName(tid) : undefined;
       openDiceRoller(`1d10+${base + modSum}`, {
         kind: 'attack',
         characterId: character.id,
         weaponId: weapon.id,
         reliability: weapon.reliability,
-        isMelee: weapon.weaponType === 'Melee',
+        isMelee,
         isAutoWeapon,
+        difficultyValue: dv,
+        rangeBracketLabel,
+        ...(tid && name ? { targetCharacterId: tid, targetName: name } : {}),
         ...sheetRollContext(character, sessionId, `${weapon.name} attack`),
       });
     }
@@ -522,7 +563,9 @@ export function CombatTab({ character, editable }: CombatTabProps) {
             <button
               type="button"
               onClick={() => {
-                setDamageApplicatorPreset(null);
+                setDamageApplicatorPreset(
+                  combatTargetId.trim() ? { targetCharacterId: combatTargetId.trim() } : null,
+                );
                 setShowDamageApplicator(true);
               }}
               className="w-full mt-2 bg-red-500 hover:bg-red-600 text-white border-2 border-black p-3 font-bold uppercase"
@@ -650,6 +693,64 @@ export function CombatTab({ character, editable }: CombatTabProps) {
           <h2 className="text-xl font-bold uppercase mb-3 border-b-2 border-black pb-1">
             Weapons
           </h2>
+
+          {weapons.length > 0 && (
+            <div className="border-2 border-slate-700 bg-slate-50/90 p-3 mb-3 text-xs space-y-2">
+              <div className="font-bold uppercase text-slate-900 tracking-wide">Targeting</div>
+              <p className="text-[10px] text-gray-800 leading-relaxed">
+                Choose who you are engaging. For ranged weapons, enter <strong>distance (m)</strong> while a weapon is
+                expanded to sync the range bracket (DV). Semi/Burst/Full and bracket buttons roll{' '}
+                <strong>1d10 + attack</strong> and show <strong>HIT</strong> or <strong>MISS</strong> vs that DV. Melee
+                “Attack” uses <strong>DV 10</strong> by default (referee may adjust). Use{' '}
+                <strong>Apply Damage</strong> after a hit — it applies to the selected target when one is chosen;
+                otherwise it uses this character&apos;s sheet.
+              </p>
+              <div className="flex flex-wrap gap-3 items-end">
+                <label className="flex flex-col gap-0.5 min-w-[12rem]">
+                  <span className="font-semibold text-[10px] uppercase tracking-wide text-gray-700">Target</span>
+                  <select
+                    value={combatTargetId}
+                    onChange={(e) => setCombatTargetId(e.target.value)}
+                    className="border-2 border-black px-2 py-1.5 font-mono bg-white max-w-[18rem] text-xs"
+                  >
+                    <option value="">— Select target —</option>
+                    {stabilizationPatientOptions.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                        {p.id === character.id ? ' (this sheet)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-0.5">
+                  <span className="font-semibold text-[10px] uppercase tracking-wide text-gray-700">
+                    Distance (m)
+                  </span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    value={combatDistanceMInput}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      setCombatDistanceMInput(raw);
+                      const n = parseFloat(raw);
+                      if (!Number.isFinite(n) || n < 0 || !expandedWeaponId) return;
+                      const w = weapons.find((x) => x.id === expandedWeaponId);
+                      if (!w || w.weaponType === 'Melee' || !(w.range > 0)) return;
+                      setSelectedRangeByWeapon((prev) => ({
+                        ...prev,
+                        [w.id]: getRangeBracket(n, w.range),
+                      }));
+                    }}
+                    placeholder="Expand ranged weapon"
+                    className="w-28 border-2 border-black px-2 py-1.5 font-mono bg-white text-xs"
+                    title="Sets range bracket from CP2020 distance bands for the expanded weapon"
+                  />
+                </label>
+              </div>
+            </div>
+          )}
 
           {weapons.length === 0 ? (
             <div className="text-center text-gray-500 py-4">No weapons in inventory</div>
@@ -978,6 +1079,7 @@ export function CombatTab({ character, editable }: CombatTabProps) {
                               const aimed = !!rangedModToggles[weapon.id]?.[AIMED_SHOT_LABEL];
                               const z = aimedZoneByWeapon[weapon.id] as Zone | undefined;
                               setDamageApplicatorPreset({
+                                ...damagePresetVictim(),
                                 weaponDamageFormula: weapon.damage || '',
                                 pointBlank: false,
                                 ...(aimed
@@ -1004,6 +1106,7 @@ export function CombatTab({ character, editable }: CombatTabProps) {
                                   ? `${weapon.damage}${sdb >= 0 ? '+' : ''}${sdb}`
                                   : weapon.damage;
                               setDamageApplicatorPreset({
+                                ...damagePresetVictim(),
                                 weaponDamageFormula: dmgWithSdb,
                                 hitLocationMode: 'random',
                               });
@@ -1084,7 +1187,7 @@ export function CombatTab({ character, editable }: CombatTabProps) {
       {showDamageApplicator && (
         <DamageApplicator
           key={`${character.id}-${damageApplicatorPreset ? JSON.stringify(damageApplicatorPreset) : 'default'}`}
-          characterId={character.id}
+          characterId={damageApplicatorPreset?.targetCharacterId ?? character.id}
           preset={damageApplicatorPreset}
           onClose={() => {
             setShowDamageApplicator(false);

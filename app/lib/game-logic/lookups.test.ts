@@ -16,6 +16,7 @@ import {
   isKnowLanguageSkill,
   masterSkillList,
   martialArtsStyleSkillDefinitions,
+  fnffAttackTotalMeetsDv,
 } from './lookups';
 
 // ============================================================================
@@ -121,6 +122,14 @@ describe('Know Language skill naming', () => {
 
   it('throws on empty language', () => {
     expect(() => formatKnowLanguageSkill('   ')).toThrow();
+  });
+});
+
+describe('FNFF attack vs DV', () => {
+  it('fnffAttackTotalMeetsDv is total >= dv', () => {
+    expect(fnffAttackTotalMeetsDv(20, 20)).toBe(true);
+    expect(fnffAttackTotalMeetsDv(21, 20)).toBe(true);
+    expect(fnffAttackTotalMeetsDv(19, 20)).toBe(false);
   });
 });
 
