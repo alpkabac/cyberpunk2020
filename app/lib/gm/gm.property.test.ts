@@ -127,6 +127,8 @@ describe('Property 7: Conversation continuity', () => {
     });
     expect(out).toContain('TACTICAL_GRID_JSON');
     expect(out).toContain('MAP_COVER_JSON');
+    expect(out).toContain('MAP_SUPPRESSIVE_ZONES_JSON');
+    expect(out).toContain('MAP_SUPPRESSIVE_PENDING_JSON');
     expect(out).toContain('MAP_TOKENS_JSON');
     expect(out).toContain('COMBAT_TRACKER_JSON');
     expect(out).toContain('"inCombat":false');

@@ -130,22 +130,7 @@ export const fireModes: Record<FireMode, string> = {
   Suppressive: 'Suppressive Fire',
 };
 
-/**
- * Ammo consumed per fire mode
- * Full auto uses the ROF value, burst always uses 3
- */
-export function getAmmoConsumed(mode: FireMode, rof: number): number {
-  switch (mode) {
-    case 'SemiAuto':
-      return 1;
-    case 'ThreeRoundBurst':
-      return 3;
-    case 'FullAuto':
-      return rof;
-    case 'Suppressive':
-      return rof;
-  }
-}
+export { getAmmoConsumed } from './fire-modes';
 
 // ============================================================================
 // Martial Arts

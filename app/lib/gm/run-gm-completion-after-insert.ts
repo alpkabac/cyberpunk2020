@@ -86,6 +86,8 @@ export async function runGmCompletionAfterPlayerInsert(opts: {
     mapTokens: snapshot.tokens,
     sessionSettings: snapshot.session.settings,
     mapCoverRegions: snapshot.session.mapState.coverRegions,
+    mapSuppressiveZones: snapshot.session.mapState.suppressiveZones,
+    mapSuppressivePending: snapshot.session.mapState.pendingSuppressivePlacements,
     chatHistory,
     playerMessage: opts.playerMessage,
     messageSpeaker: opts.speakerName,

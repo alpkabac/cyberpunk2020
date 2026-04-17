@@ -4,6 +4,7 @@ import { useState, useMemo, useCallback } from 'react';
 import { Character, Zone, Weapon, Armor, FireMode } from '@/lib/types';
 import { useGameStore } from '@/lib/store/game-store';
 import { DamageApplicator, type DamageApplicatorPreset } from '../DamageApplicator';
+import { FireModeTargetModal } from '../FireModeTargetModal';
 import { ItemBrowser } from '../ItemBrowser';
 import { maxLayeredSP, getStabilizationMedicBonus } from '@/lib/game-logic/formulas';
 import {
@@ -26,6 +27,8 @@ import {
   cellDistance,
 } from '@/lib/map/grid';
 import { summarizeMapFireCover } from '@/lib/map/fire-cover';
+import { burstAllowedAtBracket, burstAmmo } from '@/lib/game-logic/fire-modes';
+import { computeAutofireModStrip, runAutomatedWeaponFire } from '@/lib/game-logic/automated-weapon-fire';
 
 /** Must match `rangedCombatModifiers` key for aimed shots (attack −4; zone chosen if hit). */
 const AIMED_SHOT_LABEL = 'Aimed shot (specific area)' as const;
@@ -79,6 +82,12 @@ export function CombatTab({ character, editable }: CombatTabProps) {
   const [aimedZoneByWeapon, setAimedZoneByWeapon] = useState<Record<string, string>>({});
   /** Declared target for attack rolls + Apply Damage victim (session PCs/NPCs). */
   const [combatTargetId, setCombatTargetId] = useState('');
+  /** Burst / full-auto target picker. */
+  const [fireModeModal, setFireModeModal] = useState<
+    null | { weaponId: string; mode: 'ThreeRoundBurst' | 'FullAuto' }
+  >(null);
+  /** Per-weapon committed round count for suppressive fire (before drawing the map zone). */
+  const [suppressRoundsByWeapon, setSuppressRoundsByWeapon] = useState<Record<string, number>>({});
   /** Optional meters to target — updates range bracket for the expanded ranged weapon. */
   const [combatDistanceMInput, setCombatDistanceMInput] = useState('');
   /** When true, distance field is not overwritten by map token movement / auto sync. */
@@ -100,6 +109,11 @@ export function CombatTab({ character, editable }: CombatTabProps) {
   const fireWeapon = useGameStore((state) => state.fireWeapon);
   const reloadWeapon = useGameStore((state) => state.reloadWeapon);
   const sellItem = useGameStore((state) => state.sellItem);
+  const saveSessionMapPendingSuppressive = useGameStore((state) => state.saveSessionMapPendingSuppressive);
+  const pendingSuppressivePlacements = useGameStore((state) => state.map.pendingSuppressivePlacements);
+  const viewerUserId = useGameStore((state) => state.session.viewerUserId);
+  const sessionCreatedBy = useGameStore((state) => state.session.createdBy);
+  const isSessionHost = Boolean(viewerUserId && sessionCreatedBy === viewerUserId);
 
   const toggleItemEquipped = (itemId: string) => {
     const updatedItems = character.items.map((i) =>
@@ -293,6 +307,73 @@ export function CombatTab({ character, editable }: CombatTabProps) {
     [effectiveDistanceMeters, selectedRangeByWeapon],
   );
 
+  const metersToTarget = useCallback(
+    (targetCharacterId: string): number | null => {
+      const shooterTok = mapTokens.find((t) => t.characterId === character.id);
+      const targetTok = mapTokens.find((t) => t.characterId === targetCharacterId);
+      const mps = mapGridSettings.mapMetersPerSquare;
+      if (shooterTok && targetTok && Number.isFinite(mps) && mps > 0) {
+        const { cols, rows } = gridColsRows;
+        const cells = cellDistance(
+          shooterTok.x,
+          shooterTok.y,
+          targetTok.x,
+          targetTok.y,
+          cols,
+          rows,
+        );
+        return cells * mps;
+      }
+      if (distanceManualOverride) {
+        const n = parseFloat(combatDistanceMInput);
+        if (Number.isFinite(n) && n >= 0) return n;
+      }
+      if (targetCharacterId === combatTargetId.trim() && mapAutoDistanceM != null) {
+        return mapAutoDistanceM;
+      }
+      return null;
+    },
+    [
+      mapTokens,
+      character.id,
+      mapGridSettings.mapMetersPerSquare,
+      gridColsRows,
+      distanceManualOverride,
+      combatDistanceMInput,
+      combatTargetId,
+      mapAutoDistanceM,
+    ],
+  );
+
+  const bracketForWeaponTarget = useCallback(
+    (weapon: Weapon, targetCharacterId: string): RangeBracket => {
+      if (weapon.weaponType === 'Melee') return 'PointBlank';
+      const m = metersToTarget(targetCharacterId);
+      if (m != null && weapon.range > 0) {
+        return getRangeBracket(m, weapon.range);
+      }
+      return getResolvedRangeBracket(weapon);
+    },
+    [metersToTarget, getResolvedRangeBracket],
+  );
+
+  const coverPresetForMapTarget = useCallback(
+    (
+      targetCharacterId: string,
+    ): { stackedSp: number; regionIds: string[] } | undefined => {
+      const shooterTok = mapTokens.find((t) => t.characterId === character.id);
+      const targetTok = mapTokens.find((t) => t.characterId === targetCharacterId);
+      if (!shooterTok || !targetTok || mapCoverRegions.length === 0) return undefined;
+      const { cols, rows } = gridColsRows;
+      const sc = pctToCell(shooterTok.x, shooterTok.y, cols, rows);
+      const tc = pctToCell(targetTok.x, targetTok.y, cols, rows);
+      const hint = summarizeMapFireCover(sc.c, sc.r, tc.c, tc.r, mapCoverRegions);
+      if (hint.coverRegionIds.length === 0) return undefined;
+      return { stackedSp: hint.stackedCoverSp, regionIds: hint.coverRegionIds };
+    },
+    [mapTokens, character.id, mapCoverRegions, gridColsRows],
+  );
+
   // Armor encumbrance: direct sum (not halved)
   const totalEncumbrance = armorItems
     .filter((a) => a.equipped)
@@ -341,6 +422,39 @@ export function CombatTab({ character, editable }: CombatTabProps) {
     if (coverLabel) sum += rangedCombatModifiers[coverLabel];
     return sum;
   };
+
+  const getRangedModSumForTarget = useCallback(
+    (weaponId: string, targetCharacterId: string): number => {
+      const toggles = rangedModToggles[weaponId];
+      let sum = 0;
+      for (const [label, value] of Object.entries(rangedCombatModifiers)) {
+        if ((COVER_TO_HIT_KEYS as readonly string[]).includes(label)) continue;
+        if (toggles?.[label]) sum += value;
+      }
+      let coverLabel: CoverToHitKey | null = null;
+      const shooterTok = mapTokens.find((t) => t.characterId === character.id);
+      const targetTok = mapTokens.find((t) => t.characterId === targetCharacterId);
+      if (!coverManualOverride && shooterTok && targetTok && mapCoverRegions.length > 0) {
+        const { cols, rows } = gridColsRows;
+        const sc = pctToCell(shooterTok.x, shooterTok.y, cols, rows);
+        const tc = pctToCell(targetTok.x, targetTok.y, cols, rows);
+        const hint = summarizeMapFireCover(sc.c, sc.r, tc.c, tc.r, mapCoverRegions);
+        coverLabel = hint.suggestedToHitLabel;
+      } else if (toggles) {
+        coverLabel = COVER_TO_HIT_KEYS.find((k) => toggles[k]) ?? null;
+      }
+      if (coverLabel) sum += rangedCombatModifiers[coverLabel];
+      return sum;
+    },
+    [
+      rangedModToggles,
+      mapTokens,
+      character.id,
+      mapCoverRegions,
+      coverManualOverride,
+      gridColsRows,
+    ],
+  );
 
   const toggleRangedMod = (weaponId: string, label: string) => {
     setRangedModToggles((prev) => ({
@@ -441,8 +555,94 @@ export function CombatTab({ character, editable }: CombatTabProps) {
     });
   };
 
-  // Fire weapon (consume ammo)
+  const automatedFireBlockedByGmRequest = (weapon: Weapon) =>
+    !!(
+      pendingGmAttackRequest &&
+      pendingGmAttackRequest.characterId === character.id &&
+      pendingGmAttackRequest.weaponId === weapon.id
+    );
+
+  const openAutomatedFireModal = (weapon: Weapon, mode: 'ThreeRoundBurst' | 'FullAuto') => {
+    if (automatedFireBlockedByGmRequest(weapon)) return;
+    setFireModeModal({ weaponId: weapon.id, mode });
+  };
+
+  const confirmAutomatedFire = (targetIds: string[]) => {
+    if (!fireModeModal) return;
+    const w = character.items.find(
+      (i): i is Weapon => i.type === 'weapon' && i.id === fireModeModal.weaponId,
+    );
+    if (!w || w.weaponType === 'Melee') {
+      setFireModeModal(null);
+      return;
+    }
+    const mode = fireModeModal.mode;
+    if (mode === 'ThreeRoundBurst') {
+      const id = targetIds[0];
+      if (!id || !burstAllowedAtBracket(bracketForWeaponTarget(w, id))) {
+        window.alert('Burst only works at Close or Medium range to the selected target.');
+        return;
+      }
+    }
+    const ok = fireWeapon(character.id, w.id, mode);
+    if (!ok) {
+      window.alert('Not enough ammunition.');
+      return;
+    }
+    const modStrip = computeAutofireModStrip(rangedModToggles[w.id]);
+    const targets = targetIds.map((id) => ({
+      characterId: id,
+      name: resolveCombatTargetName(id) ?? id,
+      bracket: bracketForWeaponTarget(w, id),
+    }));
+    const coverByTargetId: Record<string, { stackedSp: number; regionIds: string[] } | undefined> =
+      {};
+    for (const id of targetIds) {
+      const c = coverPresetForMapTarget(id);
+      if (c) coverByTargetId[id] = c;
+    }
+    runAutomatedWeaponFire({
+      shooterName: character.name,
+      weapon: w,
+      mode,
+      attackSkillTotal: getAttackSkillTotal(w),
+      situationalModSumByTarget: (tid) => getRangedModSumForTarget(w.id, tid),
+      modStrip,
+      targets,
+      coverByTargetId,
+    });
+    setFireModeModal(null);
+  };
+
+  // Fire weapon (consume ammo) — burst/full auto open target modal first
   const handleFire = (weapon: Weapon, mode: FireMode) => {
+    if (mode === 'ThreeRoundBurst' || mode === 'FullAuto') {
+      openAutomatedFireModal(weapon, mode);
+      return;
+    }
+    if (mode === 'Suppressive') {
+      if (automatedFireBlockedByGmRequest(weapon)) return;
+      const maxR = weapon.shotsLeft;
+      if (maxR < 1) return;
+      const fallback = Math.max(1, Math.min(weapon.rof, maxR));
+      const draft = suppressRoundsByWeapon[weapon.id];
+      const parsed = draft != null ? Math.floor(draft) : fallback;
+      const rounds = Math.max(1, Math.min(Number.isFinite(parsed) ? parsed : fallback, maxR));
+      const ok = fireWeapon(character.id, weapon.id, 'Suppressive', { suppressiveRounds: rounds });
+      if (!ok) {
+        window.alert('Not enough ammunition.');
+        return;
+      }
+      saveSessionMapPendingSuppressive({
+        characterId: character.id,
+        weaponId: weapon.id,
+        roundsCommitted: rounds,
+        weaponDamage: weapon.damage?.trim() || '2d6',
+        weaponAp: weapon.ap,
+        weaponName: weapon.name?.trim() || 'Weapon',
+      });
+      return;
+    }
     const success = fireWeapon(character.id, weapon.id, mode);
     if (success) {
       const base = getAttackSkillTotal(weapon);
@@ -1272,7 +1472,10 @@ export function CombatTab({ character, editable }: CombatTabProps) {
                                       {modSum}
                                     </>
                                   )}
-                                  ). Compare to the bracket <strong>DV</strong> below.
+                                  ). Compare to the bracket <strong>DV</strong> below.{' '}
+                                  <span className="text-amber-900/90">
+                                    Burst/full auto (Fire) strip aim, optics, and smart modifiers per FNFF.
+                                  </span>
                                 </p>
                                 <div className="max-h-40 overflow-y-auto border border-black p-2 bg-white grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1 text-[10px] mt-1">
                                   {Object.keys(rangedCombatModifiers)
@@ -1400,41 +1603,120 @@ export function CombatTab({ character, editable }: CombatTabProps) {
                         })()}
 
                         {/* Fire Modes */}
-                        <div className="flex gap-2 flex-wrap">
-                          <button
-                            onClick={() => handleFire(weapon, 'SemiAuto')}
-                            disabled={!isMelee && weapon.shotsLeft < 1}
-                            className="flex-1 border-2 border-black p-2 font-bold uppercase text-sm hover:bg-gray-100 disabled:bg-gray-200 disabled:text-gray-400"
-                          >
-                            {isMelee ? 'Attack' : 'Semi-Auto (1)'}
-                          </button>
+                        {(() => {
+                          const selB: RangeBracket = !isMelee
+                            ? getResolvedRangeBracket(weapon)
+                            : 'PointBlank';
+                          const burstPreviewOk = isMelee || burstAllowedAtBracket(selB);
+                          const ba = burstAmmo(weapon.rof);
+                          const gmAtkBlock = automatedFireBlockedByGmRequest(weapon);
+                          return (
+                            <div className="flex gap-2 flex-wrap">
+                              <button
+                                type="button"
+                                onClick={() => handleFire(weapon, 'SemiAuto')}
+                                disabled={!isMelee && weapon.shotsLeft < 1}
+                                className="flex-1 border-2 border-black p-2 font-bold uppercase text-sm hover:bg-gray-100 disabled:bg-gray-200 disabled:text-gray-400"
+                              >
+                                {isMelee ? 'Attack' : 'Semi-Auto (1)'}
+                              </button>
 
-                          {canAuto && (
-                            <>
-                              <button
-                                onClick={() => handleFire(weapon, 'ThreeRoundBurst')}
-                                disabled={weapon.shotsLeft < 3}
-                                className="flex-1 border-2 border-black p-2 font-bold uppercase text-sm hover:bg-gray-100 disabled:bg-gray-200 disabled:text-gray-400"
-                              >
-                                Burst (3)
-                              </button>
-                              <button
-                                onClick={() => handleFire(weapon, 'FullAuto')}
-                                disabled={weapon.shotsLeft < weapon.rof}
-                                className="flex-1 border-2 border-black p-2 font-bold uppercase text-sm hover:bg-gray-100 disabled:bg-gray-200 disabled:text-gray-400"
-                              >
-                                Full Auto ({weapon.rof})
-                              </button>
-                              <button
-                                onClick={() => handleFire(weapon, 'Suppressive')}
-                                disabled={weapon.shotsLeft < weapon.rof}
-                                className="flex-1 border-2 border-black p-2 font-bold uppercase text-sm hover:bg-gray-100 disabled:bg-gray-200 disabled:text-gray-400"
-                              >
-                                Suppress ({weapon.rof})
-                              </button>
-                            </>
-                          )}
-                        </div>
+                              {canAuto && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleFire(weapon, 'ThreeRoundBurst')}
+                                    disabled={
+                                      weapon.shotsLeft < ba ||
+                                      ba < 1 ||
+                                      !burstPreviewOk ||
+                                      gmAtkBlock
+                                    }
+                                    title={
+                                      !burstPreviewOk
+                                        ? 'Burst only at Close or Medium range (set distance / map).'
+                                        : gmAtkBlock
+                                          ? 'Resolve the AI-GM attack request with a manual roll first.'
+                                          : undefined
+                                    }
+                                    className="flex-1 border-2 border-black p-2 font-bold uppercase text-sm hover:bg-gray-100 disabled:bg-gray-200 disabled:text-gray-400"
+                                  >
+                                    Burst ({ba})
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleFire(weapon, 'FullAuto')}
+                                    disabled={
+                                      weapon.shotsLeft < weapon.rof ||
+                                      weapon.rof < 1 ||
+                                      gmAtkBlock
+                                    }
+                                    title={
+                                      gmAtkBlock
+                                        ? 'Resolve the AI-GM attack request with a manual roll first.'
+                                        : undefined
+                                    }
+                                    className="flex-1 border-2 border-black p-2 font-bold uppercase text-sm hover:bg-gray-100 disabled:bg-gray-200 disabled:text-gray-400"
+                                  >
+                                    Full Auto ({weapon.rof})
+                                  </button>
+                                  <div className="flex flex-1 flex-wrap items-stretch gap-1 min-w-[10rem]">
+                                    <label className="flex flex-col justify-end text-[9px] font-bold uppercase leading-tight">
+                                      Rds
+                                      <input
+                                        type="number"
+                                        min={1}
+                                        max={Math.max(1, weapon.shotsLeft)}
+                                        value={
+                                          suppressRoundsByWeapon[weapon.id] ??
+                                          Math.max(1, Math.min(weapon.rof, weapon.shotsLeft))
+                                        }
+                                        onChange={(e) => {
+                                          const v = parseInt(e.target.value, 10);
+                                          setSuppressRoundsByWeapon((prev) => ({
+                                            ...prev,
+                                            [weapon.id]: Number.isFinite(v) ? v : 1,
+                                          }));
+                                        }}
+                                        disabled={weapon.shotsLeft < 1 || gmAtkBlock}
+                                        className="w-14 border-2 border-black px-1 py-1 text-sm font-mono disabled:bg-gray-200"
+                                      />
+                                    </label>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleFire(weapon, 'Suppressive')}
+                                      disabled={weapon.shotsLeft < 1 || gmAtkBlock}
+                                      title={
+                                        gmAtkBlock
+                                          ? 'Resolve the AI-GM attack request with a manual roll first.'
+                                          : 'Spend rounds, then draw the suppressive rectangle on the tactical map.'
+                                      }
+                                      className="flex-1 min-w-[6rem] border-2 border-black p-2 font-bold uppercase text-sm hover:bg-gray-100 disabled:bg-gray-200 disabled:text-gray-400"
+                                    >
+                                      Suppress
+                                    </button>
+                                  </div>
+                                  <p className="w-full text-[10px] text-gray-700 leading-snug mt-1">
+                                    Open the tactical map and drag the orange dashed rectangle (min width 2 m from Grid
+                                    m/cell). You can place your own zone; the session host can place any queued zone.
+                                    {!isSessionHost && (
+                                      <span className="block mt-0.5 text-gray-600">
+                                        If you do not see draw mode on the map, switch to this character in the session
+                                        bar so the app knows your token, or ask the host to place it.
+                                      </span>
+                                    )}
+                                    {pendingSuppressivePlacements.length > 1 && (
+                                      <span className="block mt-0.5 font-semibold text-amber-900">
+                                        {pendingSuppressivePlacements.length} suppressive placements are queued—resolve
+                                        them in order on the map.
+                                      </span>
+                                    )}
+                                  </p>
+                                </>
+                              )}
+                            </div>
+                          );
+                        })()}
 
                         {/* Reload & Damage */}
                         <div className="flex gap-2">
@@ -1589,6 +1871,30 @@ export function CombatTab({ character, editable }: CombatTabProps) {
       {showItemBrowser && (
         <ItemBrowser characterId={character.id} onClose={() => setShowItemBrowser(false)} />
       )}
+
+      {fireModeModal &&
+        (() => {
+          const w = character.items.find(
+            (i): i is Weapon => i.type === 'weapon' && i.id === fireModeModal.weaponId,
+          );
+          if (!w) return null;
+          const tid = combatTargetId.trim();
+          return (
+            <FireModeTargetModal
+              open
+              mode={fireModeModal.mode}
+              weaponName={w.name}
+              burstAmmo={burstAmmo(w.rof)}
+              rof={w.rof}
+              options={stabilizationPatientOptions.filter((o) => o.id !== character.id)}
+              initialSelectedIds={
+                tid && tid !== character.id ? [tid] : []
+              }
+              onClose={() => setFireModeModal(null)}
+              onConfirm={confirmAutomatedFire}
+            />
+          );
+        })()}
     </>
   );
 }

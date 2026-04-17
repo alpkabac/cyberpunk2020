@@ -9,6 +9,8 @@ import {
   Session,
   Token,
   MapCoverRegion,
+  MapSuppressiveZone,
+  PendingSuppressivePlacement,
   ChatMessage,
   Scene,
   SessionSettings,
@@ -33,7 +35,7 @@ import {
   isFlatSaveSuccess,
 } from '../game-logic/formulas';
 import { maxDamageFromDiceFormula } from '../game-logic/dice';
-import { getAmmoConsumed } from '../game-logic/lookups';
+import { getAmmoConsumed } from '../game-logic/fire-modes';
 import { isSeveredConditionName, severedConditionName } from '../game-logic/conditions';
 import type { LoadedSessionSnapshot } from '../realtime/session-load';
 import {
@@ -43,6 +45,10 @@ import {
 } from '../realtime/db-mapper';
 import { parseCombatStateJson } from '../session/combat-state';
 import { coverTypeSp } from '../map/cover-types';
+import type { SessionMapState } from '../map/map-state';
+import { reconcileSuppressiveZonesForCombat } from '../map/suppressive-fire';
+import { cellInsideSuppressiveZone } from '../map/suppressive-zone-cells';
+import { resolveSuppressiveZoneEntry } from '../game-logic/resolve-suppressive-entry';
 import { sortChatMessagesByTimestamp } from '../chat/chat-order';
 
 function deathSaveBonusFromMods(m: Character['combatModifiers'] | undefined): number {
@@ -81,6 +87,9 @@ interface GameState {
     backgroundImageUrl: string;
     tokens: Token[];
     coverRegions: MapCoverRegion[];
+    suppressiveZones: MapSuppressiveZone[];
+    /** FIFO suppressive placements waiting for a map rectangle (synced in `sessions.map_state`). */
+    pendingSuppressivePlacements: PendingSuppressivePlacement[];
   };
 
   chat: {
@@ -150,6 +159,8 @@ interface GameState {
     pendingGmAttackRequest: PendingGmAttackRequest | null;
     /** After a successful attack reply to the GM, suppress re-opening pending for the same chat line. */
     lastAnsweredGmAttackRequestMessageId: string | null;
+    /** Head of `map.pendingSuppressivePlacements` (who draws next on the tactical map). */
+    pendingSuppressivePlacement: PendingSuppressivePlacement | null;
   };
 
   /** Optimistic edit backups for Supabase writes (rollback on RLS/error). */
@@ -206,7 +217,12 @@ interface GameActions {
   removeSkill: (characterId: string, skillId: string) => void;
 
   // Weapon actions
-  fireWeapon: (characterId: string, weaponId: string, mode: FireMode) => boolean;
+  fireWeapon: (
+    characterId: string,
+    weaponId: string,
+    mode: FireMode,
+    opts?: { suppressiveRounds?: number },
+  ) => boolean;
   reloadWeapon: (characterId: string, weaponId: string) => void;
 
   // NPC actions
@@ -217,6 +233,13 @@ interface GameActions {
   // Map actions
   setMapBackground: (url: string) => void;
   setMapCoverRegions: (coverRegions: MapCoverRegion[]) => void;
+  /** Replace tactical map regions from DB / persist (cover + suppressive). */
+  applySessionMapState: (state: SessionMapState) => void;
+  setPendingSuppressivePlacement: (p: PendingSuppressivePlacement | null) => void;
+  /** Append a committed suppressive fire to the FIFO queue and persist (any session participant may update). */
+  saveSessionMapPendingSuppressive: (p: PendingSuppressivePlacement) => void;
+  /** After token lands on grid: suppressive saves for zones at that cell (excludes owner). */
+  evaluateSuppressiveFireForTokenCell: (tokenId: string, cellC: number, cellR: number) => void;
   addToken: (token: Token) => void;
   moveToken: (tokenId: string, x: number, y: number) => void;
   removeToken: (tokenId: string) => void;
@@ -452,6 +475,8 @@ const initialState: GameState = {
     backgroundImageUrl: '',
     tokens: [],
     coverRegions: [],
+    suppressiveZones: [],
+    pendingSuppressivePlacements: [],
   },
 
   chat: {
@@ -484,6 +509,7 @@ const initialState: GameState = {
     sessionVoicePeerStartTick: 0,
     pendingGmAttackRequest: null,
     lastAnsweredGmAttackRequestMessageId: null,
+    pendingSuppressivePlacement: null,
   },
 
   realtime: {
@@ -501,9 +527,33 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
 
   // Session actions
   setSession: (session) =>
-    set((state) => ({
-      session: { ...state.session, ...session },
-    })),
+    set((state) => {
+      const nextSession = { ...state.session, ...session };
+      let nextMap = state.map;
+      if (session.combatState !== undefined) {
+            const nz = reconcileSuppressiveZonesForCombat(state.map.suppressiveZones, nextSession.combatState);
+        const prevZ = JSON.stringify(state.map.suppressiveZones);
+        const nextZ = JSON.stringify(nz);
+        if (prevZ !== nextZ) {
+          nextMap = { ...state.map, suppressiveZones: nz };
+          if (nz.length < state.map.suppressiveZones.length) {
+            const sid = state.session.id;
+            if (sid) {
+              const mapPayload: SessionMapState = {
+                coverRegions: nextMap.coverRegions,
+                suppressiveZones: nz,
+                pendingSuppressivePlacements: nextMap.pendingSuppressivePlacements,
+              };
+              void (async () => {
+                const { supabase } = await import('../supabase');
+                await supabase.from('sessions').update({ map_state: mapPayload }).eq('id', sid);
+              })();
+            }
+          }
+        }
+      }
+      return { session: nextSession, map: nextMap };
+    }),
 
   setSessionViewerUserId: (userId) =>
     set((state) => ({
@@ -991,7 +1041,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     }),
 
   // Weapon actions
-  fireWeapon: (characterId, weaponId, mode) => {
+  fireWeapon: (characterId, weaponId, mode, opts) => {
     const state = get();
     const character = state.characters.byId[characterId] ?? state.npcs.byId[characterId];
     if (!character) return false;
@@ -1004,7 +1054,13 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
 
     if (isMelee) return true;
 
-    const ammoNeeded = getAmmoConsumed(mode, weapon.rof);
+    let ammoNeeded: number;
+    if (mode === 'Suppressive' && opts?.suppressiveRounds != null) {
+      const req = Math.floor(opts.suppressiveRounds);
+      ammoNeeded = Math.max(1, Math.min(req, weapon.shotsLeft));
+    } else {
+      ammoNeeded = getAmmoConsumed(mode, weapon.rof);
+    }
     if (weapon.shotsLeft < ammoNeeded) return false;
 
     const updatedItems = [...character.items];
@@ -1119,6 +1175,65 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     set((state) => ({
       map: { ...state.map, coverRegions },
     })),
+
+  applySessionMapState: (mapState) =>
+    set((state) => {
+      const queue =
+        mapState.pendingSuppressivePlacements !== undefined
+          ? mapState.pendingSuppressivePlacements
+          : state.map.pendingSuppressivePlacements;
+      const head = queue[0] ?? null;
+      return {
+        map: {
+          ...state.map,
+          coverRegions: mapState.coverRegions,
+          suppressiveZones: mapState.suppressiveZones,
+          pendingSuppressivePlacements: queue,
+        },
+        ui: { ...state.ui, pendingSuppressivePlacement: head },
+      };
+    }),
+
+  setPendingSuppressivePlacement: (p) =>
+    set((state) => {
+      const next = p == null ? [] : [p];
+      return {
+        map: { ...state.map, pendingSuppressivePlacements: next },
+        ui: { ...state.ui, pendingSuppressivePlacement: next[0] ?? null },
+      };
+    }),
+
+  saveSessionMapPendingSuppressive: (p) => {
+    set((state) => {
+      const next = [...state.map.pendingSuppressivePlacements, p];
+      return {
+        map: { ...state.map, pendingSuppressivePlacements: next },
+        ui: { ...state.ui, pendingSuppressivePlacement: next[0] ?? null },
+      };
+    });
+    const sid = get().session.id;
+    if (!sid) return;
+    void (async () => {
+      const { persistSessionMapState } = await import('../session/persist-session-map-state');
+      const { supabase } = await import('../supabase');
+      await persistSessionMapState(supabase, sid, {
+        pendingSuppressivePlacements: get().map.pendingSuppressivePlacements,
+      });
+    })();
+  },
+
+  evaluateSuppressiveFireForTokenCell: (tokenId, cellC, cellR) => {
+    const state = get();
+    const token = state.map.tokens.find((t) => t.id === tokenId);
+    const cid = token?.characterId?.trim();
+    if (!cid) return;
+    for (const z of state.map.suppressiveZones) {
+      if (z.ownerCharacterId === cid) continue;
+      if (cellInsideSuppressiveZone(cellC, cellR, z)) {
+        resolveSuppressiveZoneEntry(cid, z);
+      }
+    }
+  },
 
   addToken: (token) =>
     set((state) => ({
@@ -1656,6 +1771,8 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
           backgroundImageUrl: snapshot.session.mapBackgroundUrl,
           tokens: snapshot.tokens,
           coverRegions: snapshot.session.mapState.coverRegions,
+          suppressiveZones: snapshot.session.mapState.suppressiveZones,
+          pendingSuppressivePlacements: snapshot.session.mapState.pendingSuppressivePlacements,
         },
         chat: {
           messages: snapshot.chatMessages,
@@ -1670,6 +1787,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
           sessionVoicePeerStartTick: 0,
           pendingGmAttackRequest: null,
           lastAnsweredGmAttackRequestMessageId: null,
+          pendingSuppressivePlacement: snapshot.session.mapState.pendingSuppressivePlacements[0] ?? null,
         },
         realtime: { optimisticBackupByCharacterId: {}, maxMergedCharacterRowUpdatedAtMs: {} },
       };

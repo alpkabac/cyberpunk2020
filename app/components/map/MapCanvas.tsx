@@ -12,7 +12,7 @@ import {
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { useGameStore } from '@/lib/store/game-store';
 import { useShallow } from 'zustand/react/shallow';
-import type { MapCoverRegion, Token } from '@/lib/types';
+import type { MapCoverRegion, MapSuppressiveZone, Token } from '@/lib/types';
 import { canDragToken, tokenRoleLabel, type TokenDragContext } from '@/lib/map/token-drag-permissions';
 import {
   MAP_GRID_DEFAULT_COLS,
@@ -25,10 +25,13 @@ import {
   snapPctToGrid,
 } from '@/lib/map/grid';
 import { CP2020_COVER_TYPES, coverSpStyle, coverTypeLabel } from '@/lib/map/cover-types';
-import { normalizeCellRect, type SessionMapState } from '@/lib/map/map-state';
+import { normalizeCellRect, parseMapStateJson, type SessionMapState } from '@/lib/map/map-state';
 import type { MapPresetPayload } from '@/lib/map/map-preset-types';
 import { persistSessionMapGridSettings } from '@/lib/session/persist-session-map-grid-settings';
 import { persistSessionMapState } from '@/lib/session/persist-session-map-state';
+import { suppressiveZoneWidthMeters, suppressiveSaveNumber } from '@/lib/map/suppressive-fire';
+import { cellInsideSuppressiveZone } from '@/lib/map/suppressive-zone-cells';
+import { resolveSuppressiveZoneEntry } from '@/lib/game-logic/resolve-suppressive-entry';
 
 const MAP_UPLOAD_MAX_BYTES = 1_800_000;
 
@@ -71,6 +74,8 @@ export function MapCanvas({
   const coverDraggingRef = useRef(false);
   const coverDragStartRef = useRef<{ c: number; r: number } | null>(null);
   const coverDragRectRef = useRef<{ c0: number; r0: number; c1: number; r1: number } | null>(null);
+  /** When true, the grid-rectangle drag is for suppressive fire (pending from Combat tab). */
+  const isSuppressiveRectDragRef = useRef(false);
   // Track drag distance so a click doesn't fire after a drag
   const dragRef = useRef<{ tokenId: string; startX: number; startY: number; moved: boolean } | null>(null);
 
@@ -101,6 +106,24 @@ export function MapCanvas({
   const mapSnapToGrid = useGameStore((s) => s.session.settings.mapSnapToGrid);
   const mapMetersPerSquare = useGameStore((s) => s.session.settings.mapMetersPerSquare);
   const coverRegions = useGameStore((s) => s.map.coverRegions);
+  const suppressiveZones = useGameStore((s) => s.map.suppressiveZones);
+  const pendingSuppressivePlacement = useGameStore((s) => s.ui.pendingSuppressivePlacement);
+  const pendingSuppressQueueLen = useGameStore((s) => s.map.pendingSuppressivePlacements.length);
+
+  const gridCols = normalizeGridDimension(mapGridCols, MAP_GRID_DEFAULT_COLS);
+  const gridRows = normalizeGridDimension(mapGridRows, MAP_GRID_DEFAULT_ROWS);
+  const suppressiveDraw = Boolean(
+    pendingSuppressivePlacement &&
+      (isGm ||
+        (myCharacterId != null && pendingSuppressivePlacement.characterId === myCharacterId)),
+  );
+
+  useEffect(() => {
+    if (pendingSuppressivePlacement) {
+      setCoverTool(false);
+      setRulerActive(false);
+    }
+  }, [pendingSuppressivePlacement]);
   const { byId: charsById, allIds: charIds } = useGameStore(
     useShallow((s) => ({ byId: s.characters.byId, allIds: s.characters.allIds })),
   );
@@ -187,13 +210,16 @@ export function MapCanvas({
       if (error) {
         useGameStore.getState().moveToken(tokenId, revert.x, revert.y);
         setMapError(error.message);
+        return;
       }
+      const st = useGameStore.getState();
+      const cols = normalizeGridDimension(st.session.settings.mapGridCols, MAP_GRID_DEFAULT_COLS);
+      const rows = normalizeGridDimension(st.session.settings.mapGridRows, MAP_GRID_DEFAULT_ROWS);
+      const cell = pctToCell(x, y, cols, rows);
+      st.evaluateSuppressiveFireForTokenCell(tokenId, cell.c, cell.r);
     },
     [sessionId, supabase],
   );
-
-  const gridCols = normalizeGridDimension(mapGridCols, MAP_GRID_DEFAULT_COLS);
-  const gridRows = normalizeGridDimension(mapGridRows, MAP_GRID_DEFAULT_ROWS);
 
   const distanceFromSelected = useMemo(() => {
     if (!selectedTokenId || tokens.length < 2) return null;
@@ -263,9 +289,78 @@ export function MapCanvas({
     }
   }, []);
 
+  const confirmSuppressiveRegion = useCallback(
+    async (rawRect: { c0: number; r0: number; c1: number; r1: number }) => {
+      const mapSnap = useGameStore.getState().map;
+      const queue = [...mapSnap.pendingSuppressivePlacements];
+      const pend = queue.shift();
+      if (!pend) return;
+      const mayPlace =
+        isGm || (myCharacterId != null && pend.characterId === myCharacterId);
+      if (!mayPlace) return;
+      const rect = normalizeCellRect(rawRect.c0, rawRect.r0, rawRect.c1, rawRect.r1);
+      const cs = useGameStore.getState().session.combatState;
+      const placedRound = cs?.round ?? 1;
+      const placedActiveTurnIndex = cs?.activeTurnIndex ?? 0;
+      const width = suppressiveZoneWidthMeters({
+        ...rect,
+        metersPerSquare: mapMetersPerSquare,
+      });
+      const saveNumber = suppressiveSaveNumber(pend.roundsCommitted, width);
+      const id =
+        globalThis.crypto && 'randomUUID' in globalThis.crypto
+          ? globalThis.crypto.randomUUID()
+          : `sup-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      const zn: MapSuppressiveZone = {
+        id,
+        ...rect,
+        ownerCharacterId: pend.characterId,
+        placedRound,
+        placedActiveTurnIndex,
+        suppressExpiryUntilTurnChange: true,
+        roundsCommitted: pend.roundsCommitted,
+        widthMeters: width,
+        saveNumber,
+        weaponDamage: pend.weaponDamage?.trim() || '2d6',
+        weaponAp: pend.weaponAp,
+        ...(pend.weaponName ? { weaponName: pend.weaponName } : {}),
+      };
+      const mapState: SessionMapState = {
+        coverRegions: mapSnap.coverRegions,
+        suppressiveZones: [...mapSnap.suppressiveZones, zn],
+        pendingSuppressivePlacements: queue,
+      };
+      setMapError(null);
+      const { error } = await persistSessionMapState(supabase, sessionId, mapState);
+      if (error) {
+        setMapError(error.message);
+        return;
+      }
+      useGameStore.getState().addChatMessage({
+        id:
+          typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+            ? crypto.randomUUID()
+            : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+        speaker: 'System',
+        text: `Suppressive fire (${pend.weaponName ?? 'weapon'}): ${pend.roundsCommitted} rds, zone ~${width.toFixed(1)} m — save vs ${saveNumber} (Athletics+REF+d10).`,
+        timestamp: Date.now(),
+        type: 'system',
+      });
+      for (const t of mapSnap.tokens) {
+        const cid = t.characterId?.trim();
+        if (!cid || cid === pend.characterId) continue;
+        const cell = pctToCell(t.x, t.y, gridCols, gridRows);
+        if (cellInsideSuppressiveZone(cell.c, cell.r, zn)) {
+          resolveSuppressiveZoneEntry(cid, zn);
+        }
+      }
+    },
+    [isGm, myCharacterId, sessionId, supabase, gridCols, gridRows, mapMetersPerSquare],
+  );
+
   const onBoardPointerDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
-      if (coverTool && isGm) {
+      if ((coverTool && isGm) || suppressiveDraw) {
         e.preventDefault();
         const p = pointerToPctRaw(e.clientX, e.clientY);
         const st = useGameStore.getState().session.settings;
@@ -274,6 +369,7 @@ export function MapCanvas({
         const cell = pctToCell(p.x, p.y, cols, rows);
         coverDragStartRef.current = { c: cell.c, r: cell.r };
         coverDraggingRef.current = true;
+        isSuppressiveRectDragRef.current = suppressiveDraw;
         const rect = normalizeCellRect(cell.c, cell.r, cell.c, cell.r);
         coverDragRectRef.current = rect;
         setCoverDraft(rect);
@@ -298,12 +394,12 @@ export function MapCanvas({
       }
       useGameStore.getState().selectToken(null);
     },
-    [coverTool, isGm, rulerActive, pointerToPctRaw],
+    [coverTool, isGm, rulerActive, pointerToPctRaw, suppressiveDraw],
   );
 
   const onBoardPointerMove = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
-      if (coverDraggingRef.current && coverTool && isGm) {
+      if (coverDraggingRef.current && ((coverTool && isGm) || suppressiveDraw)) {
         e.preventDefault();
         const p = pointerToPctRaw(e.clientX, e.clientY);
         const st = useGameStore.getState().session.settings;
@@ -322,14 +418,16 @@ export function MapCanvas({
       const pt = pointerToPctRaw(e.clientX, e.clientY);
       setRuler((prev) => (prev ? { a: prev.a, b: pt } : null));
     },
-    [coverTool, isGm, rulerActive, pointerToPctRaw],
+    [coverTool, isGm, rulerActive, pointerToPctRaw, suppressiveDraw],
   );
 
   const onBoardPointerUp = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
-      if (coverDraggingRef.current && coverTool && isGm) {
+      if (coverDraggingRef.current && ((coverTool && isGm) || suppressiveDraw)) {
         e.preventDefault();
+        const wasSuppress = isSuppressiveRectDragRef.current;
         coverDraggingRef.current = false;
+        isSuppressiveRectDragRef.current = false;
         coverDragStartRef.current = null;
         const rect = coverDragRectRef.current;
         coverDragRectRef.current = null;
@@ -339,18 +437,20 @@ export function MapCanvas({
         } catch {
           /* */
         }
-        if (rect) setCoverPickRect(rect);
+        if (rect && wasSuppress) void confirmSuppressiveRegion(rect);
+        else if (rect) setCoverPickRect(rect);
         return;
       }
       endRulerPointerDrag(e);
     },
-    [coverTool, isGm, endRulerPointerDrag],
+    [coverTool, isGm, endRulerPointerDrag, suppressiveDraw, confirmSuppressiveRegion],
   );
 
   const onBoardPointerCancel = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
       if (coverDraggingRef.current) {
         coverDraggingRef.current = false;
+        isSuppressiveRectDragRef.current = false;
         coverDragStartRef.current = null;
         coverDragRectRef.current = null;
         setCoverDraft(null);
@@ -371,8 +471,11 @@ export function MapCanvas({
       ...coverPickRect,
       coverTypeId: coverPickTypeId,
     };
+    const m = useGameStore.getState().map;
     const mapState: SessionMapState = {
-      coverRegions: [...useGameStore.getState().map.coverRegions, next],
+      coverRegions: [...m.coverRegions, next],
+      suppressiveZones: m.suppressiveZones,
+      pendingSuppressivePlacements: m.pendingSuppressivePlacements,
     };
     setCoverPickRect(null);
     const { error } = await persistSessionMapState(supabase, sessionId, mapState);
@@ -382,8 +485,26 @@ export function MapCanvas({
   const removeCoverRegion = useCallback(
     async (regionId: string) => {
       if (!isGm) return;
+      const m = useGameStore.getState().map;
       const mapState: SessionMapState = {
-        coverRegions: useGameStore.getState().map.coverRegions.filter((r) => r.id !== regionId),
+        coverRegions: m.coverRegions.filter((r) => r.id !== regionId),
+        suppressiveZones: m.suppressiveZones,
+        pendingSuppressivePlacements: m.pendingSuppressivePlacements,
+      };
+      const { error } = await persistSessionMapState(supabase, sessionId, mapState);
+      if (error) setMapError(error.message);
+    },
+    [isGm, sessionId, supabase],
+  );
+
+  const removeSuppressiveZone = useCallback(
+    async (zoneId: string) => {
+      if (!isGm) return;
+      const m = useGameStore.getState().map;
+      const mapState: SessionMapState = {
+        coverRegions: m.coverRegions,
+        suppressiveZones: m.suppressiveZones.filter((z) => z.id !== zoneId),
+        pendingSuppressivePlacements: m.pendingSuppressivePlacements,
       };
       const { error } = await persistSessionMapState(supabase, sessionId, mapState);
       if (error) setMapError(error.message);
@@ -399,7 +520,7 @@ export function MapCanvas({
     try {
       const st = useGameStore.getState().session.settings;
       const bg = useGameStore.getState().map.backgroundImageUrl;
-      const regions = useGameStore.getState().map.coverRegions;
+      const m = useGameStore.getState().map;
       const payload: MapPresetPayload = {
         map_background_url: bg,
         settings: {
@@ -409,7 +530,11 @@ export function MapCanvas({
           mapSnapToGrid: st.mapSnapToGrid,
           mapMetersPerSquare: st.mapMetersPerSquare,
         },
-        map_state: { coverRegions: regions },
+        map_state: {
+          coverRegions: m.coverRegions,
+          suppressiveZones: m.suppressiveZones,
+          pendingSuppressivePlacements: m.pendingSuppressivePlacements,
+        },
       };
       const { error } = await supabase.from('map_presets').insert({
         session_id: sessionId,
@@ -464,7 +589,8 @@ export function MapCanvas({
       }
       useGameStore.getState().setMapBackground(payload.map_background_url);
       useGameStore.getState().updateSessionSettings(payload.settings);
-      useGameStore.getState().setMapCoverRegions(payload.map_state.coverRegions);
+      const parsedMap = parseMapStateJson(payload.map_state);
+      useGameStore.getState().applySessionMapState(parsedMap);
     } finally {
       setPresetBusy(false);
     }
@@ -789,6 +915,34 @@ export function MapCanvas({
               </ul>
             </div>
           )}
+          {suppressiveZones.length > 0 && (
+            <div className="w-full basis-full text-[10px] text-zinc-500 space-y-1 pt-1">
+              <span className="text-amber-700/90 uppercase tracking-wider font-bold">Suppressive zones</span>
+              <ul className="flex flex-wrap gap-1">
+                {suppressiveZones.map((z) => (
+                  <li
+                    key={z.id}
+                    className="inline-flex items-center gap-1 rounded border border-amber-900/50 bg-zinc-950/60 px-1.5 py-0.5"
+                  >
+                    <span
+                      className="text-amber-200/80 truncate max-w-[11rem]"
+                      title={`${z.weaponName ?? 'Suppressive'} · save ${z.saveNumber} · ${z.roundsCommitted} rds`}
+                    >
+                      {z.weaponName ?? 'Suppressive'} · DV {z.saveNumber}
+                    </span>
+                    <button
+                      type="button"
+                      className="text-red-400/90 hover:text-red-300"
+                      title="Remove zone"
+                      onClick={() => void removeSuppressiveZone(z.id)}
+                    >
+                      ×
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <button
             type="button"
             onClick={() => setGridOptsVisible(false)}
@@ -837,7 +991,7 @@ export function MapCanvas({
         role="application"
         aria-label="Battle map"
         className={`relative w-full min-h-[min(88vh,920px)] h-[min(88vh,920px)] max-h-[95vh] bg-zinc-950 bg-no-repeat bg-center select-none touch-none ${
-          rulerActive || (coverTool && isGm) ? 'cursor-crosshair' : ''
+          rulerActive || (coverTool && isGm) || suppressiveDraw ? 'cursor-crosshair' : ''
         }`}
         style={{
           backgroundImage: backgroundUrl ? `url(${backgroundUrl})` : undefined,
@@ -889,9 +1043,22 @@ export function MapCanvas({
           );
         })}
 
+        {suppressiveZones.map((z) => (
+          <div
+            key={z.id}
+            className="pointer-events-none absolute z-3 rounded-sm border-2 border-dashed border-orange-500/80 bg-orange-600/15"
+            style={cellRectPercentStyle(z.c0, z.r0, z.c1, z.r1)}
+            title={`Suppressive · save ${z.saveNumber} · ${z.roundsCommitted} rds · ${z.weaponName ?? 'fire'}`}
+          />
+        ))}
+
         {coverDraft && (
           <div
-            className="pointer-events-none absolute z-3 rounded-sm border-2 border-dashed border-emerald-400/70 bg-emerald-500/10"
+            className={`pointer-events-none absolute z-3 rounded-sm border-2 border-dashed ${
+              suppressiveDraw
+                ? 'border-amber-400/90 bg-amber-500/15'
+                : 'border-emerald-400/70 bg-emerald-500/10'
+            }`}
             style={cellRectPercentStyle(coverDraft.c0, coverDraft.r0, coverDraft.c1, coverDraft.r1)}
           />
         )}
@@ -939,7 +1106,16 @@ export function MapCanvas({
           </div>
         )}
 
-        {coverTool && isGm && !coverDraft && (
+        {suppressiveDraw && !coverDraft && (
+          <div className="pointer-events-none absolute bottom-1 left-1/2 z-4 max-w-[95%] -translate-x-1/2 rounded border border-amber-800/50 bg-zinc-950/90 px-2 py-0.5 text-center text-[10px] text-amber-200/95">
+            Drag suppressive fire zone (min width 2 m from Grid m/cell)
+            {pendingSuppressQueueLen > 1
+              ? ` — ${pendingSuppressQueueLen} waiting in queue (place the first next).`
+              : ''}
+          </div>
+        )}
+
+        {coverTool && isGm && !coverDraft && !suppressiveDraw && (
           <div className="pointer-events-none absolute bottom-1 left-1/2 z-4 max-w-[95%] -translate-x-1/2 rounded border border-emerald-900/30 bg-zinc-950/90 px-2 py-0.5 text-center text-[10px] text-emerald-600/95">
             Drag to select tiles, then choose cover type
           </div>

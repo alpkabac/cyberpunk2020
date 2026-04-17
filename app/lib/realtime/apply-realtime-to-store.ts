@@ -29,7 +29,7 @@ export function createDefaultPostgresHandlersForGameStore(): PostgresChangeHandl
       }
 
       if ('map_state' in row) {
-        useGameStore.getState().setMapCoverRegions(parseMapStateJson(row.map_state).coverRegions);
+        useGameStore.getState().applySessionMapState(parseMapStateJson(row.map_state));
       }
 
       if ('combat_state' in row) {

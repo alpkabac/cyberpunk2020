@@ -373,10 +373,34 @@ export interface MapCoverRegion {
   spAblation?: number;
 }
 
+/**
+ * Suppressive fire zone on the tactical grid. Expires when initiative returns to `ownerCharacterId`
+ * after combat has moved off the `(placedRound, placedActiveTurnIndex)` snapshot.
+ */
+export interface MapSuppressiveZone {
+  id: string;
+  c0: number;
+  r0: number;
+  c1: number;
+  r1: number;
+  ownerCharacterId: string;
+  placedRound: number;
+  placedActiveTurnIndex: number;
+  /** While true, zone does not expire on owner's turn (until turn advances away from placement moment). */
+  suppressExpiryUntilTurnChange: boolean;
+  roundsCommitted: number;
+  widthMeters: number;
+  saveNumber: number;
+  weaponDamage: string;
+  weaponAp: boolean;
+  weaponName?: string;
+}
+
 export interface MapState {
   backgroundImageUrl: string;
   tokens: Token[];
   coverRegions: MapCoverRegion[];
+  suppressiveZones: MapSuppressiveZone[];
 }
 
 export interface Token {
@@ -421,6 +445,16 @@ export interface PendingGmAttackRequest {
   targetName?: string;
   rollSummary?: string;
   reason?: string;
+}
+
+/** Combat tab → map: draw suppressive zone after choosing rounds and spending ammo. */
+export interface PendingSuppressivePlacement {
+  characterId: string;
+  weaponId: string;
+  roundsCommitted: number;
+  weaponDamage: string;
+  weaponAp: boolean;
+  weaponName: string;
 }
 
 export interface SessionSettings {

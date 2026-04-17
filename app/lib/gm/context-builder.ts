@@ -2,7 +2,17 @@
  * Assembles LLM messages for the AI-GM (Requirements 3.6, 4.1).
  */
 
-import type { Character, ChatMessage, CombatState, MapCoverRegion, Scene, SessionSettings, Token } from '../types';
+import type {
+  Character,
+  ChatMessage,
+  CombatState,
+  MapCoverRegion,
+  MapSuppressiveZone,
+  PendingSuppressivePlacement,
+  Scene,
+  SessionSettings,
+  Token,
+} from '../types';
 import { estimateTokens } from './lorebook';
 import { effectiveCharacterTeam } from '../game-logic/teams';
 import {
@@ -30,6 +40,7 @@ For move_token, add_token, and remove_token, use token ids from MAP_TOKENS_JSON 
 **Tactical map:** TACTICAL_GRID_JSON gives cols, rows, snap_to_grid, and meters_per_square. MAP_TOKENS_JSON lists each token's x,y (0–100% of map width/height) plus cell_column and cell_row (0-based) on that grid—use cells for range, flanking, and movement. When snap_to_grid is true, the client snaps positions to cell centers; pass x,y as percentages (cell center ≈ ((col+0.5)/cols)*100 for x, ((row+0.5)/rows)*100 for y).
 **Teams:** CHARACTERS_JSON includes \`team\` (effective id). Same team = allies; different team = enemies for tactical purposes. Empty sheet team defaults PCs to \`party\` and NPCs to \`hostile\`. MAP_TOKENS_JSON repeats \`team\` when the token is linked to a sheet.
 **Cover & LOS:** MAP_COVER_JSON lists drawn cover zones (grid cell ranges) and CP2020 **SP** values from the Common Cover table (Friday Night Firefight). Use these when narrating hits through cover, penetration, and line of sight. **TACTICAL_COVER_HINT_JSON** (when non-empty) lists tokens with hostile line-of-sight relations and server-suggested x,y cell centers that put drawn cover between that token and as many enemies as possible—prefer those coordinates when you move someone to take cover (still respect fiction, movement limits, and snap_to_grid).
+**Suppressive fire:** MAP_SUPPRESSIVE_ZONES_JSON lists active suppressive-fire rectangles (grid cells), owner character id, save DC (Athletics+REF+d10), rounds committed, and weapon damage—use when narrating movement into beaten zones, forced saves, and automatic weapon hits. MAP_SUPPRESSIVE_PENDING_JSON (when non-empty) is a FIFO queue of committed ammo not yet drawn on the map; mention if the table is still placing zones.
 If CHARACTERS_JSON is empty, the session has no sheets synced yet—say that and skip character tools.
 
 **Money:** Use \`add_money\` to reward eurobucks (payment, loot, rewards). Use \`deduct_money\` to subtract (purchases, bribes, fees). Never use update_character_field for eurobucks—use the dedicated tools.
@@ -195,6 +206,60 @@ export interface MapCoverRegionForLlm {
   sp_ablation: number;
 }
 
+export interface MapSuppressiveZoneForLlm {
+  id: string;
+  owner_character_id: string;
+  cell_c0: number;
+  cell_r0: number;
+  cell_c1: number;
+  cell_r1: number;
+  save_number: number;
+  width_meters: number;
+  rounds_committed: number;
+  weapon_damage: string;
+  weapon_ap: boolean;
+  weapon_name?: string;
+}
+
+export function serializeSuppressiveZonesForLlm(zones: MapSuppressiveZone[]): MapSuppressiveZoneForLlm[] {
+  return zones.map((z) => ({
+    id: z.id,
+    owner_character_id: z.ownerCharacterId,
+    cell_c0: z.c0,
+    cell_r0: z.r0,
+    cell_c1: z.c1,
+    cell_r1: z.r1,
+    save_number: z.saveNumber,
+    width_meters: z.widthMeters,
+    rounds_committed: z.roundsCommitted,
+    weapon_damage: z.weaponDamage,
+    weapon_ap: z.weaponAp,
+    ...(z.weaponName ? { weapon_name: z.weaponName } : {}),
+  }));
+}
+
+export interface PendingSuppressiveForLlm {
+  character_id: string;
+  weapon_id: string;
+  rounds_committed: number;
+  weapon_damage: string;
+  weapon_ap: boolean;
+  weapon_name: string;
+}
+
+export function serializePendingSuppressiveForLlm(
+  pending: PendingSuppressivePlacement[],
+): PendingSuppressiveForLlm[] {
+  return pending.map((p) => ({
+    character_id: p.characterId,
+    weapon_id: p.weaponId,
+    rounds_committed: p.roundsCommitted,
+    weapon_damage: p.weaponDamage,
+    weapon_ap: p.weaponAp,
+    weapon_name: p.weaponName,
+  }));
+}
+
 export function serializeMapCoverForLlm(regions: MapCoverRegion[]): MapCoverRegionForLlm[] {
   return regions.map((r) => {
     const def = CP2020_COVER_TYPES.find((t) => t.id === r.coverTypeId);
@@ -324,6 +389,10 @@ export interface BuildContextInput {
   sessionSettings?: SessionSettings;
   /** Tactical cover rectangles (from sessions.map_state); omit for empty. */
   mapCoverRegions?: MapCoverRegion[];
+  /** Placed suppressive-fire zones (from sessions.map_state). */
+  mapSuppressiveZones?: MapSuppressiveZone[];
+  /** FIFO queue of suppressive fire not yet drawn on the map. */
+  mapSuppressivePending?: PendingSuppressivePlacement[];
   chatHistory: ChatMessage[];
   /** Latest user line (also usually last in chatHistory). */
   playerMessage: string;
@@ -381,6 +450,10 @@ export function buildGmUserContent(input: BuildContextInput): string {
   const mapTokensJson = JSON.stringify(serializeTokensForLlm(input.mapTokens, settings, input.characters));
   const tacticalGridJson = JSON.stringify(tacticalGridPayloadFromSettings(settings));
   const mapCoverJson = JSON.stringify(serializeMapCoverForLlm(input.mapCoverRegions ?? []));
+  const mapSuppressiveJson = JSON.stringify(serializeSuppressiveZonesForLlm(input.mapSuppressiveZones ?? []));
+  const mapSuppressivePendingJson = JSON.stringify(
+    serializePendingSuppressiveForLlm(input.mapSuppressivePending ?? []),
+  );
   const coverHints = buildTacticalCoverHints({
     characters: input.characters,
     tokens: input.mapTokens,
@@ -401,6 +474,8 @@ export function buildGmUserContent(input: BuildContextInput): string {
     `ACTIVE_SCENE_JSON: ${sceneJson}`,
     `TACTICAL_GRID_JSON: ${tacticalGridJson}`,
     `MAP_COVER_JSON: ${mapCoverJson}`,
+    `MAP_SUPPRESSIVE_ZONES_JSON: ${mapSuppressiveJson}`,
+    `MAP_SUPPRESSIVE_PENDING_JSON: ${mapSuppressivePendingJson}`,
     `TACTICAL_COVER_HINT_JSON: ${tacticalCoverHintJson}`,
     `MAP_TOKENS_JSON: ${mapTokensJson}`,
     `COMBAT_TRACKER_JSON: ${combatTrackerJson}`,
