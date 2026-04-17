@@ -1,0 +1,45 @@
+{
+  "name": "app",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "test:run": "vitest run",
+    "test:unit": "vitest run --project unit",
+    "test:property": "vitest run --project property",
+    "build:scripts": "tsc -p tsconfig.scripts.json",
+    "typecheck:scripts": "tsc -p tsconfig.scripts.json --noEmit",
+    "import:supabase": "npm run build:scripts && node .scripts-out/import-to-supabase.js",
+    "extract:foundry": "npm run build:scripts && node .scripts-out/extract-foundry-data.js"
+  },
+  "dependencies": {
+    "@deepgram/sdk": "^5.0.0",
+    "@supabase/supabase-js": "^2.103.0",
+    "dotenv": "^17.4.2",
+    "next": "16.2.3",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "ws": "^8.20.0",
+    "zod": "^4.3.6",
+    "zustand": "^5.0.12"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/ws": "^8.18.1",
+    "@vitest/ui": "^3.2.4",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.3",
+    "fast-check": "^4.6.0",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "vitest": "^3.2.4"
+  }
+}
