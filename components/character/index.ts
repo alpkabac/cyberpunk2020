@@ -1,4 +1,5 @@
 export { CharacterSheet } from './CharacterSheet';
+export { ChargenWizard } from './ChargenWizard';
 export { CharacterHeader } from './CharacterHeader';
 export { StatsRow } from './StatsRow';
 export { WoundTracker } from './WoundTracker';

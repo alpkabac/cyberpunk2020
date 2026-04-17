@@ -38,23 +38,40 @@ export function rollCharacterPointsFast(rng: Cp2020Rng): number {
   return sum;
 }
 
-const CINEMATIC_PRESETS: Record<string, number> = {
+/** Ref-chosen point budgets (VIEW FROM THE EDGE p.25). */
+export const CP2020_CINEMATIC_PRESETS = {
   average: 50,
   minor_supporting: 60,
   minor_hero: 75,
   major_supporting: 70,
   major_hero: 80,
-};
+} as const;
+
+export type Cp2020CinematicPreset = keyof typeof CP2020_CINEMATIC_PRESETS;
 
 /** Cinematic / Ref-chosen point budgets (p.25). */
-export function cinematicCharacterPoints(preset: keyof typeof CINEMATIC_PRESETS | number): number {
+export function cinematicCharacterPoints(
+  preset: Cp2020CinematicPreset | (string & {}) | number,
+): number {
   if (typeof preset === 'number' && Number.isFinite(preset)) {
     return Math.max(18, Math.min(90, Math.floor(preset)));
   }
-  return CINEMATIC_PRESETS[preset] ?? 50;
+  return CP2020_CINEMATIC_PRESETS[preset as Cp2020CinematicPreset] ?? 50;
 }
 
-const STAT_KEYS: Array<keyof Stats> = ['int', 'ref', 'tech', 'cool', 'attr', 'luck', 'ma', 'bt', 'emp'];
+export const CP2020_STAT_KEYS: Array<keyof Stats> = [
+  'int',
+  'ref',
+  'tech',
+  'cool',
+  'attr',
+  'luck',
+  'ma',
+  'bt',
+  'emp',
+];
+
+const STAT_KEYS = CP2020_STAT_KEYS;
 
 /**
  * Split Character Points across nine stats (each 2–10). Sum of bases equals `totalPoints`.
@@ -328,7 +345,8 @@ export function distributeCareerSkills(
   return { skills, specialValue };
 }
 
-const PICKUP_POOL: string[] = [
+/** Pickup skill names (career-excluded pool; VIEW FROM THE EDGE p.46). */
+export const CP2020_PICKUP_POOL: readonly string[] = [
   'Dodge & Escape',
   'Driving',
   'First Aid',
@@ -343,6 +361,8 @@ const PICKUP_POOL: string[] = [
   'Stock Market',
   'Wilderness Survival',
 ];
+
+const PICKUP_POOL: readonly string[] = CP2020_PICKUP_POOL;
 
 function shuffle<T>(arr: T[], rng: Cp2020Rng): T[] {
   const a = [...arr];
@@ -452,7 +472,7 @@ export interface GenerateCp2020CharacterInput {
   name: string;
   role: RoleType;
   method: Cp2020PointMethod;
-  cinematicPreset?: keyof typeof CINEMATIC_PRESETS | number;
+  cinematicPreset?: Cp2020CinematicPreset | number;
   age?: number;
   rng: Cp2020Rng;
 }
@@ -484,7 +504,7 @@ export function createCryptoRng(): Cp2020Rng {
 export function resolveCharacterPoints(
   method: Cp2020PointMethod,
   rng: Cp2020Rng,
-  cinematic?: keyof typeof CINEMATIC_PRESETS | number,
+  cinematic?: Cp2020CinematicPreset | number,
 ): number {
   if (method === 'random') return rollCharacterPointsRandom(rng);
   if (method === 'fast') return rollCharacterPointsFast(rng);
@@ -532,6 +552,206 @@ export function generateCp2020Character(input: GenerateCp2020CharacterInput): Ch
       current: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },
     },
     eurobucks,
+    items: [],
+    combatModifiers: { initiative: 0, stunSave: 0 },
+    netrunDeck: null,
+    lifepath: null,
+  };
+
+  return recalcCharacterForGm(raw);
+}
+
+/** Wizard / manual sheet: fixed career & pickup lines validated against CP2020 totals. */
+export interface Cp2020ChargenBuildInput {
+  sessionId: string;
+  userId?: string;
+  kind?: 'character' | 'npc';
+  name: string;
+  role: RoleType;
+  age: number;
+  /** Total Character Points; must equal the sum of `statBases` (VIEW FROM THE EDGE p.25). */
+  points: number;
+  /** Nine stats, each base 2–10. */
+  statBases: Record<keyof Stats, number>;
+  /** One entry per career skill name for `role`; special ability 1–10, others 0–10; sum 40. */
+  careerValuesByName: Record<string, number>;
+  /** Pickup skills not in career; each 0–10; total points ≤ REF+INT (bases). */
+  pickup: { name: string; value: number }[];
+  eurobucks: number;
+}
+
+const PICKUP_NAME_SET = new Set(CP2020_PICKUP_POOL);
+
+export function validateCp2020Chargen(input: Cp2020ChargenBuildInput): string[] {
+  const err: string[] = [];
+  const { role, points, statBases, careerValuesByName, pickup } = input;
+
+  if (!Number.isFinite(points) || points < 18 || points > 90) {
+    err.push('Character Points must be between 18 and 90.');
+  }
+
+  let statSum = 0;
+  for (const k of CP2020_STAT_KEYS) {
+    const v = statBases[k];
+    if (!Number.isFinite(v) || v < 2 || v > 10) {
+      err.push(`Stat ${String(k).toUpperCase()} must be between 2 and 10.`);
+    } else {
+      statSum += v;
+    }
+  }
+  if (statSum !== points) {
+    err.push(`Stat bases sum to ${statSum} but Character Points are ${points}.`);
+  }
+
+  const pack = ROLE_CAREER_PACKAGES[role];
+  const specialName = ROLE_SPECIAL_ABILITIES[role];
+  let careerTotal = 0;
+  for (const name of pack) {
+    const v = careerValuesByName[name];
+    if (!Number.isFinite(v)) {
+      err.push(`Career skill "${name}" is missing a value.`);
+      continue;
+    }
+    const isSpecial = name === specialName;
+    if (isSpecial) {
+      if (v < 1 || v > 10) err.push(`Special ability must be between 1 and 10.`);
+    } else if (v < 0 || v > 10) {
+      err.push(`Career skill "${name}" must be between 0 and 10.`);
+    }
+    careerTotal += v;
+  }
+  for (const key of Object.keys(careerValuesByName)) {
+    if (!pack.includes(key)) err.push(`Unknown career skill "${key}" for role ${role}.`);
+  }
+  if (careerTotal !== 40) err.push(`Career skills must total 40 points (currently ${careerTotal}).`);
+
+  const careerNames = new Set(pack);
+  const refB = statBases.ref;
+  const intB = statBases.int;
+  const pickupPool = Math.max(0, Math.floor(refB + intB));
+  const seenPickup = new Set<string>();
+  let pickupSpent = 0;
+  for (const row of pickup) {
+    if (seenPickup.has(row.name)) {
+      err.push(`Duplicate pickup skill "${row.name}".`);
+      continue;
+    }
+    seenPickup.add(row.name);
+    if (!PICKUP_NAME_SET.has(row.name)) {
+      err.push(`"${row.name}" is not a valid pickup skill for this app.`);
+    }
+    if (careerNames.has(row.name)) {
+      err.push(`Pickup skill "${row.name}" overlaps the career package.`);
+    }
+    const v = row.value;
+    if (!Number.isFinite(v) || v < 0 || v > 10) {
+      err.push(`Pickup "${row.name}" must be between 0 and 10.`);
+    } else {
+      pickupSpent += v;
+    }
+  }
+  if (pickupSpent > pickupPool) {
+    err.push(`Pickup skills spend ${pickupSpent} points but REF+INT allows ${pickupPool}.`);
+  }
+
+  if (!Number.isFinite(input.eurobucks) || input.eurobucks < 0) {
+    err.push('Starting eurobucks must be a non-negative number.');
+  }
+
+  return err;
+}
+
+function careerSkillsFromFixedValues(
+  role: RoleType,
+  valuesByName: Record<string, number>,
+): { skills: Skill[]; specialValue: number } {
+  const pack = ROLE_CAREER_PACKAGES[role];
+  const specialName = ROLE_SPECIAL_ABILITIES[role];
+  const skills: Skill[] = pack.map((name) => {
+    const isSpecial = name === specialName;
+    const st = linkedStatForSkill(name, role, isSpecial);
+    return {
+      id: crypto.randomUUID(),
+      name,
+      value: valuesByName[name] ?? 0,
+      linkedStat: st,
+      category: skillCategory(st),
+      isChipped: false,
+      ...(isSpecial ? { isSpecialAbility: true } : {}),
+    };
+  });
+  return { skills, specialValue: valuesByName[specialName] ?? 0 };
+}
+
+function pickupSkillsFromFixed(entries: { name: string; value: number }[]): Skill[] {
+  return entries
+    .filter((e) => e.value > 0)
+    .map(({ name, value }) => {
+      const st = SKILL_LINKED_STAT[name] ?? 'int';
+      return {
+        id: crypto.randomUUID(),
+        name,
+        value,
+        linkedStat: st,
+        category: skillCategory(st),
+        isChipped: false,
+      };
+    });
+}
+
+/** Build a recalculated Character from a validated chargen draft (wizard submit). */
+export function buildCp2020CharacterFromChargen(input: Cp2020ChargenBuildInput): Character {
+  const errors = validateCp2020Chargen(input);
+  if (errors.length > 0) {
+    throw new Error(errors.join(' '));
+  }
+
+  const kind = input.kind ?? 'character';
+  const userId = kind === 'npc' ? '' : (input.userId ?? '');
+  const { skills: careerSkills, specialValue } = careerSkillsFromFixedValues(input.role, input.careerValuesByName);
+  const pickupSkills = pickupSkillsFromFixed(input.pickup);
+  const allSkills = [...careerSkills, ...pickupSkills];
+
+  const stats: Stats = {
+    int: createStatBlock(input.statBases.int),
+    ref: createStatBlock(input.statBases.ref),
+    tech: createStatBlock(input.statBases.tech),
+    cool: createStatBlock(input.statBases.cool),
+    attr: createStatBlock(input.statBases.attr),
+    luck: createStatBlock(input.statBases.luck),
+    ma: createStatBlock(input.statBases.ma),
+    bt: createStatBlock(input.statBases.bt),
+    emp: createStatBlock(input.statBases.emp),
+  };
+
+  const typ: Character['type'] = kind === 'npc' ? 'npc' : 'character';
+  const raw: Character = {
+    id: crypto.randomUUID(),
+    userId,
+    sessionId: input.sessionId,
+    name: input.name,
+    type: typ,
+    isNpc: typ === 'npc',
+    team: typ === 'npc' ? 'hostile' : 'party',
+    imageUrl: '',
+    role: input.role,
+    age: input.age,
+    points: input.points,
+    stats,
+    specialAbility: { name: ROLE_SPECIAL_ABILITIES[input.role], value: specialValue },
+    reputation: 0,
+    improvementPoints: 0,
+    skills: allSkills,
+    damage: 0,
+    isStunned: false,
+    isStabilized: false,
+    conditions: [],
+    hitLocations: DEFAULT_HIT_LOCATIONS,
+    sdp: {
+      sum: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },
+      current: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },
+    },
+    eurobucks: Math.floor(input.eurobucks),
     items: [],
     combatModifiers: { initiative: 0, stunSave: 0 },
     netrunDeck: null,

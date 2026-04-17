@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import type { User } from '@supabase/supabase-js';
-import { CharacterSheet, DiceRoller } from '@/components/character';
+import { CharacterSheet, ChargenWizard, DiceRoller } from '@/components/character';
 import { ChatInterface, ResizableChatPanel } from '@/components/chat';
 import { PopoutCharacterSheet } from '@/components/session/PopoutCharacterSheet';
 import { InitiativeTracker } from '@/components/session/InitiativeTracker';
@@ -16,9 +16,7 @@ import { useSessionRealtimeSync } from '@/lib/hooks/useSessionRealtimeSync';
 import { useCharacterCloudSync } from '@/lib/hooks/useCharacterCloudSync';
 import { useShallow } from 'zustand/react/shallow';
 import type { Character } from '@/lib/types';
-import { createCryptoRng, generateCp2020Character } from '@/lib/character-gen/cp2020-char-gen';
 import type { SessionPresencePeer } from '@/lib/realtime';
-import { serializeCharacterForDb } from '@/lib/db/character-serialize';
 import {
   MAP_GRID_DEFAULT_COLS,
   MAP_GRID_DEFAULT_ROWS,
@@ -51,7 +49,7 @@ export function SessionRoomClient() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [claimError, setClaimError] = useState<string | null>(null);
   const [presencePeers, setPresencePeers] = useState<SessionPresencePeer[]>([]);
-  const [addCharBusyUserId, setAddCharBusyUserId] = useState<string | null>(null);
+  const [chargenFor, setChargenFor] = useState<{ userId: string; suggestedName: string } | null>(null);
   const [tokenPlaceBusyId, setTokenPlaceBusyId] = useState<string | null>(null);
   const [npcRemoveBusy, setNpcRemoveBusy] = useState(false);
 
@@ -350,43 +348,6 @@ export function SessionRoomClient() {
     [user],
   );
 
-  const handleAddCharacterForUser = useCallback(
-    async (targetUserId: string) => {
-      if (!sessionId || !user) return;
-      if (!canAddCharacterForUser(targetUserId)) return;
-      setAddCharBusyUserId(targetUserId);
-      setClaimError(null);
-      try {
-        const ownedCount = characters.allIds.filter((id) => characters.byId[id].userId === targetUserId).length;
-        const peer = presencePeers.find((p) => p.userId === targetUserId);
-        const label =
-          peer?.email?.split('@')[0]?.trim() ||
-          (targetUserId === user.id ? 'You' : `User ${targetUserId.slice(0, 8)}`);
-        // Must use a real RNG: a constant rng (e.g. () => 0.5) can infinite-loop in stat allocation
-        // when one stat hits 10 and the same index is picked forever.
-        const c = generateCp2020Character({
-          sessionId,
-          userId: targetUserId,
-          name: `${label} · ${ownedCount + 1}`,
-          role: 'Solo',
-          method: 'cinematic',
-          cinematicPreset: 'average',
-          rng: createCryptoRng(),
-        });
-        const { error } = await supabase.from('characters').insert({
-          session_id: sessionId,
-          user_id: targetUserId,
-          type: 'character',
-          ...serializeCharacterForDb(c),
-        });
-        if (error) setClaimError(error.message);
-      } finally {
-        setAddCharBusyUserId(null);
-      }
-    },
-    [sessionId, user, canAddCharacterForUser, characters.allIds, characters.byId, presencePeers],
-  );
-
   const patchNpcDamage = useCallback(
     async (delta: number) => {
       const sel = selectedCharacter;
@@ -629,11 +590,21 @@ export function SessionRoomClient() {
                             {showAdd && (
                               <button
                                 type="button"
-                                disabled={addCharBusyUserId === peer.userId}
-                                onClick={() => void handleAddCharacterForUser(peer.userId)}
+                                onClick={() => {
+                                  const ownedCount = characters.allIds.filter(
+                                    (id) => characters.byId[id].userId === peer.userId,
+                                  ).length;
+                                  const label =
+                                    peer.email?.split('@')[0]?.trim() ||
+                                    (peer.userId === user.id ? 'You' : `User ${peer.userId.slice(0, 8)}`);
+                                  setChargenFor({
+                                    userId: peer.userId,
+                                    suggestedName: `${label} · ${ownedCount + 1}`,
+                                  });
+                                }}
                                 className="w-full text-[11px] uppercase tracking-wide py-1.5 rounded border border-violet-700/50 text-violet-200 hover:bg-violet-950/40 disabled:opacity-50"
                               >
-                                {addCharBusyUserId === peer.userId ? 'Adding…' : 'Add character'}
+                                New character…
                               </button>
                             )}
                           </div>
@@ -1038,6 +1009,21 @@ export function SessionRoomClient() {
         )}
 
       {/* Token right-click sheet popout */}
+      {chargenFor && sessionId && user && (
+        <ChargenWizard
+          open
+          onClose={() => setChargenFor(null)}
+          sessionId={sessionId}
+          userId={chargenFor.userId}
+          defaultName={chargenFor.suggestedName}
+          supabase={supabase}
+          onCreated={(id) => {
+            setChargenFor(null);
+            selectCharacter(id);
+          }}
+        />
+      )}
+
       {tokenSheetCharacter && (
         <PopoutCharacterSheet
           title={tokenSheetCharacter.name}
