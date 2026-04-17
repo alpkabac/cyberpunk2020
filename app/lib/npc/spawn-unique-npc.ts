@@ -252,6 +252,7 @@ export function buildUniqueGmNpc(input: BuildUniqueGmNpcInput): Character {
     skills,
     damage: Math.max(0, Math.min(41, Math.floor(input.damage))),
     isStunned: false,
+    isStabilized: false,
     conditions: [],
     hitLocations: { ...EMPTY_HIT },
     sdp: {

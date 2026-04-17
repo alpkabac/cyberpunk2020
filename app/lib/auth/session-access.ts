@@ -28,3 +28,14 @@ export async function userHasSessionAccess(
   if (cErr) return false;
   return (chars?.length ?? 0) > 0;
 }
+
+/** True if the user created the session (GM / referee). */
+export async function userIsSessionGm(
+  admin: SupabaseClient,
+  sessionId: string,
+  userId: string,
+): Promise<boolean> {
+  const { data, error } = await admin.from('sessions').select('created_by').eq('id', sessionId).maybeSingle();
+  if (error || !data) return false;
+  return (data as { created_by?: string | null }).created_by === userId;
+}

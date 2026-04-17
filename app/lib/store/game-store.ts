@@ -20,6 +20,7 @@ import {
   DiceRollIntent,
   PendingRollForVoice,
   PendingVoiceGmPayload,
+  CombatState,
 } from '../types';
 import { BROADCAST_EVENTS } from '../realtime/realtime-events';
 import {
@@ -31,8 +32,14 @@ import {
 } from '../game-logic/formulas';
 import { maxDamageFromDiceFormula } from '../game-logic/dice';
 import { getAmmoConsumed } from '../game-logic/lookups';
+import { severedConditionName } from '../game-logic/conditions';
 import type { LoadedSessionSnapshot } from '../realtime/session-load';
 import { characterRowToCharacter, mergeCharacterRowWithRealtime } from '../realtime/db-mapper';
+import { parseCombatStateJson } from '../session/combat-state';
+
+function deathSaveBonusFromMods(m: Character['combatModifiers'] | undefined): number {
+  return (m?.stunSave ?? 0) + (m?.deathSave ?? 0);
+}
 
 // ============================================================================
 // State Interface
@@ -47,6 +54,7 @@ interface GameState {
     activeScene: Scene | null;
     settings: SessionSettings;
     sessionSummary: string;
+    combatState: CombatState | null;
   };
 
   characters: {
@@ -88,6 +96,13 @@ interface GameState {
      * Cleared after resolve (flat saves) or when the roller closes.
      */
     diceRollIntent: DiceRollIntent | null;
+    /**
+     * Set when an incoming hit forces an immediate Mortal-0 death save
+     * (limb severance). Consumed right after the auto-opened stun save is
+     * resolved: the roller is re-armed with a death-save intent so the roll
+     * happens on the attacker's turn without a manual click.
+     */
+    pendingForcedDeathSaveFor: string | null;
     isChatInputFocused: boolean;
     isVoiceRecording: boolean;
     /** Session voice: STT done, not sent to GM yet. */
@@ -99,6 +114,11 @@ interface GameState {
     sessionRecordingStartedBy: string | null;
     /** True after `/api/gm` returned while GM reply is still generating (narration not in chat yet). */
     gmNarrationPending: boolean;
+    /**
+     * After start-of-turn stun recovery, pause before opening the chained ongoing death save
+     * so the player acknowledges the stun outcome.
+     */
+    startOfTurnDeathSaveAck: { characterId: string } | null;
     /** Rolls saved for merge with session voice ("Save for voice"); ordered by `rolledAtMs` when sending. */
     pendingRollsForVoice: PendingRollForVoice[];
     /** Incremented on `SESSION_VOICE_STOP_ALL` broadcast so chat can stop remote session takes. */
@@ -185,17 +205,65 @@ interface GameActions {
   setIncludeSpecialAbilityInSkillRolls: (include: boolean) => void;
   /** Open flat d10 with intent so the roller applies stun save vs target and sets isStunned. */
   beginStunSaveRoll: (characterId: string) => void;
-  /** Open flat d10 with intent (only if mortally wounded); fail kills the character. */
-  beginDeathSaveRoll: (characterId: string) => void;
+  /** Start of turn while stunned: success clears STUNNED. */
+  beginStunRecoveryRoll: (characterId: string) => void;
+  /** Open dice UI: request AI-GM ruling on stun (no roll; POST /api/gm). */
+  beginStunOverrideRequest: (characterId: string) => void;
+  /**
+   * Open flat d10 with intent (only if mortally wounded); fail kills the character.
+   * When `isStabilized`, does nothing unless `ignoreStabilization` (limb-severance chain).
+   */
+  beginDeathSaveRoll: (
+    characterId: string,
+    options?: { ignoreStabilization?: boolean },
+  ) => void;
   clearDiceRollIntent: () => void;
   /** Apply stun save from a flat d10 total (for AI / automation). Uses derived stun target + combatModifiers.stunSave. */
   applyStunSaveRollResult: (characterId: string, flatRollTotal: number) => void;
+  /** Start-of-turn stun recovery; may chain death save or clear combat pending flag. */
+  applyStunRecoveryRollResult: (characterId: string, flatRollTotal: number) => void;
   /**
    * Apply death save from a flat d10 total (for AI / automation).
    * Fail → damage 41 (Dead on wound track). Per FNFF: failed death save while Mortally wounded means death;
    * we represent that as the Dead state (damage ≥ 41), not a separate flag.
    */
   applyDeathSaveRollResult: (characterId: string, flatRollTotal: number) => void;
+
+  /**
+   * Medic stabilization (FNFF): total ≥ patient damage. On success, sets
+   * `isStabilized` on the patient. Logs outcome to chat.
+   */
+  applyStabilizationRollResult: (
+    patientCharacterId: string,
+    success: boolean,
+    detail: { rollTotal: number; targetDamage: number },
+  ) => void;
+
+  /**
+   * NPC stun save: roll flat 1d10 internally, apply `isStunned`, log to chat.
+   * Used by applyDamage for NPCs (they can't click the dice modal).
+   */
+  autoResolveNpcStunSave: (
+    characterId: string,
+  ) => { roll: number; target: number; success: boolean } | null;
+
+  /**
+   * NPC death save: roll flat 1d10 internally, apply death (damage → 41) on
+   * failure, log to chat. Skips if the character isn't mortally wounded.
+   */
+  autoResolveNpcDeathSave: (
+    characterId: string,
+  ) => { roll: number; target: number; success: boolean } | null;
+
+  /** Open stun recovery or ongoing death save for `startOfTurnSavesPendingFor` flow. */
+  openStartOfTurnSavesIfNeeded: (characterId: string) => void;
+  /** POST clear_turn_saves_pending (participant); updates local combat state from response. */
+  clearStartOfTurnSavesPendingRemote: () => Promise<void>;
+  /** Continue start-of-turn chain: open ongoing death save after stun-recovery ack. */
+  proceedStartOfTurnDeathSaveAfterAck: () => void;
+  /** Close stun→death ack without opening the roller (e.g. pause); pending combat flag remains. */
+  dismissStartOfTurnDeathSaveAck: () => void;
+
   setVoiceRecording: (isRecording: boolean) => void;
   setPendingVoiceGm: (payload: PendingVoiceGmPayload | null) => void;
   clearPendingVoiceGm: () => void;
@@ -265,6 +333,40 @@ function voiceUiFieldsFromSessionSettings(
   };
 }
 
+/**
+ * Emit a dice-type chat message describing an NPC's auto-resolved stun or death
+ * save so the GM can see the roll vs. target without a modal. Used by the
+ * auto-resolve helpers below — PCs still roll via the DiceRoller.
+ */
+function appendAutoSaveChatMessage(
+  addChatMessage: (message: ChatMessage) => void,
+  characterName: string,
+  label: 'Stun save' | 'Death save',
+  roll: number,
+  target: number,
+  success: boolean,
+): void {
+  const outcome =
+    label === 'Death save'
+      ? success
+        ? 'survived'
+        : 'DIED'
+      : success
+      ? 'stayed conscious'
+      : 'STUNNED';
+  addChatMessage({
+    id:
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+    speaker: characterName,
+    text: `${label}: rolled ${roll} vs. ≤${target} — ${outcome}.`,
+    timestamp: Date.now(),
+    type: 'roll',
+    metadata: { kind: 'auto_npc_save', label, roll, target, success },
+  });
+}
+
 // ============================================================================
 // Initial State
 // ============================================================================
@@ -285,6 +387,7 @@ const initialState: GameState = {
       sessionRecordingStartedBy: null,
     },
     sessionSummary: '',
+    combatState: null,
   },
 
   characters: {
@@ -316,6 +419,7 @@ const initialState: GameState = {
     diceFormula: null,
     includeSpecialAbilityInSkillRolls: false,
     diceRollIntent: null,
+    pendingForcedDeathSaveFor: null,
     isChatInputFocused: false,
     isVoiceRecording: false,
     pendingVoiceGm: null,
@@ -323,6 +427,7 @@ const initialState: GameState = {
     sessionRecordingGroupActive: false,
     sessionRecordingStartedBy: null,
     gmNarrationPending: false,
+    startOfTurnDeathSaveAck: null,
     pendingRollsForVoice: [],
     sessionVoiceStopAllTick: 0,
     sessionVoiceStopTurnId: null,
@@ -414,23 +519,31 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     }),
 
   /**
-   * Full CP2020 damage pipeline:
+   * Full CP2020 damage pipeline (FNFF):
    * 1. Head hits: damage x2
    * 2. AP ammo: halve SP
-   * 3. Subtract SP (and ablate SP by 1 if location specified)
-   * 4. Subtract BTM
+   * 3. Subtract SP (ablation is applied ONLY when the attack penetrates SP)
+   * 4. Subtract BTM (minimum 1 point if anything penetrated armor)
    * 5. Add remainder to damage total
+   * 6. >8 damage to a limb → ensure Mortal 0 (forced death save next);
+   *    >8 damage to Head → automatic death (damage = 41).
+   * 7. If any damage landed and the character isn't already dead, auto-open
+   *    the Stun Save roller so the book-required stun save isn't skipped.
    *
    * Point blank (FNFF): if pointBlank and weaponDamageFormula parse as NdS+M, base damage = max dice total.
    * Otherwise rawDamage is used (already your max if you typed it in manually).
    */
-  applyDamage: (characterId, rawDamage, location, isAP = false, pointBlank = false, weaponDamageFormula = null) =>
+  applyDamage: (characterId, rawDamage, location, isAP = false, pointBlank = false, weaponDamageFormula = null) => {
+    let autoOpenStunFor: string | null = null;
+    let queueForcedDeathFor: string | null = null;
+    let targetIsNpc = false;
     set((state) => {
       const character =
         state.characters.byId[characterId] ?? state.npcs.byId[characterId];
       if (!character) return state;
 
       const isNpc = character.type === 'npc';
+      targetIsNpc = isNpc;
 
       let effectiveRaw = rawDamage;
       if (pointBlank && weaponDamageFormula) {
@@ -445,29 +558,74 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
 
       const result = calculateDamage(effectiveRaw, location, sp, btm, isAP);
 
-      const newDamage = Math.min(41, Math.max(0, character.damage + result.finalDamage));
+      // Severance / head auto-kill escalate the final damage before applying.
+      // Head: instant kill (damage 41). Limb: force Mortal 0 minimum (13).
+      const addedDamage = result.finalDamage;
+      let forcedDamageTotal: number | null = null;
+      if (result.headAutoKill) {
+        forcedDamageTotal = 41;
+      } else if (result.limbSevered) {
+        forcedDamageTotal = Math.max(character.damage + addedDamage, 13);
+      }
 
-      // Apply ablation to hit location (increment ablation counter only;
-      // stoppingPower is synced from armor on recalc, effective SP = stoppingPower - ablation)
+      const newDamage =
+        forcedDamageTotal !== null
+          ? Math.min(41, Math.max(0, forcedDamageTotal))
+          : Math.min(41, Math.max(0, character.damage + addedDamage));
+
+      // Ablation: only on a penetrating hit (book: "attack that actually exceeds the armor's SP").
       let updatedHitLocations = character.hitLocations;
-      if (location && character.hitLocations[location] && effectiveRaw > 0) {
-        const effectiveSP = Math.max(0, character.hitLocations[location].stoppingPower - character.hitLocations[location].ablation);
-        if (effectiveSP > 0) {
-          updatedHitLocations = {
-            ...character.hitLocations,
-            [location]: {
-              ...character.hitLocations[location],
-              ablation: character.hitLocations[location].ablation + 1,
-            },
-          };
+      if (location && character.hitLocations[location] && result.penetrated) {
+        updatedHitLocations = {
+          ...character.hitLocations,
+          [location]: {
+            ...character.hitLocations[location],
+            ablation: character.hitLocations[location].ablation + 1,
+          },
+        };
+      }
+
+      // Persistent severance: on a limb-severing hit, add a `severed_<limb>`
+      // condition so the Body tab, GM context, and save/load preserve it.
+      let updatedConditions = character.conditions;
+      if (result.limbSevered && location) {
+        const sevName = severedConditionName(location);
+        if (sevName && !updatedConditions.some((c) => c.name === sevName)) {
+          updatedConditions = [...updatedConditions, { name: sevName, duration: null }];
         }
       }
+
+      const tookDamage = newDamage > character.damage;
+      const stillAlive = newDamage < 41;
 
       const updated = recalcCharacter({
         ...character,
         damage: newDamage,
         hitLocations: updatedHitLocations,
+        conditions: updatedConditions,
+        ...(tookDamage ? { isStabilized: false } : {}),
       });
+
+      // Queue a stun save if the character actually took damage and isn't dead.
+      // Per FNFF: "Every time a character takes damage, he must make a save."
+      if (tookDamage && stillAlive) {
+        autoOpenStunFor = characterId;
+      }
+
+      // FNFF limb severance (>8 final damage to a limb): forces an immediate
+      // Mortal-0 death save. Head auto-kill sets damage to 41 (stillAlive=false),
+      // so no death save to roll there.
+      if (result.limbSevered && stillAlive) {
+        queueForcedDeathFor = characterId;
+      }
+
+      // Only queue the forced death save in UI state for PCs (they roll in the
+      // dice modal after resolving stun). NPCs auto-resolve inline below, so we
+      // don't want a stale queue entry for them.
+      const nextUi =
+        queueForcedDeathFor !== null && !isNpc
+          ? { ...state.ui, pendingForcedDeathSaveFor: queueForcedDeathFor }
+          : state.ui;
 
       if (isNpc) {
         return {
@@ -475,6 +633,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
             ...state.npcs,
             byId: { ...state.npcs.byId, [characterId]: updated },
           },
+          ui: nextUi,
         };
       }
       return {
@@ -482,8 +641,37 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
           ...state.characters,
           byId: { ...state.characters.byId, [characterId]: updated },
         },
+        ui: nextUi,
       };
-    }),
+    });
+
+    if (targetIsNpc) {
+      // NPCs can't click a dice modal, so resolve saves automatically. Stun
+      // first (if damage landed and they're alive); then, if a limb was
+      // severed and they're still alive, the forced Mortal-0 death save.
+      if (autoOpenStunFor) {
+        get().autoResolveNpcStunSave(autoOpenStunFor);
+      }
+      if (queueForcedDeathFor) {
+        const stillAlive = (get().npcs.byId[queueForcedDeathFor]?.damage ?? 41) < 41;
+        if (stillAlive) {
+          get().autoResolveNpcDeathSave(queueForcedDeathFor);
+        }
+      }
+      return;
+    }
+
+    if (autoOpenStunFor) {
+      // PC path: open the roller so the player rolls. applyStunSaveRollResult
+      // consumes pendingForcedDeathSaveFor and chains into the death save.
+      get().beginStunSaveRoll(autoOpenStunFor);
+    } else if (queueForcedDeathFor) {
+      // Edge case: no stun save queued (e.g. damage didn't actually increase),
+      // but severance still forces a death save. Consume immediately.
+      set((s) => ({ ui: { ...s.ui, pendingForcedDeathSaveFor: null } }));
+      get().beginDeathSaveRoll(queueForcedDeathFor, { ignoreStabilization: true });
+    }
+  },
 
   deductMoney: (characterId, amount) =>
     set((state) => {
@@ -905,6 +1093,9 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
         isDiceRollerOpen: false,
         diceFormula: null,
         diceRollIntent: null,
+        // If the user dismisses before resolving a chained save, drop the queue
+        // so it can't leak into a later, unrelated stun save.
+        pendingForcedDeathSaveFor: null,
       },
     })),
 
@@ -927,10 +1118,51 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     }));
   },
 
-  beginDeathSaveRoll: (characterId) => {
+  beginStunOverrideRequest: (characterId) => {
+    const char = get().characters.byId[characterId] ?? get().npcs.byId[characterId];
+    if (!char) return;
+    const sessionId = get().session.id;
+    set((state) => ({
+      ui: {
+        ...state.ui,
+        isDiceRollerOpen: true,
+        diceFormula: 'request:stun_override',
+        diceRollIntent: {
+          kind: 'stun_override_request',
+          characterId,
+          sessionId: sessionId ?? undefined,
+          speakerName: char.name,
+          rollSummary: 'Stun override (Ask AI-GM)',
+        },
+      },
+    }));
+  },
+
+  beginStunRecoveryRoll: (characterId) => {
+    const char = get().characters.byId[characterId] ?? get().npcs.byId[characterId];
+    if (!char?.isStunned) return;
+    const sessionId = get().session.id;
+    set((state) => ({
+      ui: {
+        ...state.ui,
+        isDiceRollerOpen: true,
+        diceFormula: 'flat:1d10',
+        diceRollIntent: {
+          characterId,
+          kind: 'stun_recovery',
+          sessionId: sessionId ?? undefined,
+          speakerName: char?.name,
+          rollSummary: 'Stun recovery',
+        },
+      },
+    }));
+  },
+
+  beginDeathSaveRoll: (characterId, options) => {
     const char = get().characters.byId[characterId] ?? get().npcs.byId[characterId];
     const target = char?.derivedStats?.deathSaveTarget ?? -1;
     if (target < 0) return;
+    if (!options?.ignoreStabilization && char?.isStabilized) return;
     const sessionId = get().session.id;
     set((state) => ({
       ui: {
@@ -960,17 +1192,176 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     const target = char.derivedStats.stunSaveTarget + bonus;
     const success = isFlatSaveSuccess(flatRollTotal, target);
     get().updateCharacterField(characterId, 'isStunned', !success);
+
+    // Chain into the forced Mortal-0 death save queued by applyDamage when a
+    // limb was severed. Consume the queue and re-arm the roller with a death
+    // intent (DiceRoller detects the intent change and auto-rolls once).
+    const pending = get().ui.pendingForcedDeathSaveFor;
+    if (pending && pending === characterId) {
+      set((s) => ({ ui: { ...s.ui, pendingForcedDeathSaveFor: null } }));
+      // Only chain if the character is still mortally wounded (dead save
+      // target is -1 when Uninjured/Light/Serious/Critical → no-op).
+      const updatedChar = get().characters.byId[characterId] ?? get().npcs.byId[characterId];
+      if ((updatedChar?.derivedStats?.deathSaveTarget ?? -1) >= 0) {
+        get().beginDeathSaveRoll(characterId, { ignoreStabilization: true });
+      }
+    }
+  },
+
+  applyStunRecoveryRollResult: (characterId, flatRollTotal) => {
+    const char = get().characters.byId[characterId] ?? get().npcs.byId[characterId];
+    if (!char?.derivedStats) return;
+    const bonus = char.combatModifiers?.stunSave ?? 0;
+    const target = char.derivedStats.stunSaveTarget + bonus;
+    const success = isFlatSaveSuccess(flatRollTotal, target);
+    get().updateCharacterField(characterId, 'isStunned', !success);
+
+    const pendingTurn = get().session.combatState?.startOfTurnSavesPendingFor;
+    if (pendingTurn !== characterId) return;
+
+    const updatedChar = get().characters.byId[characterId] ?? get().npcs.byId[characterId];
+    const needsDeath =
+      (updatedChar?.derivedStats?.deathSaveTarget ?? -1) >= 0 && !updatedChar?.isStabilized;
+
+    if (needsDeath) {
+      set((s) => ({
+        ui: { ...s.ui, startOfTurnDeathSaveAck: { characterId } },
+      }));
+      get().closeDiceRoller();
+    } else {
+      void get().clearStartOfTurnSavesPendingRemote();
+    }
   },
 
   applyDeathSaveRollResult: (characterId, flatRollTotal) => {
     const char = get().characters.byId[characterId] ?? get().npcs.byId[characterId];
     if (!char?.derivedStats) return;
-    const saveBonus = char.combatModifiers?.stunSave ?? 0;
-    const target = char.derivedStats.deathSaveTarget + saveBonus;
+    const target = char.derivedStats.deathSaveTarget + deathSaveBonusFromMods(char.combatModifiers);
     if (char.derivedStats.deathSaveTarget < 0) return;
+    if (char.isStabilized) return;
     if (!isFlatSaveSuccess(flatRollTotal, target)) {
       get().updateCharacterField(characterId, 'damage', 41);
     }
+    const pendingTurn = get().session.combatState?.startOfTurnSavesPendingFor;
+    if (pendingTurn === characterId) {
+      void get().clearStartOfTurnSavesPendingRemote();
+    }
+    set((s) => ({
+      ui: {
+        ...s.ui,
+        startOfTurnDeathSaveAck:
+          s.ui.startOfTurnDeathSaveAck?.characterId === characterId
+            ? null
+            : s.ui.startOfTurnDeathSaveAck,
+      },
+    }));
+  },
+
+  proceedStartOfTurnDeathSaveAfterAck: () => {
+    const id = get().ui.startOfTurnDeathSaveAck?.characterId;
+    if (!id) return;
+    set((s) => ({ ui: { ...s.ui, startOfTurnDeathSaveAck: null } }));
+    get().beginDeathSaveRoll(id);
+  },
+
+  dismissStartOfTurnDeathSaveAck: () =>
+    set((s) => ({ ui: { ...s.ui, startOfTurnDeathSaveAck: null } })),
+
+  openStartOfTurnSavesIfNeeded: (characterId) => {
+    if (get().ui.isDiceRollerOpen) return;
+    if (get().ui.startOfTurnDeathSaveAck?.characterId === characterId) return;
+    const char = get().characters.byId[characterId] ?? get().npcs.byId[characterId];
+    if (!char) return;
+    if (char.isStunned) {
+      get().beginStunRecoveryRoll(characterId);
+      return;
+    }
+    const needsDeath =
+      (char.derivedStats?.deathSaveTarget ?? -1) >= 0 && !char.isStabilized;
+    if (needsDeath) {
+      get().beginDeathSaveRoll(characterId);
+    }
+  },
+
+  clearStartOfTurnSavesPendingRemote: async () => {
+    const sessionId = get().session.id?.trim();
+    if (!sessionId) return;
+    const { supabase } = await import('../supabase');
+    const token = (await supabase.auth.getSession()).data.session?.access_token;
+    if (!token) return;
+    const res = await fetch(`/api/session/${encodeURIComponent(sessionId)}/combat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ action: 'clear_turn_saves_pending' }),
+    });
+    const j = (await res.json().catch(() => ({}))) as { combat_state?: unknown };
+    if (!res.ok) return;
+    if (j.combat_state !== undefined && j.combat_state !== null) {
+      const parsed = parseCombatStateJson(j.combat_state);
+      if (parsed) {
+        set((s) => ({ session: { ...s.session, combatState: parsed } }));
+      }
+    }
+  },
+
+  applyStabilizationRollResult: (patientCharacterId, success, detail) => {
+    const char =
+      get().characters.byId[patientCharacterId] ?? get().npcs.byId[patientCharacterId];
+    const patientName = char?.name ?? 'Patient';
+    if (success) {
+      get().updateCharacterField(patientCharacterId, 'isStabilized', true);
+    }
+    get().addChatMessage({
+      id:
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+      speaker: patientName,
+      text: `Stabilization: medic total ${detail.rollTotal} vs. ≥${detail.targetDamage} (patient damage) — ${
+        success
+          ? 'STABILIZED (ongoing death saves suppressed until new damage).'
+          : 'failed.'
+      }`,
+      timestamp: Date.now(),
+      type: 'roll',
+      metadata: {
+        kind: 'stabilization',
+        patientCharacterId,
+        success,
+        rollTotal: detail.rollTotal,
+        targetDamage: detail.targetDamage,
+      },
+    });
+  },
+
+  autoResolveNpcStunSave: (characterId) => {
+    const char = get().npcs.byId[characterId] ?? get().characters.byId[characterId];
+    if (!char?.derivedStats) return null;
+    const bonus = char.combatModifiers?.stunSave ?? 0;
+    const target = char.derivedStats.stunSaveTarget + bonus;
+    const roll = Math.floor(Math.random() * 10) + 1;
+    const success = isFlatSaveSuccess(roll, target);
+    get().updateCharacterField(characterId, 'isStunned', !success);
+    appendAutoSaveChatMessage(get().addChatMessage, char.name, 'Stun save', roll, target, success);
+    return { roll, target, success };
+  },
+
+  autoResolveNpcDeathSave: (characterId) => {
+    const char = get().npcs.byId[characterId] ?? get().characters.byId[characterId];
+    if (!char?.derivedStats) return null;
+    if (char.derivedStats.deathSaveTarget < 0) return null;
+    if (char.isStabilized) return null;
+    const target = char.derivedStats.deathSaveTarget + deathSaveBonusFromMods(char.combatModifiers);
+    const roll = Math.floor(Math.random() * 10) + 1;
+    const success = isFlatSaveSuccess(roll, target);
+    if (!success) {
+      get().updateCharacterField(characterId, 'damage', 41);
+    }
+    appendAutoSaveChatMessage(get().addChatMessage, char.name, 'Death save', roll, target, success);
+    return { roll, target, success };
   },
 
   setIncludeSpecialAbilityInSkillRolls: (include) =>
@@ -1116,6 +1507,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
           activeScene: snapshot.session.activeScene,
           settings: snapshot.session.settings,
           sessionSummary: snapshot.session.sessionSummary,
+          combatState: snapshot.session.combatState,
         },
         characters: { byId: byIdChar, allIds: allIdsChar },
         npcs: { byId: byIdNpc, allIds: allIdsNpc },
@@ -1130,6 +1522,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
         ui: {
           ...state.ui,
           ...voiceUiFieldsFromSessionSettings(snapshot.session.settings),
+          startOfTurnDeathSaveAck: null,
           sessionVoiceStopAllTick: 0,
           sessionVoicePeerStartTick: 0,
         },

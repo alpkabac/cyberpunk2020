@@ -39,6 +39,7 @@ function characterToRow(c: Character): Record<string, unknown> {
     skills: c.skills,
     damage: c.damage,
     is_stunned: c.isStunned,
+    is_stabilized: c.isStabilized,
     conditions: c.conditions,
     hit_locations: c.hitLocations,
     sdp: c.sdp,
@@ -102,6 +103,7 @@ const arbCharacter: fc.Arbitrary<Character> = fc.record({
   skills: fc.constant([]),
   damage: fc.integer({ min: 0, max: 40 }),
   isStunned: fc.boolean(),
+  isStabilized: fc.boolean(),
   conditions: fc.constant([]),
   hitLocations: fc.constant({} as Character['hitLocations']),
   sdp: fc.constant({

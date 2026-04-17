@@ -26,7 +26,7 @@ Hello **world**.
 describe('loadLoreRulesFromDir', () => {
   it('loads all rule files with unique ids', () => {
     const rules = loadLoreRulesFromDir(getLoreRulesDir());
-    expect(rules.length).toBeGreaterThanOrEqual(15);
+    expect(rules.length).toBeGreaterThanOrEqual(16);
     const ids = new Set(rules.map((r) => r.id));
     expect(ids.size).toBe(rules.length);
   });

@@ -3,6 +3,7 @@
 import React from 'react';
 import { Character, RoleType, ROLE_SPECIAL_ABILITIES } from '@/lib/types';
 import { useGameStore } from '@/lib/store/game-store';
+import { getActiveCombatCharacterId } from '@/lib/session/combat-state';
 import { StatsRow } from './StatsRow';
 import { WoundTracker } from './WoundTracker';
 
@@ -18,6 +19,9 @@ const ROLES: RoleType[] = [
 
 export function CharacterHeader({ character, editable }: CharacterHeaderProps) {
   const updateCharacterField = useGameStore((state) => state.updateCharacterField);
+  const combatState = useGameStore((s) => s.session.combatState);
+  const activeCombatId = getActiveCombatCharacterId(combatState);
+  const isTheirTurn = activeCombatId != null && activeCombatId === character.id;
 
   const handleFieldChange = (field: string, value: unknown) => {
     if (!editable) return;
@@ -34,6 +38,11 @@ export function CharacterHeader({ character, editable }: CharacterHeaderProps) {
 
   return (
     <header className="p-4 bg-[#f5f5dc] border-b-2 border-black">
+      {isTheirTurn && (
+        <div className="mb-3 px-2 py-1.5 bg-cyan-900/90 text-cyan-50 text-xs font-bold uppercase tracking-wide text-center border border-cyan-500/60 rounded">
+          Active initiative turn — this character is up
+        </div>
+      )}
       {/* Top Row: Name, Role, Age, REP, PTS */}
       <div className="flex items-center gap-4 mb-4">
         <div className="flex-grow">

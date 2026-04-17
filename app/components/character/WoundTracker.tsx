@@ -18,6 +18,10 @@ const CONDITION_COLORS: Record<string, string> = {
   poisoned: 'bg-green-200 text-green-800 border-green-500',
   drugged: 'bg-green-200 text-green-800 border-green-500',
   cyberpsychosis: 'bg-pink-200 text-pink-800 border-pink-500',
+  severed_right_arm: 'bg-red-900 text-white border-red-950',
+  severed_left_arm: 'bg-red-900 text-white border-red-950',
+  severed_right_leg: 'bg-red-900 text-white border-red-950',
+  severed_left_leg: 'bg-red-900 text-white border-red-950',
 };
 const DEFAULT_BADGE = 'bg-gray-200 text-gray-700 border-gray-400';
 
@@ -28,7 +32,7 @@ const COMMON_CONDITIONS = [
 
 export function WoundTracker({ character, editable }: WoundTrackerProps) {
   const updateCharacterField = useGameStore((state) => state.updateCharacterField);
-  const { damage, derivedStats, isStunned, conditions } = character;
+  const { damage, derivedStats, isStunned, isStabilized, conditions } = character;
 
   const [showAddForm, setShowAddForm] = useState(false);
   const [selectedCondition, setSelectedCondition] = useState(COMMON_CONDITIONS[0]);
@@ -183,6 +187,14 @@ export function WoundTracker({ character, editable }: WoundTrackerProps) {
                   </span>
                 )}
               </span>
+              {isStabilized && derivedStats.woundState.startsWith('Mortal') && (
+                  <span
+                    className="text-[9px] font-bold uppercase px-1.5 py-0.5 border rounded-sm border-teal-800 bg-teal-100 text-teal-950"
+                    title="Medically stabilized — ongoing death saves off until new damage"
+                  >
+                    Stabilized
+                  </span>
+                )}
             </div>
           )}
 

@@ -20,7 +20,7 @@ import {
 import {
   applyGmAddItem,
   applyGmAddMoney,
-  applyGmDamage,
+  applyGmDamageDetailed,
   applyGmDeductMoney,
   applyGmEquipItem,
   applyGmFieldUpdate,
@@ -31,8 +31,14 @@ import {
   applyGmSetCondition,
   applyGmUpdateAmmo,
 } from './character-mutations';
+import { npcApplyDamageStunSave, npcApplyDeathSave, rollFlatD10 } from './npc-save-rolls';
 import { rollDice } from '../game-logic/dice';
 import { resolveGmRequestRollForServer } from '../game-logic/resolve-gm-request-roll';
+import {
+  sessionAdvanceRound,
+  sessionEndCombat,
+  sessionStartCombat,
+} from '../session/session-combat-service';
 import type { LoreRule } from './lorebook';
 import { lookupRulesText } from './lorebook';
 
@@ -60,6 +66,9 @@ export type GmToolName =
   | 'update_ammo'
   | 'set_condition'
   | 'update_summary'
+  | 'start_combat'
+  | 'advance_round'
+  | 'end_combat'
   | 'spawn_npc'
   | 'spawn_random_npc'
   | 'spawn_unique_npc'
@@ -376,6 +385,24 @@ export function validateGmToolParameters(name: string, raw: unknown): { ok: true
       if (typeof summary !== 'string') return { ok: false, error: summary.error };
       return { ok: true, name: 'update_summary', args: raw };
     }
+    case 'start_combat': {
+      return { ok: true, name: 'start_combat', args: raw };
+    }
+    case 'advance_round': {
+      return { ok: true, name: 'advance_round', args: raw };
+    }
+    case 'end_combat': {
+      if (raw.clear_timed_conditions !== undefined && typeof raw.clear_timed_conditions !== 'boolean') {
+        return { ok: false, error: 'clear_timed_conditions must be a boolean if provided' };
+      }
+      if (raw.narration !== undefined && raw.narration !== null && typeof raw.narration !== 'string') {
+        return { ok: false, error: 'narration must be a string if provided' };
+      }
+      if (typeof raw.narration === 'string' && raw.narration.length > 4000) {
+        return { ok: false, error: 'narration must be at most 4000 characters' };
+      }
+      return { ok: true, name: 'end_combat', args: raw };
+    }
     case 'spawn_npc':
     case 'spawn_random_npc': {
       const v = validateFastSpawnNpcArgs(raw);
@@ -591,7 +618,7 @@ export async function executeGmTool(
       const location: Zone | null =
         typeof locRaw === 'string' && ZONES.includes(locRaw as Zone) ? (locRaw as Zone) : null;
       const rawD = Number(args.raw_damage);
-      const updated = applyGmDamage(
+      const { character: updated, info } = applyGmDamageDetailed(
         c,
         rawD,
         location,
@@ -599,10 +626,55 @@ export async function executeGmTool(
         optBool(args.point_blank) ?? false,
         optStr(args.weapon_damage_formula) ?? null,
       );
-      ctx.charactersById.set(id, updated);
-      const { error } = await saveCharacterToSupabase(ctx.supabase, updated);
+      let working = updated;
+      ctx.charactersById.set(id, working);
+      const { error } = await saveCharacterToSupabase(ctx.supabase, working);
       if (error) return { ok: false, name, error: error.message };
-      return { ok: true, name, result: { character_id: id, damage: updated.damage, woundState: updated.derivedStats?.woundState } };
+
+      const npcAutoRolls: Array<{
+        kind: 'stun_save' | 'death_save';
+        roll: number;
+        target: number;
+        success: boolean;
+      }> = [];
+
+      if (working.type === 'npc' && info.stunSaveRequired) {
+        const roll = rollFlatD10();
+        const r = npcApplyDamageStunSave(working, roll);
+        working = r.character;
+        npcAutoRolls.push({ kind: 'stun_save', roll, target: r.target, success: r.success });
+        ctx.charactersById.set(id, working);
+        const e2 = await saveCharacterToSupabase(ctx.supabase, working);
+        if (e2.error) return { ok: false, name, error: e2.error.message };
+      }
+
+      if (working.type === 'npc' && info.limbSevered && working.damage < 41) {
+        const roll = rollFlatD10();
+        const r = npcApplyDeathSave(working, roll);
+        working = r.character;
+        npcAutoRolls.push({ kind: 'death_save', roll, target: r.target, success: r.success });
+        ctx.charactersById.set(id, working);
+        const e3 = await saveCharacterToSupabase(ctx.supabase, working);
+        if (e3.error) return { ok: false, name, error: e3.error.message };
+      }
+
+      return {
+        ok: true,
+        name,
+        result: {
+          character_id: id,
+          damage: working.damage,
+          woundState: working.derivedStats?.woundState,
+          final_damage: info.finalDamage,
+          penetrated: info.penetrated,
+          head_multiplied: info.headMultiplied,
+          btm_clamped_to_one: info.btmClampedToOne,
+          limb_severed: info.limbSevered,
+          head_auto_kill: info.headAutoKill,
+          stun_save_required: info.stunSaveRequired,
+          ...(npcAutoRolls.length > 0 ? { npc_auto_rolls: npcAutoRolls } : {}),
+        },
+      };
     }
     case 'deduct_money': {
       const id = String(args.character_id);
@@ -931,6 +1003,26 @@ export async function executeGmTool(
         .eq('id', ctx.sessionId);
       if (error) return { ok: false, name, error: error.message };
       return { ok: true, name, result: { updated: true } };
+    }
+    case 'start_combat': {
+      const r = await sessionStartCombat(ctx.supabase, ctx.sessionId);
+      if (!r.ok) return { ok: false, name, error: r.error };
+      return { ok: true, name, result: { combat_state: r.combat_state } };
+    }
+    case 'advance_round': {
+      const r = await sessionAdvanceRound(ctx.supabase, ctx.sessionId);
+      if (!r.ok) return { ok: false, name, error: r.error };
+      return { ok: true, name, result: { combat_state: r.combat_state } };
+    }
+    case 'end_combat': {
+      const clearTimed = args.clear_timed_conditions === true;
+      const narration = typeof args.narration === 'string' ? args.narration : undefined;
+      const r = await sessionEndCombat(ctx.supabase, ctx.sessionId, {
+        clear_timed_conditions: clearTimed,
+        narration,
+      });
+      if (!r.ok) return { ok: false, name, error: r.error };
+      return { ok: true, name, result: { ended: true } };
     }
     case 'spawn_npc':
     case 'spawn_random_npc': {

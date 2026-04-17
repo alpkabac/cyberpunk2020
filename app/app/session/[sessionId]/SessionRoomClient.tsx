@@ -7,6 +7,8 @@ import type { User } from '@supabase/supabase-js';
 import { CharacterSheet, DiceRoller } from '@/components/character';
 import { ChatInterface, ResizableChatPanel } from '@/components/chat';
 import { PopoutCharacterSheet } from '@/components/session/PopoutCharacterSheet';
+import { InitiativeTracker } from '@/components/session/InitiativeTracker';
+import { StartOfTurnDeathSaveAck } from '@/components/session/StartOfTurnDeathSaveAck';
 import { MapCanvas, TokenContextCard } from '@/components/map';
 import { supabase } from '@/lib/supabase';
 import { useGameStore } from '@/lib/store/game-store';
@@ -534,6 +536,13 @@ export function SessionRoomClient() {
                   to create a character for this session.
                 </p>
               )}
+              <InitiativeTracker
+                sessionId={sessionId}
+                supabase={supabase}
+                isGm={isGm}
+                viewerUserId={user?.id ?? null}
+                gmRequestSpeakerName={selectedCharacter?.name ?? user.email ?? 'Referee'}
+              />
             </>
           )}
         </aside>
@@ -681,6 +690,7 @@ export function SessionRoomClient() {
 
       {/* Floating dice roller */}
       {user && cloudHydrated && !loadError && <DiceRoller />}
+      {user && cloudHydrated && !loadError && <StartOfTurnDeathSaveAck />}
 
       {/* Own character sheet popout (from toggle bar) */}
       {user &&

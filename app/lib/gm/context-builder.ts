@@ -2,7 +2,7 @@
  * Assembles LLM messages for the AI-GM (Requirements 3.6, 4.1).
  */
 
-import type { Character, ChatMessage, Scene, Token } from '../types';
+import type { Character, ChatMessage, CombatState, Scene, Token } from '../types';
 import { estimateTokens } from './lorebook';
 
 export const CORE_GM_RULES = `You are the Game Master for a Cyberpunk 2020 tabletop session (R. Talsorian Games).
@@ -18,7 +18,7 @@ If CHARACTERS_JSON is empty, the session has no sheets synced yet—say that and
 
 **Money:** Use \`add_money\` to reward eurobucks (payment, loot, rewards). Use \`deduct_money\` to subtract (purchases, bribes, fees). Never use update_character_field for eurobucks—use the dedicated tools.
 
-**Damage and healing:** Use \`apply_damage\` for the full damage pipeline (SP, BTM, ablation). Use \`heal_damage\` when a character receives medical care or rests—it reduces the damage counter. Do not set damage directly via update_character_field.
+**Damage and healing:** Use \`apply_damage\` for the full damage pipeline (SP, BTM, ablation). For **NPCs** (\`type: "npc"\`), the tool auto-rolls required **stun** and **limb-severance death** saves and returns \`npc_auto_rolls\` in the result—narrate those outcomes. Use \`heal_damage\` when a character receives medical care or rests—it reduces the damage counter. Do not set damage directly via update_character_field.
 
 **Dice — request_roll:** Prefer structured rolls so the client can build the same bonus as the character sheet. Set \`roll_kind\` to one of:
 - \`skill\`: pass \`character_id\` (UUID from CHARACTERS_JSON) and \`skill_id\` (UUID from that character's \`skills[]\` in JSON). Do not hand-add stat + skill points; the app computes \`1d10+total\`. Optional \`formula\` is ignored when resolution succeeds.
@@ -35,7 +35,11 @@ Use \`roll_dice\` to roll server-side for NPCs, random encounters, hit location,
 
 **Improvement Points (IP):** CHARACTERS_JSON includes \`improvementPoints\` per sheet. Award IP sparingly: end of a job, after real danger, major goals, memorable roleplay—not every exchange. Typical Referee awards are often ~1–3 IP per session for solid play, more for exceptional arcs (see lore \`improvement-points\`). Use \`adjust_improvement_points\` with a non-zero \`delta\` and short \`reason\` (audited in chat). For absolute totals only when needed, \`update_character_field\` path \`improvementPoints\` is allowed but does not post an audit line—prefer \`adjust_improvement_points\`.
 
-**Conditions:** Use \`set_condition\` to apply or remove status effects. "stunned" toggles only the isStunned flag (not stored in conditions[]). Other conditions are persisted in the character's conditions array (with optional \`duration_rounds\`) and visible to all players. Specify \`duration_rounds\` when the CP2020 rules define one (Dazzle grenade = blinded 12 rounds, Sonic grenade = deafened 12 rounds, Incendiary = on_fire 9 rounds; 1 CP2020 "turn" = 3 rounds). Omit duration for indefinite conditions. CP2020-relevant conditions: unconscious, asleep (also sets isStunned), blinded, on_fire, grappled, prone, deafened, poisoned, drugged, cyberpsychosis.
+**Conditions:** Use \`set_condition\` to apply or remove status effects. "stunned" toggles only the isStunned flag (not stored in conditions[]). Other conditions are persisted in the character's conditions array (with optional \`duration_rounds\`) and visible to all players. Specify \`duration_rounds\` when the CP2020 rules define one (Dazzle grenade = blinded 12 rounds, Sonic grenade = deafened 12 rounds, Incendiary = on_fire 9 rounds; 1 CP2020 "turn" = 3 rounds). Omit duration for indefinite conditions. CP2020-relevant conditions: unconscious, asleep (also sets isStunned), blinded, on_fire, grappled, prone, deafened, poisoned, drugged, cyberpsychosis. Severance conditions (\`severed_right_arm\`, \`severed_left_arm\`, \`severed_right_leg\`, \`severed_left_leg\`) are auto-applied by \`apply_damage\` on limb hits dealing >8 final damage; leave them in place unless the character receives cyberware replacement or similar narrative healing.
+
+**Initiative / combat rounds:** When a fight starts, call \`start_combat\` to roll initiative for **every** character in the session (full **REF** after cyberware/armor/wounds + exploding 1d10 + manual initiative mod + Solo Combat Sense + **cyber initiative bonus** from equipped ware such as Kerenzikov). That builds turn order, sets round 1, and posts the order to chat. Call \`advance_round\` at the start of each new round: it increments the round counter, ticks \`duration_rounds\` on **all** conditions in the session, removes expired ones, and posts a summary line. Call \`end_combat\` to clear the tracker; set \`clear_timed_conditions\` true if timed conditions should be wiped, and optional \`narration\` for the closing line. The human GM can also advance turns from the session sidebar.
+
+**Combat tracker snapshot:** \`COMBAT_TRACKER_JSON\` (when \`inCombat\` is true) lists initiative order and, for each combatant, \`isStunned\`, \`isStabilized\`, \`woundState\`, \`damage\`, and \`deathSaveTarget\` merged from the live sheet—use it so narration matches the table. If \`startOfTurnSavesPendingFor\` is set, that character's **start-of-turn stun recovery / ongoing death save** is still being resolved in the client; keep your narration compatible with CP2020 until that flag clears (see lore \`start-of-turn-saves\`). When a player asks the GM to override a **stun** outcome, weigh the fiction but default to the rules unless the table clearly agrees to a fiat.
 
 **NPCs:** Use \`spawn_random_npc\` (or equivalent \`spawn_npc\`) for **generic** CP2020 **Fast Character System** mooks: 2D6 stats, 40-pt career, book armor/weapon table; optional \`stat_overrides\` (2–10), \`threat\`, \`announce\`, \`place_token\`. For **named or boss NPCs** where you must set the sheet yourself (custom stats, special ability label, arbitrary skills including homebrew names, cyberware/weapons with specific stats), use \`spawn_unique_npc\` with \`name\`, \`role\`, \`special_ability\`, optional \`stats\`, \`skills[]\`, \`items[]\`, and optional \`announcement_text\`. Use \`add_chat_as_npc\` for dialogue-only when no sheet is needed.
 
@@ -52,6 +56,7 @@ export interface CompactCharacterPayload {
   role: Character['role'];
   damage: number;
   isStunned: boolean;
+  isStabilized: boolean;
   conditions: Array<{ name: string; duration: number | null }>;
   eurobucks: number;
   improvementPoints: number;
@@ -97,6 +102,7 @@ export function serializeCharacterForLlm(c: Character): CompactCharacterPayload 
     role: c.role,
     damage: c.damage,
     isStunned: c.isStunned,
+    isStabilized: c.isStabilized,
     conditions: c.conditions ?? [],
     eurobucks: c.eurobucks,
     improvementPoints: c.improvementPoints,
@@ -144,11 +150,84 @@ export function serializeTokensForLlm(tokens: Token[]): MapTokenForLlm[] {
   }));
 }
 
+/** Per-row initiative + wound state for the AI-GM (merged from tracker + sheets). */
+export interface CombatTrackerCombatantForLlm {
+  characterId: string;
+  name: string;
+  initiativeTotal: number;
+  turnOrderIndex: number;
+  isActiveTurn: boolean;
+  /** Null if no sheet synced for this id. */
+  isStunned: boolean | null;
+  isStabilized: boolean | null;
+  woundState: string | null;
+  damage: number | null;
+  deathSaveTarget: number | null;
+  type: Character['type'] | null;
+}
+
+export interface CombatTrackerContextPayload {
+  inCombat: boolean;
+  round: number | null;
+  activeTurnIndex: number | null;
+  activeCombatantCharacterId: string | null;
+  startOfTurnSavesPendingFor: string | null;
+  combatants: CombatTrackerCombatantForLlm[];
+}
+
+export function buildCombatTrackerContextPayload(
+  combatState: CombatState | null | undefined,
+  characters: Character[],
+): CombatTrackerContextPayload {
+  if (!combatState || combatState.entries.length === 0) {
+    return {
+      inCombat: false,
+      round: null,
+      activeTurnIndex: null,
+      activeCombatantCharacterId: null,
+      startOfTurnSavesPendingFor: null,
+      combatants: [],
+    };
+  }
+
+  const byId = new Map(characters.map((c) => [c.id, c]));
+  const activeIdx = combatState.activeTurnIndex;
+  const activeEntry = combatState.entries[activeIdx];
+  const combatants: CombatTrackerCombatantForLlm[] = combatState.entries.map((e, turnOrderIndex) => {
+    const c = byId.get(e.characterId) ?? null;
+    return {
+      characterId: e.characterId,
+      name: e.name,
+      initiativeTotal: e.total,
+      turnOrderIndex,
+      isActiveTurn: turnOrderIndex === activeIdx,
+      isStunned: c?.isStunned ?? null,
+      isStabilized: c?.isStabilized ?? null,
+      woundState: c?.derivedStats?.woundState ?? null,
+      damage: c?.damage ?? null,
+      deathSaveTarget:
+        c?.derivedStats?.deathSaveTarget !== undefined ? c.derivedStats.deathSaveTarget : null,
+      type: c?.type ?? null,
+    };
+  });
+
+  return {
+    inCombat: true,
+    round: combatState.round,
+    activeTurnIndex: combatState.activeTurnIndex,
+    activeCombatantCharacterId: activeEntry?.characterId ?? null,
+    startOfTurnSavesPendingFor: combatState.startOfTurnSavesPendingFor ?? null,
+    combatants,
+  };
+}
+
 export interface BuildContextInput {
   sessionName: string;
   sessionSummary: string;
   activeScene: Scene;
   characters: Character[];
+  /** Initiative tracker + per-combatant wound snapshot; omit or null when not in combat. */
+  combatState?: CombatState | null;
   /** Map tokens for move_token / add_token / remove_token tool calls. */
   mapTokens: Token[];
   chatHistory: ChatMessage[];
@@ -160,6 +239,8 @@ export interface BuildContextInput {
   loreInjection: string;
   /** Max messages from history (oldest dropped first). */
   maxHistoryMessages?: number;
+  /** From chat row / POST body; drives special GM instructions (e.g. stun override). */
+  playerMessageMetadata?: Record<string, unknown> | null;
 }
 
 export interface OpenRouterChatMessage {
@@ -188,6 +269,14 @@ export function formatChatLine(m: ChatMessage): string {
   return `[${m.type}] ${m.speaker}: ${m.text}`;
 }
 
+function stunOverrideInstruction(meta: Record<string, unknown> | null | undefined): string | null {
+  if (!meta || meta.kind !== 'stun_override_request') return null;
+  const id = meta.characterId;
+  if (typeof id !== 'string' || !id) return null;
+  return `REQUEST_FOCUS: stun_override_request for character_id \`${id}\`.
+You must resolve whether **isStunned** should change using tools: prefer \`set_condition\` with \`condition\` "stunned" and \`active\` true/false (toggles isStunned). Narrate briefly; lean on CP2020 unless the PLAYER_MESSAGE clearly asks for table fiat.`;
+}
+
 export function buildGmUserContent(input: BuildContextInput): string {
   const history = sliceRecentChat(input.chatHistory, input.maxHistoryMessages ?? 40);
   const historyBlock = history.map(formatChatLine).join('\n');
@@ -195,6 +284,11 @@ export function buildGmUserContent(input: BuildContextInput): string {
   const charsJson = JSON.stringify(input.characters.map(serializeCharacterForLlm));
   const sceneJson = JSON.stringify(sceneToPayload(input.activeScene));
   const mapTokensJson = JSON.stringify(serializeTokensForLlm(input.mapTokens));
+  const combatTrackerJson = JSON.stringify(
+    buildCombatTrackerContextPayload(input.combatState ?? null, input.characters),
+  );
+
+  const overrideInstr = stunOverrideInstruction(input.playerMessageMetadata ?? null);
 
   const parts = [
     `SESSION: ${input.sessionName}`,
@@ -202,9 +296,11 @@ export function buildGmUserContent(input: BuildContextInput): string {
     `CURRENT_MESSAGE_SPEAKER: ${input.messageSpeaker || 'Player'}`,
     `ACTIVE_SCENE_JSON: ${sceneJson}`,
     `MAP_TOKENS_JSON: ${mapTokensJson}`,
+    `COMBAT_TRACKER_JSON: ${combatTrackerJson}`,
     `CHARACTERS_JSON: ${charsJson}`,
     `RECENT_CHAT:\n${historyBlock || '(empty)'}`,
     `LORE_RULES:\n${input.loreInjection || '(none)'}`,
+    ...(overrideInstr ? [`GM_TASK:\n${overrideInstr}`] : []),
     `PLAYER_MESSAGE:\n${input.playerMessage}`,
   ];
 

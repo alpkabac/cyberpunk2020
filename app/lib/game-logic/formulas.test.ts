@@ -14,6 +14,7 @@ import {
   maxLayeredSP,
   isFlatSaveSuccess,
   getStabilizationMedicBonus,
+  calculateDamage,
 } from './formulas';
 import { Character, createStatBlock } from '../types';
 
@@ -115,6 +116,7 @@ describe('Property 12: Derived Stats Calculation', () => {
             skills: [],
             damage,
             isStunned: false,
+            isStabilized: false,
             conditions: [],
             hitLocations: {
               Head: { location: [1], stoppingPower: 0, ablation: 0 },
@@ -375,6 +377,62 @@ describe('Flat save helper', () => {
   });
 });
 
+describe('calculateDamage (FNFF pipeline)', () => {
+  it('armor fully stops attack: no damage, no penetration, no ablation flag', () => {
+    const r = calculateDamage(5, 'Torso', 20, 2, false);
+    expect(r.finalDamage).toBe(0);
+    expect(r.penetrated).toBe(false);
+    expect(r.btmClampedToOne).toBe(false);
+    expect(r.limbSevered).toBe(false);
+    expect(r.headAutoKill).toBe(false);
+  });
+
+  it('BTM "minimum 1" rule: penetrating hit reduced below 1 by BTM still deals 1', () => {
+    // 3 past SP 0 vs BTM 4 would be -1 → clamped to 1.
+    const r = calculateDamage(3, 'Torso', 0, 4, false);
+    expect(r.finalDamage).toBe(1);
+    expect(r.penetrated).toBe(true);
+    expect(r.btmClampedToOne).toBe(true);
+  });
+
+  it('head hit doubles damage before armor', () => {
+    const r = calculateDamage(6, 'Head', 10, 3, false);
+    // 6 × 2 = 12, − SP 10 = 2 (penetrated), − BTM 3 → clamped to 1.
+    expect(r.headMultiplied).toBe(true);
+    expect(r.penetrated).toBe(true);
+    expect(r.finalDamage).toBe(1);
+    expect(r.headAutoKill).toBe(false);
+  });
+
+  it('head with >8 final damage triggers auto-kill flag', () => {
+    // 6 raw, head ×2 = 12, no armor, − BTM 3 = 9.
+    const r = calculateDamage(6, 'Head', 0, 3, false);
+    expect(r.finalDamage).toBe(9);
+    expect(r.headAutoKill).toBe(true);
+  });
+
+  it('limb with >8 final damage triggers severance flag', () => {
+    const r = calculateDamage(12, 'rArm', 0, 3, false);
+    expect(r.finalDamage).toBe(9);
+    expect(r.limbSevered).toBe(true);
+    expect(r.headAutoKill).toBe(false);
+  });
+
+  it('torso does not trigger severance or auto-kill', () => {
+    const r = calculateDamage(20, 'Torso', 0, 2, false);
+    expect(r.finalDamage).toBe(18);
+    expect(r.limbSevered).toBe(false);
+    expect(r.headAutoKill).toBe(false);
+  });
+
+  it('AP halves SP before subtraction', () => {
+    const r = calculateDamage(10, 'Torso', 12, 2, true);
+    // effective SP = floor(12/2) = 6, − = 4, − BTM 2 = 2.
+    expect(r.effectiveSP).toBe(6);
+    expect(r.finalDamage).toBe(2);
+  });
+});
+
 describe('getStabilizationMedicBonus', () => {
   it('sums TECH and the higher of First Aid vs Medical Tech', () => {
     const character: Character = {
@@ -422,6 +480,7 @@ describe('getStabilizationMedicBonus', () => {
       ],
       damage: 20,
       isStunned: false,
+      isStabilized: false,
       conditions: [],
       hitLocations: {
         Head: { location: [1], stoppingPower: 0, ablation: 0 },

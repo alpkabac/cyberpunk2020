@@ -44,7 +44,10 @@ CREATE TABLE IF NOT EXISTS sessions (
     "allowPlayerTokenMovement": true,
     "voiceInputMode": "pushToTalk",
     "sessionRecordingStartedBy": null
-  }'::jsonb
+  }'::jsonb,
+
+  -- FNFF initiative / turn order (null = not in combat)
+  combat_state JSONB DEFAULT NULL
 );
 
 -- Index for faster lookups
@@ -92,9 +95,10 @@ CREATE TABLE IF NOT EXISTS characters (
   -- Wound tracking
   damage INTEGER DEFAULT 0,
   is_stunned BOOLEAN NOT NULL DEFAULT FALSE,
+  is_stabilized BOOLEAN NOT NULL DEFAULT FALSE,
   conditions JSONB DEFAULT '[]'::jsonb,
 
-  combat_modifiers JSONB DEFAULT '{"initiative":0,"stunSave":0}'::jsonb,
+  combat_modifiers JSONB DEFAULT '{"initiative":0,"stunSave":0,"deathSave":0}'::jsonb,
   
   -- Hit locations with SP
   hit_locations JSONB NOT NULL DEFAULT '{
@@ -363,7 +367,8 @@ COMMENT ON COLUMN characters.special_ability IS 'Role special ability: { name, v
 COMMENT ON COLUMN characters.reputation IS 'Reputation (REP)';
 COMMENT ON COLUMN characters.improvement_points IS 'Improvement Points (IP)';
 COMMENT ON COLUMN characters.is_stunned IS 'Stun state after failed stun save';
+COMMENT ON COLUMN characters.is_stabilized IS 'True while medically stabilized (suppresses ongoing Mortal death saves). Cleared on any new damage.';
 COMMENT ON COLUMN characters.conditions IS 'Active status conditions (string[]), e.g. ["unconscious","on_fire"]. Stun is tracked via is_stunned.';
-COMMENT ON COLUMN characters.combat_modifiers IS 'Optional initiative / stun save bonuses: { initiative, stunSave }';
+COMMENT ON COLUMN characters.combat_modifiers IS 'Optional initiative / save bonuses: { initiative, stunSave, deathSave? }';
 COMMENT ON COLUMN programs.program_class IS 'Net program class (matches app Program.programClass)';
 COMMENT ON COLUMN programs.options IS 'Program options array (matches app Program.options)';

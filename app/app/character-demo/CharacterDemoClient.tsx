@@ -112,6 +112,7 @@ export function CharacterDemoClient() {
       ],
       damage: 6,
       isStunned: false,
+      isStabilized: false,
       conditions: [],
       hitLocations: {
         Head: { location: [1], stoppingPower: 14, ablation: 0 },

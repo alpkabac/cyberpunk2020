@@ -42,6 +42,7 @@ function minimalChar(overrides: Partial<Character> = {}): Character {
     ],
     damage: 0,
     isStunned: false,
+    isStabilized: false,
     conditions: [],
     hitLocations: {} as Character['hitLocations'],
     sdp: {

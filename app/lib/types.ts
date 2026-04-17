@@ -136,6 +136,14 @@ export interface Character {
   // Wound tracking
   damage: number;
   isStunned: boolean;
+  /**
+   * True while the character is medically stabilized — ongoing start-of-turn
+   * death saves are suppressed until they take new damage. Set by stabilization
+   * success, Speedheal, Trauma Team, etc.; auto-cleared by any fresh damage in
+   * applyDamage (both client and GM paths). Does NOT suppress the severance
+   * forced Mortal-0 save (that's per-hit trauma, not the ongoing roll).
+   */
+  isStabilized: boolean;
   /** Persistent status conditions. Stun is tracked via isStunned only. */
   conditions: CharacterCondition[];
 
@@ -155,8 +163,13 @@ export interface Character {
   // Combat modifiers (optional; initiative also used for Combat Sense initiative roll)
   combatModifiers?: {
     initiative: number;
-    /** Added to flat stun and death save targets (easier when positive). */
+    /** Added to flat stun save target only (easier when positive). */
     stunSave: number;
+    /**
+     * Added to flat death save target only (stacks with stunSave for death rolls).
+     * Use for gear/perks that help death saves but not stun (rare).
+     */
+    deathSave?: number;
   };
 
   // Netrunning
@@ -235,6 +248,11 @@ export interface Cyberware extends Item {
   humanityLoss: number;
   cyberwareType: string;
   statMods?: Partial<Record<keyof Stats, number>>;
+  /**
+   * Initiative-only bonus (e.g. Kerenzikov / boosterware in CP2020). Not the same as REF from `statMods`.
+   * Parsed from item JSON (`initiativeBonus`, Foundry `checks.Initiative`, nested `system.CyberWorkType.Checks`).
+   */
+  initiativeBonus?: number;
 }
 
 export interface Vehicle extends Item {
@@ -322,6 +340,9 @@ export interface Session {
 
   // Settings
   settings: SessionSettings;
+
+  /** Session room: FNFF tracker (optional; store hydrates from Postgres). */
+  combatState?: CombatState | null;
 }
 
 export interface MapState {
@@ -366,6 +387,37 @@ export interface SessionSettings {
   voiceInputMode: 'pushToTalk' | 'session';
   /** Display name of who last turned on group Session mode (best-effort). */
   sessionRecordingStartedBy: string | null;
+}
+
+/** Initiative row for FNFF turn order (persisted on `sessions.combat_state`). */
+export interface InitiativeEntry {
+  characterId: string;
+  name: string;
+  ref: number;
+  initiativeMod: number;
+  /** Solo Combat Sense (or 0). */
+  combatSense: number;
+  /** Equipped cyberware initiative-only bonuses (e.g. boosterware), not REF. */
+  cyberInitiativeBonus: number;
+  /** Total d10 contribution (may be exploding 1d10). */
+  d10Total: number;
+  /** e.g. "7" or "10+4" for display. */
+  d10Detail: string;
+  /** REF + d10 + manual mod + Combat Sense + cyber initiative bonuses. */
+  total: number;
+}
+
+/** Active combat / initiative (null = not in combat). */
+export interface CombatState {
+  round: number;
+  /** Index into `entries` (sorted highest initiative first). */
+  activeTurnIndex: number;
+  entries: InitiativeEntry[];
+  /**
+   * When set, this PC (`type === "character"`) owes start-of-turn stun recovery /
+   * ongoing death saves — client should resolve then clear (future: PATCH combat_state).
+   */
+  startOfTurnSavesPendingFor?: string | null;
 }
 
 // ============================================================================
@@ -440,6 +492,13 @@ export type DiceRollGmContext = {
 /** Intent for the dice roller modal (stun/death saves, weapon attack fumbles, stabilization). */
 export type DiceRollIntent =
   | ({ kind: 'stun'; characterId: string } & DiceRollGmContext)
+  /** Start of turn: flat d10 vs stun target; success clears STUNNED. */
+  | ({ kind: 'stun_recovery'; characterId: string } & DiceRollGmContext)
+  /**
+   * Ask the AI-GM to rule on stun (fiction / fiat). No dice — posts to `/api/gm`;
+   * GM should apply via `set_condition` stunned or equivalent.
+   */
+  | ({ kind: 'stun_override_request'; characterId: string; note?: string } & DiceRollGmContext)
   | ({ kind: 'death'; characterId: string } & DiceRollGmContext)
   | ({
       kind: 'attack';
@@ -450,8 +509,16 @@ export type DiceRollIntent =
       /** True when weapon is auto-capable (reserved for future Foundry-style options). */
       isAutoWeapon: boolean;
     } & DiceRollGmContext)
-  /** Medic roll: total ≥ targetDamage stabilizes the patient (does not auto-edit sheet). */
-  | ({ kind: 'stabilization'; targetDamage: number } & DiceRollGmContext)
+  /**
+   * Medic roll on the medic's sheet: exploding 1d10 + TECH + medical skill ≥ `targetDamage`.
+   * On success, `patientCharacterId` is marked `isStabilized` (ongoing death saves suppressed
+   * until they take new damage).
+   */
+  | ({
+      kind: 'stabilization';
+      patientCharacterId: string;
+      targetDamage: number;
+    } & DiceRollGmContext)
   /** Generic sheet roll with an explicit label (skills, stats, initiative, damage, netrun, etc.). */
   | {
       kind: 'custom';

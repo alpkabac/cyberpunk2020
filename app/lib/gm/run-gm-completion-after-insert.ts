@@ -63,6 +63,7 @@ export async function runGmCompletionAfterPlayerInsert(opts: {
   loreBudget: number;
   apiKey: string;
   model: string;
+  playerMessageMetadata?: Record<string, unknown> | null;
 }): Promise<void> {
   const snapshot = await fetchSessionSnapshot(opts.supabase, opts.sessionId);
   if (!snapshot) {
@@ -81,11 +82,13 @@ export async function runGmCompletionAfterPlayerInsert(opts: {
     sessionSummary: snapshot.session.sessionSummary,
     activeScene: snapshot.session.activeScene,
     characters: snapshot.characters,
+    combatState: snapshot.session.combatState,
     mapTokens: snapshot.tokens,
     chatHistory,
     playerMessage: opts.playerMessage,
     messageSpeaker: opts.speakerName,
     loreInjection,
+    playerMessageMetadata: opts.playerMessageMetadata ?? null,
   });
 
   const charactersById = new Map(snapshot.characters.map((c) => [c.id, c]));

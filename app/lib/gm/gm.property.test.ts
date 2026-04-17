@@ -6,7 +6,12 @@ import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
 import type { Character, ChatMessage, Scene } from '../types';
 import { createStatBlock } from '../types';
-import { buildGmUserContent, sliceRecentChat, formatChatLine } from './context-builder';
+import {
+  buildCombatTrackerContextPayload,
+  buildGmUserContent,
+  sliceRecentChat,
+  formatChatLine,
+} from './context-builder';
 import {
   applyGmDamage,
   applyGmDeductMoney,
@@ -58,6 +63,7 @@ const minimalChar = (id: string): Character => ({
   skills: [],
   damage: 0,
   isStunned: false,
+  isStabilized: false,
   conditions: [],
   hitLocations: {
     Head: { location: [1], stoppingPower: 0, ablation: 0 },
@@ -119,10 +125,86 @@ describe('Property 7: Conversation continuity', () => {
       maxHistoryMessages: 10,
     });
     expect(out).toContain('MAP_TOKENS_JSON');
+    expect(out).toContain('COMBAT_TRACKER_JSON');
+    expect(out).toContain('"inCombat":false');
     expect(out).toContain('PLAYER_MESSAGE');
+    expect(out).not.toContain('GM_TASK');
     expect(out).toContain('I draw my gun');
     expect(out).toContain('LORE_RULES');
     expect(out).toContain(formatChatLine(history[history.length - 1]));
+  });
+
+  it('buildGmUserContent injects GM_TASK for stun_override_request metadata', () => {
+    const out = buildGmUserContent({
+      sessionName: 'S',
+      sessionSummary: '',
+      activeScene: minimalScene,
+      characters: [minimalChar('c1')],
+      mapTokens: [],
+      chatHistory: [],
+      playerMessage: 'Please rule on stun.',
+      messageSpeaker: 'Player',
+      loreInjection: '',
+      playerMessageMetadata: { kind: 'stun_override_request', characterId: 'c1' },
+    });
+    expect(out).toContain('GM_TASK');
+    expect(out).toContain('stun_override_request');
+    expect(out).toContain('c1');
+  });
+
+  it('buildCombatTrackerContextPayload merges sheet wound state into initiative order', () => {
+    const entry = (id: string, name: string, total: number) => ({
+      characterId: id,
+      name,
+      ref: 5,
+      initiativeMod: 0,
+      combatSense: 0,
+      cyberInitiativeBonus: 0,
+      d10Total: 5,
+      d10Detail: '5',
+      total,
+    });
+    const withDerived: Character = {
+      ...minimalChar('c1'),
+      isStunned: true,
+      isStabilized: true,
+      damage: 20,
+      derivedStats: {
+        btm: 0,
+        strengthDamageBonus: 0,
+        run: 0,
+        leap: 0,
+        carry: 0,
+        lift: 0,
+        humanity: 50,
+        currentEmp: 5,
+        saveNumber: 0,
+        woundState: 'Serious',
+        woundPenalties: { ref: 0, int: 0, cool: 0 },
+        stunSaveTarget: 12,
+        deathSaveTarget: 15,
+      },
+    };
+    const payload = buildCombatTrackerContextPayload(
+      {
+        round: 2,
+        activeTurnIndex: 1,
+        entries: [entry('c1', 'Alpha', 18), entry('c2', 'Beta', 12)],
+        startOfTurnSavesPendingFor: 'c1',
+      },
+      [withDerived],
+    );
+    expect(payload.inCombat).toBe(true);
+    expect(payload.round).toBe(2);
+    expect(payload.activeCombatantCharacterId).toBe('c2');
+    expect(payload.startOfTurnSavesPendingFor).toBe('c1');
+    const row = payload.combatants.find((x) => x.characterId === 'c1');
+    expect(row?.isActiveTurn).toBe(false);
+    expect(row?.isStunned).toBe(true);
+    expect(row?.isStabilized).toBe(true);
+    expect(row?.woundState).toBe('Serious');
+    expect(row?.deathSaveTarget).toBe(15);
+    expect(payload.combatants.find((x) => x.characterId === 'c2')?.isStunned).toBe(null);
   });
 });
 
@@ -210,6 +292,15 @@ describe('Property 6: Tool parameter validation', () => {
     expect(validateGmToolParameters('request_roll', { roll_kind: 'skill', character_id: 'c' }).ok).toBe(
       false,
     );
+  });
+
+  it('accepts combat tracker tools', () => {
+    expect(validateGmToolParameters('start_combat', {}).ok).toBe(true);
+    expect(validateGmToolParameters('advance_round', {}).ok).toBe(true);
+    expect(validateGmToolParameters('end_combat', {}).ok).toBe(true);
+    expect(validateGmToolParameters('end_combat', { clear_timed_conditions: true }).ok).toBe(true);
+    expect(validateGmToolParameters('end_combat', { narration: 'Stand down.' }).ok).toBe(true);
+    expect(validateGmToolParameters('end_combat', { clear_timed_conditions: 'yes' }).ok).toBe(false);
   });
 
   it('accepts spawn_npc with optional fields and stat_overrides', () => {

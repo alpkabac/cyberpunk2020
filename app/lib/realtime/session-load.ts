@@ -3,7 +3,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Character, ChatMessage, Scene, SessionSettings, Token } from '../types';
+import type { Character, ChatMessage, CombatState, Scene, SessionSettings, Token } from '../types';
 import {
   characterRowToCharacter,
   chatRowToMessage,
@@ -11,6 +11,7 @@ import {
   parseSessionSettingsJson,
   tokenRowToToken,
 } from './db-mapper';
+import { parseCombatStateJson } from '../session/combat-state';
 
 export interface LoadedSessionSnapshot {
   session: {
@@ -22,6 +23,7 @@ export interface LoadedSessionSnapshot {
     settings: SessionSettings;
     sessionSummary: string;
     mapBackgroundUrl: string;
+    combatState: CombatState | null;
   };
   characters: Character[];
   tokens: Token[];
@@ -44,7 +46,7 @@ export async function fetchSessionSnapshot(
   const { data: sessionRow, error: sessionError } = await client
     .from('sessions')
     .select(
-      'id, name, created_by, created_at, map_background_url, active_scene, settings, session_summary',
+      'id, name, created_by, created_at, map_background_url, active_scene, settings, session_summary, combat_state',
     )
     .eq('id', sessionId)
     .maybeSingle();
@@ -84,6 +86,7 @@ export async function fetchSessionSnapshot(
       settings: parseSessionSettingsJson(s.settings),
       sessionSummary: String(s.session_summary ?? ''),
       mapBackgroundUrl: String(s.map_background_url ?? ''),
+      combatState: parseCombatStateJson(s.combat_state),
     },
     characters,
     tokens,

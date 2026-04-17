@@ -87,6 +87,7 @@ export async function POST(request: Request) {
       loreBudget,
       apiKey,
       model,
+      playerMessageMetadata: Object.keys(meta).length > 0 ? meta : null,
     });
   });
 

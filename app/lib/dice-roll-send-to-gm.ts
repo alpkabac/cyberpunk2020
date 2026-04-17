@@ -1,5 +1,41 @@
 import type { Character, DiceRollIntent, PendingRollForVoice, PendingVoiceGmPayload, RollResult } from '@/lib/types';
 
+/** Payload for POST `/api/gm` — stun override referee request (no roll). */
+export function buildStunOverrideGmPayload(params: {
+  character: Character;
+  sessionId: string;
+  speakerName: string;
+  note?: string;
+}): {
+  sessionId: string;
+  speakerName: string;
+  playerMessage: string;
+  playerMessageMetadata: { kind: 'stun_override_request'; characterId: string };
+} {
+  const { character: c, sessionId, speakerName, note } = params;
+  const wound = c.derivedStats?.woundState ?? 'unknown';
+  const stunT = c.derivedStats?.stunSaveTarget ?? c.stats.bt.total;
+  const cond = (c.conditions ?? []).map((x) => x.name).join(', ') || '(none)';
+  const playerMessage = `[stun_override_request — referee ruling]
+
+**Character:** ${c.name} (\`character_id\`: \`${c.id}\`)
+**Snapshot:** isStunned **${c.isStunned}**, wound **${wound}**, damage **${c.damage}**/41, stun-save target **≤${stunT}** (flat d10), stabilized **${c.isStabilized}**, conditions: ${cond}
+
+The player asks you to **rule whether STUNNED should change** for this character (fiction, drugs, cyber, referee fiat). Default to **CP2020** unless the table clearly agrees to override.
+
+**Player note (optional):**
+${note?.trim() ? note.trim() : '_(none — use sheet + context only)_' }
+
+**Required:** If you change the ruling, **apply it** with tool \`set_condition\`: \`condition\` = \`"stunned"\`, \`active\` = true or false (toggles \`isStunned\` only). Then narrate briefly.`;
+
+  return {
+    sessionId,
+    speakerName,
+    playerMessage,
+    playerMessageMetadata: { kind: 'stun_override_request', characterId: c.id },
+  };
+}
+
 /**
  * Caller-supplied fields for posting a sheet roll to the AI-GM (session play).
  * Spread into `openDiceRoller(..., { kind: 'attack' | 'custom' | ..., ...sheetRollContext(...) })`.
@@ -22,6 +58,10 @@ function describeRollForGm(intent: DiceRollIntent, formula: string): string | nu
   switch (intent.kind) {
     case 'stun':
       return 'Stun save';
+    case 'stun_recovery':
+      return 'Stun recovery';
+    case 'stun_override_request':
+      return 'Stun override request';
     case 'death':
       return 'Death save';
     case 'attack':

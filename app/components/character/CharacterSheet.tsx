@@ -5,6 +5,7 @@ import { useGameStore } from '@/lib/store/game-store';
 import { CharacterHeader } from './CharacterHeader';
 import { SkillsTab } from './tabs/SkillsTab';
 import { CombatTab } from './tabs/CombatTab';
+import { BodyTab } from './tabs/BodyTab';
 import { GearTab } from './tabs/GearTab';
 import { CyberwareTab } from './tabs/CyberwareTab';
 import { LifeTab } from './tabs/LifeTab';
@@ -15,7 +16,7 @@ interface CharacterSheetProps {
   editable?: boolean;
 }
 
-type TabType = 'skills' | 'combat' | 'gear' | 'cyberware' | 'life' | 'netrun';
+type TabType = 'skills' | 'combat' | 'body' | 'gear' | 'cyberware' | 'life' | 'netrun';
 
 export function CharacterSheet({ characterId, editable = false }: CharacterSheetProps) {
   const character = useGameStore(
@@ -40,6 +41,7 @@ export function CharacterSheet({ characterId, editable = false }: CharacterSheet
         {[
           { id: 'skills', label: 'Skills' },
           { id: 'combat', label: 'Combat' },
+          { id: 'body', label: 'Body' },
           { id: 'gear', label: 'Gear' },
           { id: 'cyberware', label: 'Cyberware' },
           { id: 'life', label: 'Life' },
@@ -65,6 +67,7 @@ export function CharacterSheet({ characterId, editable = false }: CharacterSheet
         {activeTab === 'combat' && (
           <CombatTab key={character.id} character={character} editable={editable} />
         )}
+        {activeTab === 'body' && <BodyTab character={character} editable={editable} />}
         {activeTab === 'gear' && <GearTab character={character} editable={editable} />}
         {activeTab === 'cyberware' && <CyberwareTab character={character} editable={editable} />}
         {activeTab === 'life' && <LifeTab character={character} editable={editable} />}

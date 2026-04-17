@@ -309,12 +309,16 @@ export function calculateStunSaveTarget(woundState: WoundState, saveNumber: numb
 }
 
 /**
- * Death save target: same as stun save, but only required at Mortal+
- * Returns -1 if not applicable
+ * Death save target: BT minus the mortal wound's own severity number.
+ * Per FNFF (CP2020Gameplay.md): "Mortal 4 wound. He must roll lower than (10−4)=6 to stay alive."
+ * The death save uses only the mortal digit (0..6) — NOT the harsher stun-row penalty.
+ * Returns -1 if not applicable (not mortally wounded).
  */
 export function calculateDeathSaveTarget(woundState: WoundState, saveNumber: number): number {
   if (!woundState.startsWith('Mortal')) return -1;
-  return calculateStunSaveTarget(woundState, saveNumber);
+  const mortalLevel = Number(woundState.slice('Mortal'.length));
+  if (!Number.isFinite(mortalLevel)) return -1;
+  return saveNumber - mortalLevel;
 }
 
 /**
@@ -405,9 +409,20 @@ export function maxLayeredSP(spValues: number[]): number {
   return current;
 }
 
+const LIMB_ZONES: readonly Zone[] = ['rArm', 'lArm', 'rLeg', 'lLeg'];
+
 /**
- * Full damage pipeline: calculates final damage after all reductions
- * Returns the actual damage to add to the character's damage total
+ * Full damage pipeline: calculates final damage after all reductions.
+ * Returns the actual damage to add plus flags for book-mandated side effects.
+ *
+ * Book refs (CP2020Gameplay.md §7 Friday Night Firefight):
+ *  - Head Hits: "A head hit always doubles damage." (L6426)
+ *  - AP: halves SP before subtraction (L6346)
+ *  - BTM min-1: "A Body Type Modifier may never reduce damage to less than one" (L6407)
+ *  - Ablation / Staged Penetration: ablate "each time the armor is struck by a PENETRATING
+ *    attack (i.e., an attack that actually exceeds the armor's SP)" (L6350)
+ *  - Limb Loss: ">8 damage to a limb area in any one attack → severed, immediate Death
+ *    Save at Mortal 0. A head wound of this type will kill automatically." (L6424)
  */
 export function calculateDamage(
   rawDamage: number,
@@ -421,36 +436,56 @@ export function calculateDamage(
   effectiveSP: number;
   spReduction: number;
   btmReduction: number;
+  /** Attack exceeded effective SP (armor was pierced). Drives ablation + BTM min-1. */
+  penetrated: boolean;
+  /** BTM would have reduced damage below 1; floored to 1 per FNFF. */
+  btmClampedToOne: boolean;
+  /** Final damage > 8 to a limb zone; limb severed + forced Mortal-0 death save. */
+  limbSevered: boolean;
+  /** Final damage > 8 to head; character dies automatically. */
+  headAutoKill: boolean;
 } {
-  let damage = rawDamage;
+  let damage = Math.max(0, Math.floor(rawDamage || 0));
   let headMultiplied = false;
 
-  // Head hits: damage x2
   if (location === 'Head') {
     damage = damage * 2;
     headMultiplied = true;
   }
 
-  // AP ammo: halve SP before subtraction
-  let effectiveSP = sp;
+  let effectiveSP = Math.max(0, Math.floor(sp || 0));
   if (isAP) {
-    effectiveSP = Math.floor(sp / 2);
+    effectiveSP = Math.floor(effectiveSP / 2);
   }
 
-  // Subtract SP
   const spReduction = Math.min(damage, effectiveSP);
   damage = Math.max(0, damage - effectiveSP);
+  const penetrated = damage > 0;
 
-  // Subtract BTM
-  const btmReduction = Math.min(damage, btm);
-  damage = Math.max(0, damage - btm);
+  const btmValue = Math.max(0, Math.floor(btm || 0));
+  const btmReduction = Math.min(damage, btmValue);
+  let damageAfterBtm = Math.max(0, damage - btmValue);
+
+  let btmClampedToOne = false;
+  if (penetrated && damageAfterBtm === 0) {
+    damageAfterBtm = 1;
+    btmClampedToOne = true;
+  }
+
+  const limbSevered =
+    location !== null && LIMB_ZONES.includes(location) && damageAfterBtm > 8;
+  const headAutoKill = location === 'Head' && damageAfterBtm > 8;
 
   return {
-    finalDamage: damage,
+    finalDamage: damageAfterBtm,
     headMultiplied,
     effectiveSP,
     spReduction,
     btmReduction,
+    penetrated,
+    btmClampedToOne,
+    limbSevered,
+    headAutoKill,
   };
 }
 

@@ -10,6 +10,7 @@ import {
   syncArmorToHitLocations,
 } from '../game-logic/formulas';
 import { maxDamageFromDiceFormula } from '../game-logic/dice';
+import { severedConditionName } from '../game-logic/conditions';
 
 export function recalcCharacterForGm(character: Character): Character {
   const updated = { ...character };
@@ -19,6 +20,19 @@ export function recalcCharacterForGm(character: Character): Character {
   return updated;
 }
 
+/** Extra info surfaced by the FNFF damage pipeline (for GM tool results / UI banners). */
+export interface GmDamageInfo {
+  finalDamage: number;
+  headMultiplied: boolean;
+  penetrated: boolean;
+  btmClampedToOne: boolean;
+  limbSevered: boolean;
+  headAutoKill: boolean;
+  /** Stun save required per FNFF (character took damage and is still alive). */
+  stunSaveRequired: boolean;
+}
+
+/** Convenience wrapper that returns just the mutated character (used by tests / legacy callers). */
 export function applyGmDamage(
   character: Character,
   rawDamage: number,
@@ -27,6 +41,21 @@ export function applyGmDamage(
   pointBlank = false,
   weaponDamageFormula: string | null = null,
 ): Character {
+  return applyGmDamageDetailed(character, rawDamage, location, isAP, pointBlank, weaponDamageFormula).character;
+}
+
+/**
+ * Full FNFF damage pipeline with result metadata.
+ * See formulas.ts `calculateDamage` for book citations on each step.
+ */
+export function applyGmDamageDetailed(
+  character: Character,
+  rawDamage: number,
+  location: Zone | null,
+  isAP = false,
+  pointBlank = false,
+  weaponDamageFormula: string | null = null,
+): { character: Character; info: GmDamageInfo } {
   let effectiveRaw = rawDamage;
   if (pointBlank && weaponDamageFormula) {
     const maxD = maxDamageFromDiceFormula(weaponDamageFormula);
@@ -46,30 +75,65 @@ export function applyGmDamage(
 
   const result = calculateDamage(effectiveRaw, location, sp, btm, isAP);
 
-  const newDamage = Math.min(41, Math.max(0, character.damage + result.finalDamage));
+  // Severance / head auto-kill escalation (FNFF L6424).
+  let forcedDamageTotal: number | null = null;
+  if (result.headAutoKill) {
+    forcedDamageTotal = 41;
+  } else if (result.limbSevered) {
+    forcedDamageTotal = Math.max(character.damage + result.finalDamage, 13);
+  }
 
+  const newDamage =
+    forcedDamageTotal !== null
+      ? Math.min(41, Math.max(0, forcedDamageTotal))
+      : Math.min(41, Math.max(0, character.damage + result.finalDamage));
+
+  // Ablation only on a penetrating hit (FNFF L6350).
   let updatedHitLocations = character.hitLocations;
-  if (location && character.hitLocations[location] && effectiveRaw > 0) {
-    const effectiveSP = Math.max(
-      0,
-      character.hitLocations[location].stoppingPower - character.hitLocations[location].ablation,
-    );
-    if (effectiveSP > 0) {
-      updatedHitLocations = {
-        ...character.hitLocations,
-        [location]: {
-          ...character.hitLocations[location],
-          ablation: character.hitLocations[location].ablation + 1,
-        },
-      };
+  if (location && character.hitLocations[location] && result.penetrated) {
+    updatedHitLocations = {
+      ...character.hitLocations,
+      [location]: {
+        ...character.hitLocations[location],
+        ablation: character.hitLocations[location].ablation + 1,
+      },
+    };
+  }
+
+  // Persistent severance: mirrors the client store so the GM pipeline tags the
+  // character with e.g. `severed_right_arm` for the Body tab / chat context.
+  let updatedConditions: CharacterCondition[] = character.conditions ?? [];
+  if (result.limbSevered && location) {
+    const sevName = severedConditionName(location);
+    if (sevName && !updatedConditions.some((c) => c.name === sevName)) {
+      updatedConditions = [...updatedConditions, { name: sevName, duration: null }];
     }
   }
 
-  return recalcCharacterForGm({
+  const tookDamage = newDamage > character.damage;
+
+  const updated = recalcCharacterForGm({
     ...character,
     damage: newDamage,
     hitLocations: updatedHitLocations,
+    conditions: updatedConditions,
+    ...(tookDamage ? { isStabilized: false } : {}),
   });
+  const stillAlive = newDamage < 41;
+  const stunSaveRequired = tookDamage && stillAlive;
+
+  return {
+    character: updated,
+    info: {
+      finalDamage: result.finalDamage,
+      headMultiplied: result.headMultiplied,
+      penetrated: result.penetrated,
+      btmClampedToOne: result.btmClampedToOne,
+      limbSevered: result.limbSevered,
+      headAutoKill: result.headAutoKill,
+      stunSaveRequired,
+    },
+  };
 }
 
 export function applyGmDeductMoney(character: Character, amount: number): Character {

@@ -523,6 +523,7 @@ export function generateCp2020Character(input: GenerateCp2020CharacterInput): Ch
     skills: allSkills,
     damage: 0,
     isStunned: false,
+    isStabilized: false,
     conditions: [],
     hitLocations: DEFAULT_HIT_LOCATIONS,
     sdp: {

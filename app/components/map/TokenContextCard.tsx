@@ -15,6 +15,10 @@ const CONDITION_COLORS: Record<string, string> = {
   drugged: 'bg-green-900/70 text-green-200 border-green-600/60',
   cyberpsychosis: 'bg-pink-900/70 text-pink-200 border-pink-600/60',
   stunned: 'bg-orange-900/70 text-orange-200 border-orange-600/60',
+  severed_right_arm: 'bg-red-950 text-red-100 border-red-800',
+  severed_left_arm: 'bg-red-950 text-red-100 border-red-800',
+  severed_right_leg: 'bg-red-950 text-red-100 border-red-800',
+  severed_left_leg: 'bg-red-950 text-red-100 border-red-800',
 };
 const DEFAULT_CHIP = 'bg-zinc-700/80 text-zinc-200 border-zinc-600/60';
 
@@ -92,6 +96,7 @@ export function TokenContextCard({
   const damage = character?.damage ?? 0;
   const conditions: CharacterCondition[] = character?.conditions ?? [];
   const isStunned = character?.isStunned ?? false;
+  const isStabilized = character?.isStabilized ?? false;
 
   const removeCondition = async (name: string) => {
     if (!character) return;
@@ -170,15 +175,28 @@ export function TokenContextCard({
         {character ? (
           <>
             {/* Wound state */}
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
               <span className={`font-semibold ${woundColor(woundState)}`}>
                 {woundState ?? 'Unknown'}
               </span>
-              {isStunned && (
-                <span className="text-[9px] uppercase bg-orange-900/60 text-orange-200 border border-orange-700/50 px-1 py-0.5 rounded">
-                  Stunned
-                </span>
-              )}
+              <span className="flex flex-wrap gap-1 justify-end">
+                {isStunned && (
+                  <span className="text-[9px] uppercase bg-orange-900/60 text-orange-200 border border-orange-700/50 px-1 py-0.5 rounded">
+                    Stunned
+                  </span>
+                )}
+                {isStabilized &&
+                  woundState &&
+                  woundState !== 'Dead' &&
+                  woundState.startsWith('Mortal') && (
+                    <span
+                      className="text-[9px] uppercase bg-teal-900/60 text-teal-100 border border-teal-600/50 px-1 py-0.5 rounded"
+                      title="Stabilized — ongoing death saves off until new damage"
+                    >
+                      Stabilized
+                    </span>
+                  )}
+              </span>
             </div>
 
             {/* HP bar */}

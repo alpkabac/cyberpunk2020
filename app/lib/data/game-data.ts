@@ -15,6 +15,7 @@ import localGear from './gear.json';
 import localVehicles from './vehicles.json';
 import localPrograms from './programs.json';
 import localSkills from './skills.json';
+import { cyberwareInitiativeBonusFromRaw } from '../game-logic/cyberware-initiative';
 
 // ============================================================================
 // Supabase Client (optional)
@@ -84,6 +85,10 @@ export interface Cyberware {
   flavor: string;
   notes: string;
   source: string;
+  /** From Foundry `CyberWorkType.Stat` (keys: int, ref, bt, …). */
+  stat_mods?: Record<string, number>;
+  /** From Foundry `CyberWorkType.Checks.Initiative` (e.g. Kerenzikov). */
+  initiative_bonus?: number;
 }
 
 export interface Gear {
@@ -260,10 +265,38 @@ function normalizeLocalArmor(): Armor[] {
   });
 }
 
+const FOUNDRY_CYBER_STAT_KEYS = new Set([
+  'int',
+  'ref',
+  'tech',
+  'cool',
+  'attr',
+  'luck',
+  'ma',
+  'bt',
+  'emp',
+]);
+
+/** Cyber stat bonuses from flattened Foundry `CyberWorkType.Stat`. */
+function foundryCyberStatMods(n: Record<string, unknown>): Record<string, number> | undefined {
+  const cwt = n.CyberWorkType;
+  if (!cwt || typeof cwt !== 'object') return undefined;
+  const stat = (cwt as Record<string, unknown>).Stat;
+  if (!stat || typeof stat !== 'object') return undefined;
+  const out: Record<string, number> = {};
+  for (const [key, val] of Object.entries(stat as Record<string, unknown>)) {
+    if (!FOUNDRY_CYBER_STAT_KEYS.has(key)) continue;
+    if (typeof val === 'number' && Number.isFinite(val)) out[key] = Math.trunc(val);
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function normalizeLocalCyberware(): Cyberware[] {
   return (localCyberware as Record<string, unknown>[]).map((raw) => {
     const n = normalizeFoundryItem(raw);
     const hc = String(n.humanityCost || n.humanity_cost || '');
+    const stat_mods = foundryCyberStatMods(n);
+    const initiative_bonus = cyberwareInitiativeBonusFromRaw(n as Record<string, unknown>);
     return {
       id: String(n.id),
       name: String(n.name),
@@ -279,6 +312,8 @@ function normalizeLocalCyberware(): Cyberware[] {
       flavor: String(n.flavor || ''),
       notes: String(n.notes || ''),
       source: String(n.source || 'Local'),
+      ...(stat_mods ? { stat_mods } : {}),
+      ...(initiative_bonus !== 0 ? { initiative_bonus } : {}),
     };
   });
 }

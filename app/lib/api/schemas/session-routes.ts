@@ -56,6 +56,21 @@ export const voiceTurnFragmentBodySchema = z.object({
 
 export type VoiceTurnFragmentBody = z.infer<typeof voiceTurnFragmentBodySchema>;
 
+/** POST /api/session/[sessionId]/combat */
+export const sessionCombatPostBodySchema = z.object({
+  action: z.enum([
+    'start_combat',
+    'advance_round',
+    'end_combat',
+    'next_turn',
+    'clear_turn_saves_pending',
+  ]),
+  clear_timed_conditions: z.boolean().optional(),
+  narration: z.string().max(4000).optional(),
+});
+
+export type SessionCombatPostBody = z.infer<typeof sessionCombatPostBodySchema>;
+
 /** Resolved language tag for POST /api/voice (after header / query / env / default). */
 export const voiceSttLanguageSchema = z
   .string()

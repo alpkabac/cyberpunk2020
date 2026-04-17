@@ -42,6 +42,14 @@ describe('Local JSON Fallback (no Supabase)', () => {
     expect(grafted!.humanity_loss).toBe(7);
   });
 
+  it('Kerenzikov-style ware exposes initiative_bonus for sheet / dice roller', async () => {
+    clearCache();
+    const cyberware = await getAllCyberware();
+    const ker = cyberware.find((c) => c.name.toLowerCase().includes('kerenzikov'));
+    expect(ker).toBeDefined();
+    expect(ker!.initiative_bonus).toBeGreaterThanOrEqual(1);
+  });
+
   it('estimateHumanityLossFromHumanityCost averages dice strings', () => {
     expect(estimateHumanityLossFromHumanityCost('2d6')).toBe(7);
     expect(estimateHumanityLossFromHumanityCost('1d6/2')).toBe(2);

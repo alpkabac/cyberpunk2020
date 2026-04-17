@@ -442,6 +442,54 @@ export const GM_TOOL_DEFINITIONS = [
   {
     type: 'function' as const,
     function: {
+      name: 'start_combat',
+      description:
+        'Begin FNFF combat for this session: roll initiative (full REF after recalc + exploding 1d10 + manual initiative mod + Solo Combat Sense + equipped cyberware initiative/booster bonuses) for every character/NPC in the session, build turn order, set round 1, and post the initiative results to chat.',
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'advance_round',
+      description:
+        'Start the next combat round: increment the round counter, move to the top of initiative, decrement duration_rounds on all timed conditions across every character in the session, remove expired conditions, and post a round summary to chat.',
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'end_combat',
+      description:
+        'End combat: clear initiative/turn tracker. Optionally remove all timed conditions (duration not null) from every character, and optional narration line.',
+      parameters: {
+        type: 'object',
+        properties: {
+          clear_timed_conditions: {
+            type: 'boolean',
+            description: 'If true, strip all conditions with a finite duration from every sheet in the session',
+          },
+          narration: {
+            type: 'string',
+            description: 'Closing narration for chat (default short line if omitted)',
+          },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
       name: 'spawn_npc',
       description:
         'Same as spawn_random_npc: disposable CP2020 **Fast Character System** NPC (2D6 stats, 40-pt career, book armor/weapon table). Prefer spawn_random_npc for name clarity. For named bosses or canon characters with GM-defined stats/skills/gear, use spawn_unique_npc instead.',

@@ -456,6 +456,7 @@ export function buildFastSystemNpc(input: BuildFastSystemNpcInput): FastSystemNp
     skills: [...careerSkills, ...extraSkills],
     damage: 0,
     isStunned: false,
+    isStabilized: false,
     conditions: [],
     hitLocations: {
       Head: { location: [1], stoppingPower: 0, ablation: 0 },

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Character } from '../types';
+import { cyberwareInitiativeBonusFromRaw } from '../game-logic/cyberware-initiative';
 import { mergeCharacterRowWithRealtime, normalizeCharacterItems, characterRowToCharacter } from './db-mapper';
 
 const minimalChar = (id: string): Character => ({
@@ -20,6 +21,7 @@ const minimalChar = (id: string): Character => ({
   skills: [{ id: 'sk1', name: 'Handgun', value: 6, linkedStat: 'ref', category: 'Combat', isChipped: false }],
   damage: 0,
   isStunned: false,
+  isStabilized: false,
   conditions: [],
   hitLocations: {} as Character['hitLocations'],
   sdp: {
@@ -97,6 +99,55 @@ describe('normalizeCharacterItems', () => {
       expect(items[0].damage).toBe('3d6');
       expect(items[0].attackSkill).toBe('Handgun');
       expect(items[0].ammoType).toBe('11mm');
+    }
+  });
+
+  it('reads initiative bonus from Foundry-style cyberware JSON', () => {
+    expect(cyberwareInitiativeBonusFromRaw({ checks: { Initiative: 2 } })).toBe(2);
+    expect(
+      cyberwareInitiativeBonusFromRaw({
+        CyberWorkType: { Checks: { Initiative: 2 } },
+      } as Record<string, unknown>),
+    ).toBe(2);
+    expect(
+      cyberwareInitiativeBonusFromRaw({
+        system: { CyberWorkType: { Checks: { Initiative: 3 } } },
+      } as Record<string, unknown>),
+    ).toBe(3);
+    expect(cyberwareInitiativeBonusFromRaw({ initiativeBonus: 1 })).toBe(1);
+  });
+
+  it('normalizes cyberware initiative bonus onto item', () => {
+    const items = normalizeCharacterItems([
+      {
+        name: 'Kerenzikov',
+        cyberware_type: 'NEURALWARE',
+        surg_code: 'N',
+        humanity_cost: '2d6',
+        humanity_loss: 0,
+        checks: { Initiative: 2 },
+      },
+    ]);
+    expect(items[0].type).toBe('cyberware');
+    if (items[0].type === 'cyberware') {
+      expect(items[0].initiativeBonus).toBe(2);
+    }
+  });
+
+  it('backfills initiative from local compendium when sheet row omits bonus fields', () => {
+    const items = normalizeCharacterItems([
+      {
+        type: 'cyberware',
+        name: 'Kerenzikov Boosterware I',
+        equipped: true,
+        surg_code: 'N',
+        cyberware_type: 'NEURALWARE',
+        humanity_cost: '1d6',
+      },
+    ]);
+    expect(items[0].type).toBe('cyberware');
+    if (items[0].type === 'cyberware') {
+      expect(items[0].initiativeBonus).toBe(1);
     }
   });
 

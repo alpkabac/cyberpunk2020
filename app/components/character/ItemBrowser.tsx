@@ -119,7 +119,7 @@ function convertArmor(src: DataArmor): Armor {
 }
 
 function convertCyberware(src: DataCyberware): Cyberware {
-  return {
+  const cw: Cyberware = {
     id: `cyber-${uid()}`,
     name: src.name,
     type: 'cyberware',
@@ -134,6 +134,13 @@ function convertCyberware(src: DataCyberware): Cyberware {
     humanityLoss: resolveCyberwareHumanityLoss(src.humanity_loss, src.humanity_cost || ''),
     cyberwareType: src.cyberware_type || '',
   };
+  if (src.stat_mods && Object.keys(src.stat_mods).length > 0) {
+    cw.statMods = src.stat_mods as Cyberware['statMods'];
+  }
+  if (typeof src.initiative_bonus === 'number' && src.initiative_bonus !== 0) {
+    cw.initiativeBonus = src.initiative_bonus;
+  }
+  return cw;
 }
 
 function convertVehicle(src: DataVehicle): Vehicle {

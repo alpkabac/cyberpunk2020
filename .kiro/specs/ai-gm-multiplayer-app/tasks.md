@@ -845,36 +845,41 @@ This implementation plan breaks down the design into discrete coding tasks. The 
     - Remove/archive NPC button
     - **COMPLETED:** `SessionRoomClient.tsx` — NPC list with GM remove (×), wound-track quick adjust (−5/−1/+1/+5) with optimistic `updateNPC` + rollback on DB error
 
-- [ ] 20. Implement turn tracker / initiative system _(deferred)_
+- [x] 20. Implement turn tracker / initiative system
   - Track combat rounds and initiative order within a session
   - **Depends on:** Task 12 (Chat Interface) for round announcements
 
-  - [ ] 20.1 Design initiative data model
+  - [x] 20.1 Design initiative data model
     - `combat_state` on session or separate table: round counter, active character index
     - `initiative_entries`: character_id, initiative roll (REF + 1d10), sort order
     - Persisted in Postgres, synced via Realtime
+    - **COMPLETED:** `sessions.combat_state` JSONB (`CombatState`, `InitiativeEntry` in `app/lib/types.ts`); migration `009_session_combat_state.sql`; parse/hydrate in `session-load.ts`, Zustand `session.combatState`, Realtime merge in `apply-realtime-to-store.ts`
 
-  - [ ] 20.2 Implement `start_combat` AI tool
+  - [x] 20.2 Implement `start_combat` AI tool
     - Roll initiative for all characters in the session (REF + 1d10 per CP2020)
     - Create initiative order, set round to 1
     - Post initiative results to chat
+    - **COMPLETED:** `start_combat` in `tool-definitions.ts` + `session-combat-service.ts` (REF + exploding 1d10 + mod + Combat Sense); `tool-executor.ts`
 
-  - [ ] 20.3 Implement `advance_round` AI tool
+  - [x] 20.3 Implement `advance_round` AI tool
     - Increment round counter
     - Auto-decrement `duration` on all `CharacterCondition` entries across session characters
     - Remove expired conditions (duration reaches 0), post removals to chat
     - Post round summary (e.g. "— Round 3 begins — Blinded cleared from V")
+    - **COMPLETED:** `advance_round` tool + `sessionAdvanceRound` (ticks all session characters via service client); `combat-condition-tick.ts`
 
-  - [ ] 20.4 Implement `end_combat` AI tool
+  - [x] 20.4 Implement `end_combat` AI tool
     - Clear initiative order and combat state
     - Optionally clear temporary combat-only conditions
     - Post combat-end narration to chat
+    - **COMPLETED:** `end_combat` with `clear_timed_conditions` + optional `narration`; `sessionEndCombat`
 
-  - [ ] 20.5 Build initiative tracker UI
+  - [x] 20.5 Build initiative tracker UI
     - Initiative sidebar/bar showing turn order with active character highlight
     - Round counter display
     - Manual "next turn" / "advance round" buttons for GM
     - Visual indicator on character sheets when it's their turn
+    - **COMPLETED:** `InitiativeTracker.tsx` in session sidebar; GM API `POST /api/session/[sessionId]/combat`; `CharacterHeader` banner for active initiative character
 
 - [ ] 21. Polish UI and styling
   - [ ] 21.1 Apply cyberpunk theme to all components

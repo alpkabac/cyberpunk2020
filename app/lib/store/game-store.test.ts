@@ -42,6 +42,7 @@ describe('Game Store', () => {
         skills: [],
         damage: 0,
         isStunned: false,
+        isStabilized: false,
         conditions: [],
         hitLocations: {
           Head: { location: [1], stoppingPower: 0, ablation: 0 },
@@ -101,6 +102,7 @@ describe('Game Store', () => {
         skills: [],
         damage: 0,
         isStunned: false,
+        isStabilized: false,
         conditions: [],
         hitLocations: {
           Head: { location: [1], stoppingPower: 0, ablation: 0 },
@@ -158,6 +160,7 @@ describe('Game Store', () => {
         skills: [],
         damage: 0,
         isStunned: false,
+        isStabilized: false,
         conditions: [],
         hitLocations: {
           Head: { location: [1], stoppingPower: 0, ablation: 0 },
@@ -238,6 +241,7 @@ describe('Game Store', () => {
         skills: [],
         damage: 0,
         isStunned: false,
+        isStabilized: false,
         conditions: [],
         hitLocations: {
           Head: { location: [1], stoppingPower: 10, ablation: 0 },
@@ -262,13 +266,269 @@ describe('Game Store', () => {
 
       const state = useGameStore.getState();
       const updatedChar = selectCharacterById(state, 'char-1');
-      
-      // Pipeline: 6 × 2 (head) = 12, - SP 10 = 2, - BTM 3 = 0 final damage
-      expect(updatedChar?.damage).toBe(0);
-      expect(updatedChar?.derivedStats?.woundState).toBe('Uninjured');
-      // SP stays at 10 (synced from armor), ablation incremented to 1 (effective SP = 9)
+
+      // Pipeline: 6 × 2 (head) = 12, − SP 10 = 2 (penetrated),
+      // − BTM 3 would be −1, but FNFF "BTM min 1" clamps to 1.
+      expect(updatedChar?.damage).toBe(1);
+      expect(updatedChar?.derivedStats?.woundState).toBe('Light');
+      // SP stays at 10 (synced from armor), ablation incremented (penetrating hit).
       expect(updatedChar?.hitLocations.Head.stoppingPower).toBe(10);
       expect(updatedChar?.hitLocations.Head.ablation).toBe(1);
+    });
+
+    it('does not ablate armor when the attack fails to penetrate SP', () => {
+      const jacket: Armor = {
+        id: 'jacket-1',
+        name: 'Armor Jacket',
+        type: 'armor',
+        flavor: '',
+        notes: '',
+        cost: 0,
+        weight: 0,
+        equipped: true,
+        source: 'Test',
+        coverage: {
+          Head: { stoppingPower: 0, ablation: 0 },
+          Torso: { stoppingPower: 20, ablation: 0 },
+          rArm: { stoppingPower: 0, ablation: 0 },
+          lArm: { stoppingPower: 0, ablation: 0 },
+          rLeg: { stoppingPower: 0, ablation: 0 },
+          lLeg: { stoppingPower: 0, ablation: 0 },
+        },
+        encumbrance: 0,
+      };
+
+      const c: Character = {
+        id: 'char-ab',
+        userId: 'u',
+        sessionId: 's',
+        name: 'Ab Target',
+        type: 'character',
+        isNpc: false,
+        imageUrl: '',
+        role: 'Solo',
+        age: 25,
+        points: 0,
+        stats: {
+          int: createStatBlock(5, 0),
+          ref: createStatBlock(5, 0),
+          tech: createStatBlock(5, 0),
+          cool: createStatBlock(5, 0),
+          attr: createStatBlock(5, 0),
+          luck: createStatBlock(5, 0),
+          ma: createStatBlock(5, 0),
+          bt: createStatBlock(8, 0),
+          emp: createStatBlock(5, 0),
+        },
+        specialAbility: { name: '', value: 0 },
+        reputation: 0,
+        improvementPoints: 0,
+        skills: [],
+        damage: 0,
+        isStunned: false,
+        isStabilized: false,
+        conditions: [],
+        hitLocations: {
+          Head: { location: [1], stoppingPower: 0, ablation: 0 },
+          Torso: { location: [2, 3, 4], stoppingPower: 20, ablation: 0 },
+          rArm: { location: [5], stoppingPower: 0, ablation: 0 },
+          lArm: { location: [6], stoppingPower: 0, ablation: 0 },
+          lLeg: { location: [7, 8], stoppingPower: 0, ablation: 0 },
+          rLeg: { location: [9, 10], stoppingPower: 0, ablation: 0 },
+        },
+        sdp: {
+          sum: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },
+          current: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },
+        },
+        eurobucks: 0,
+        items: [jacket],
+        netrunDeck: null,
+        lifepath: null,
+      };
+
+      useGameStore.getState().addCharacter(c);
+      // 5 damage vs SP 20 → fully stopped, no penetration, no ablation.
+      useGameStore.getState().applyDamage('char-ab', 5, 'Torso');
+
+      const after = selectCharacterById(useGameStore.getState(), 'char-ab');
+      expect(after?.damage).toBe(0);
+      expect(after?.hitLocations.Torso.ablation).toBe(0);
+    });
+
+    it('head hit with >8 final damage kills instantly (FNFF limb-loss rule)', () => {
+      const c: Character = {
+        id: 'char-hk',
+        userId: 'u',
+        sessionId: 's',
+        name: 'Head Kill',
+        type: 'character',
+        isNpc: false,
+        imageUrl: '',
+        role: 'Solo',
+        age: 25,
+        points: 0,
+        stats: {
+          int: createStatBlock(5, 0),
+          ref: createStatBlock(5, 0),
+          tech: createStatBlock(5, 0),
+          cool: createStatBlock(5, 0),
+          attr: createStatBlock(5, 0),
+          luck: createStatBlock(5, 0),
+          ma: createStatBlock(5, 0),
+          bt: createStatBlock(8, 0),
+          emp: createStatBlock(5, 0),
+        },
+        specialAbility: { name: '', value: 0 },
+        reputation: 0,
+        improvementPoints: 0,
+        skills: [],
+        damage: 0,
+        isStunned: false,
+        isStabilized: false,
+        conditions: [],
+        hitLocations: {
+          Head: { location: [1], stoppingPower: 0, ablation: 0 },
+          Torso: { location: [2, 3, 4], stoppingPower: 0, ablation: 0 },
+          rArm: { location: [5], stoppingPower: 0, ablation: 0 },
+          lArm: { location: [6], stoppingPower: 0, ablation: 0 },
+          lLeg: { location: [7, 8], stoppingPower: 0, ablation: 0 },
+          rLeg: { location: [9, 10], stoppingPower: 0, ablation: 0 },
+        },
+        sdp: {
+          sum: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },
+          current: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },
+        },
+        eurobucks: 0,
+        items: [],
+        netrunDeck: null,
+        lifepath: null,
+      };
+
+      useGameStore.getState().addCharacter(c);
+      // 6 raw → ×2 head = 12, − BTM 3 = 9 > 8 → head auto-kill.
+      useGameStore.getState().applyDamage('char-hk', 6, 'Head');
+
+      const after = selectCharacterById(useGameStore.getState(), 'char-hk');
+      expect(after?.damage).toBe(41);
+      expect(after?.derivedStats?.woundState).toBe('Dead');
+    });
+
+    it('limb hit with >8 final damage forces Mortal 0 (limb severed)', () => {
+      const c: Character = {
+        id: 'char-lm',
+        userId: 'u',
+        sessionId: 's',
+        name: 'Limb Sever',
+        type: 'character',
+        isNpc: false,
+        imageUrl: '',
+        role: 'Solo',
+        age: 25,
+        points: 0,
+        stats: {
+          int: createStatBlock(5, 0),
+          ref: createStatBlock(5, 0),
+          tech: createStatBlock(5, 0),
+          cool: createStatBlock(5, 0),
+          attr: createStatBlock(5, 0),
+          luck: createStatBlock(5, 0),
+          ma: createStatBlock(5, 0),
+          bt: createStatBlock(8, 0),
+          emp: createStatBlock(5, 0),
+        },
+        specialAbility: { name: '', value: 0 },
+        reputation: 0,
+        improvementPoints: 0,
+        skills: [],
+        damage: 0,
+        isStunned: false,
+        isStabilized: false,
+        conditions: [],
+        hitLocations: {
+          Head: { location: [1], stoppingPower: 0, ablation: 0 },
+          Torso: { location: [2, 3, 4], stoppingPower: 0, ablation: 0 },
+          rArm: { location: [5], stoppingPower: 0, ablation: 0 },
+          lArm: { location: [6], stoppingPower: 0, ablation: 0 },
+          lLeg: { location: [7, 8], stoppingPower: 0, ablation: 0 },
+          rLeg: { location: [9, 10], stoppingPower: 0, ablation: 0 },
+        },
+        sdp: {
+          sum: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },
+          current: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },
+        },
+        eurobucks: 0,
+        items: [],
+        netrunDeck: null,
+        lifepath: null,
+      };
+
+      useGameStore.getState().addCharacter(c);
+      // 12 raw to right arm (no SP) − BTM 3 = 9 > 8 → severed, forced Mortal 0 (>=13).
+      useGameStore.getState().applyDamage('char-lm', 12, 'rArm');
+
+      const after = selectCharacterById(useGameStore.getState(), 'char-lm');
+      expect(after?.damage).toBe(13);
+      expect(after?.derivedStats?.woundState).toBe('Mortal0');
+      // Persistent severance condition recorded for Body tab / GM context.
+      expect(after?.conditions.some((cond) => cond.name === 'severed_right_arm')).toBe(true);
+    });
+
+    it('does not duplicate a severance condition on repeated limb hits', () => {
+      const c: Character = {
+        id: 'char-lm2',
+        userId: 'u',
+        sessionId: 's',
+        name: 'Limb Sever 2',
+        type: 'character',
+        isNpc: false,
+        imageUrl: '',
+        role: 'Solo',
+        age: 25,
+        points: 0,
+        stats: {
+          int: createStatBlock(5, 0),
+          ref: createStatBlock(5, 0),
+          tech: createStatBlock(5, 0),
+          cool: createStatBlock(5, 0),
+          attr: createStatBlock(5, 0),
+          luck: createStatBlock(5, 0),
+          ma: createStatBlock(5, 0),
+          bt: createStatBlock(8, 0),
+          emp: createStatBlock(5, 0),
+        },
+        specialAbility: { name: '', value: 0 },
+        reputation: 0,
+        improvementPoints: 0,
+        skills: [],
+        damage: 0,
+        isStunned: false,
+        isStabilized: false,
+        conditions: [],
+        hitLocations: {
+          Head: { location: [1], stoppingPower: 0, ablation: 0 },
+          Torso: { location: [2, 3, 4], stoppingPower: 0, ablation: 0 },
+          rArm: { location: [5], stoppingPower: 0, ablation: 0 },
+          lArm: { location: [6], stoppingPower: 0, ablation: 0 },
+          lLeg: { location: [7, 8], stoppingPower: 0, ablation: 0 },
+          rLeg: { location: [9, 10], stoppingPower: 0, ablation: 0 },
+        },
+        sdp: {
+          sum: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },
+          current: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },
+        },
+        eurobucks: 0,
+        items: [],
+        netrunDeck: null,
+        lifepath: null,
+      };
+
+      useGameStore.getState().addCharacter(c);
+      useGameStore.getState().applyDamage('char-lm2', 12, 'rArm');
+      useGameStore.getState().applyDamage('char-lm2', 12, 'rArm');
+
+      const after = selectCharacterById(useGameStore.getState(), 'char-lm2');
+      const severed = after?.conditions.filter((cond) => cond.name === 'severed_right_arm') ?? [];
+      expect(severed.length).toBe(1);
     });
   });
 
@@ -302,6 +562,7 @@ describe('Game Store', () => {
         skills: [],
         damage: 0,
         isStunned: false,
+        isStabilized: false,
         conditions: [],
         hitLocations: {
           Head: { location: [1], stoppingPower: 0, ablation: 0 },
@@ -359,6 +620,7 @@ describe('Game Store', () => {
         skills: [],
         damage: 0,
         isStunned: false,
+        isStabilized: false,
         conditions: [],
         hitLocations: {
           Head: { location: [1], stoppingPower: 0, ablation: 0 },
@@ -418,6 +680,7 @@ describe('Game Store', () => {
         skills: [],
         damage: 0,
         isStunned: false,
+        isStabilized: false,
         conditions: [],
         hitLocations: {
           Head: { location: [1], stoppingPower: 0, ablation: 0 },
@@ -488,6 +751,7 @@ describe('Game Store', () => {
         skills: [],
         damage: 0,
         isStunned: false,
+        isStabilized: false,
         conditions: [],
         hitLocations: {
           Head: { location: [1], stoppingPower: 0, ablation: 0 },
@@ -602,6 +866,7 @@ describe('Game Store', () => {
         skills: [],
         damage: 0,
         isStunned: false,
+        isStabilized: false,
         conditions: [],
         hitLocations: {
           Head: { location: [1], stoppingPower: 0, ablation: 0 },
@@ -674,6 +939,7 @@ describe('Game Store', () => {
         skills: [],
         damage: 5,
         isStunned: false,
+        isStabilized: false,
         conditions: [],
         hitLocations: {
           Head: { location: [1], stoppingPower: 0, ablation: 0 },
@@ -731,6 +997,7 @@ describe('Game Store', () => {
         skills: [],
         damage: 13,
         isStunned: false,
+        isStabilized: false,
         conditions: [],
         hitLocations: {
           Head: { location: [1], stoppingPower: 0, ablation: 0 },
@@ -750,15 +1017,15 @@ describe('Game Store', () => {
         lifepath: null,
       };
 
-      useGameStore.getState().addCharacter(character);
-      // Mortal 0: death save target = 8 + (-3) = 5
+      useGameStore.getState().addCharacter({ ...character, damage: 25 });
+      // damage 25 → Mortal 3; death save target = BT 8 − 3 = 5
       useGameStore.getState().applyDeathSaveRollResult('char-1', 6);
       expect(selectCharacterById(useGameStore.getState(), 'char-1')?.damage).toBe(41);
 
       useGameStore.getState().reset();
-      useGameStore.getState().addCharacter({ ...character, damage: 13 });
+      useGameStore.getState().addCharacter({ ...character, damage: 25 });
       useGameStore.getState().applyDeathSaveRollResult('char-1', 4);
-      expect(selectCharacterById(useGameStore.getState(), 'char-1')?.damage).toBe(13);
+      expect(selectCharacterById(useGameStore.getState(), 'char-1')?.damage).toBe(25);
     });
 
     it('optimistic character edit can be rolled back', () => {
@@ -790,6 +1057,7 @@ describe('Game Store', () => {
         skills: [],
         damage: 0,
         isStunned: false,
+        isStabilized: false,
         conditions: [],
         hitLocations: {
           Head: { location: [1], stoppingPower: 0, ablation: 0 },
@@ -845,8 +1113,9 @@ describe('Game Store', () => {
         reputation: 0,
         improvementPoints: 0,
         skills: [],
-        damage: 13,
+        damage: 25,
         isStunned: false,
+        isStabilized: false,
         conditions: [],
         combatModifiers: { initiative: 0, stunSave: 1 },
         hitLocations: {
@@ -868,9 +1137,9 @@ describe('Game Store', () => {
       };
 
       useGameStore.getState().addCharacter(character);
-      // Base death 5 + mod 1 = 6; roll 6 succeeds (not dead)
+      // damage 25 → Mortal 3; base death = BT 8 − 3 = 5; +mod 1 = 6; roll 6 succeeds (not dead)
       useGameStore.getState().applyDeathSaveRollResult('char-1', 6);
-      expect(selectCharacterById(useGameStore.getState(), 'char-1')?.damage).toBe(13);
+      expect(selectCharacterById(useGameStore.getState(), 'char-1')?.damage).toBe(25);
     });
   });
 });

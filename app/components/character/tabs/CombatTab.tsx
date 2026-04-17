@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Character, Zone, Weapon, Armor, FireMode } from '@/lib/types';
 import { useGameStore } from '@/lib/store/game-store';
 import { DamageApplicator, type DamageApplicatorPreset } from '../DamageApplicator';
@@ -16,6 +16,7 @@ import {
   RangeBracket,
 } from '@/lib/game-logic/lookups';
 import { sheetRollContext } from '@/lib/dice-roll-send-to-gm';
+import { sumEquippedCyberwareInitiativeBonus } from '@/lib/session/combat-state';
 
 /** Must match `rangedCombatModifiers` key for aimed shots (attack −4; zone chosen if hit). */
 const AIMED_SHOT_LABEL = 'Aimed shot (specific area)' as const;
@@ -43,12 +44,19 @@ export function CombatTab({ character, editable }: CombatTabProps) {
   const [stabilizationTarget, setStabilizationTarget] = useState(() =>
     Math.max(1, Math.min(40, character.damage)),
   );
+  /** Who receives `isStabilized` on a successful roll (defaults to open sheet). */
+  const [stabilizationPatientId, setStabilizationPatientId] = useState(character.id);
   /** When aimed shot is checked, optional declared zone for Apply Damage preset. */
   const [aimedZoneByWeapon, setAimedZoneByWeapon] = useState<Record<string, string>>({});
 
   const openDiceRoller = useGameStore((state) => state.openDiceRoller);
   const sessionId = useGameStore((state) => state.session.id);
+  const charactersById = useGameStore((state) => state.characters.byId);
+  const characterIds = useGameStore((state) => state.characters.allIds);
+  const npcsById = useGameStore((state) => state.npcs.byId);
+  const npcIds = useGameStore((state) => state.npcs.allIds);
   const beginStunSaveRoll = useGameStore((state) => state.beginStunSaveRoll);
+  const beginStunOverrideRequest = useGameStore((state) => state.beginStunOverrideRequest);
   const beginDeathSaveRoll = useGameStore((state) => state.beginDeathSaveRoll);
   const updateCharacterField = useGameStore((state) => state.updateCharacterField);
   const fireWeapon = useGameStore((state) => state.fireWeapon);
@@ -63,14 +71,37 @@ export function CombatTab({ character, editable }: CombatTabProps) {
   };
 
   const initMod = character.combatModifiers?.initiative ?? 0;
+  const cyberInitBonus = sumEquippedCyberwareInitiativeBonus(character);
   const stunSaveMod = character.combatModifiers?.stunSave ?? 0;
+  const deathSaveOnlyMod = character.combatModifiers?.deathSave ?? 0;
   const stabBonus = getStabilizationMedicBonus(character);
   const medSkillForStab = Math.max(0, stabBonus - (character.stats.tech.total ?? 0));
 
-  const setCombatModifier = (key: 'initiative' | 'stunSave', value: number) => {
+  const stabilizationPatientOptions = useMemo(() => {
+    const rows: { id: string; name: string }[] = [];
+    for (const id of characterIds) {
+      const c = charactersById[id];
+      if (c) rows.push({ id: c.id, name: c.name });
+    }
+    for (const id of npcIds) {
+      const c = npcsById[id];
+      if (c) rows.push({ id: c.id, name: c.name });
+    }
+    if (!rows.some((r) => r.id === character.id)) {
+      rows.push({ id: character.id, name: character.name });
+    }
+    rows.sort((a, b) => a.name.localeCompare(b.name));
+    return rows;
+  }, [characterIds, charactersById, npcIds, npcsById, character.id, character.name]);
+
+  const stabilizationPatient =
+    charactersById[stabilizationPatientId] ?? npcsById[stabilizationPatientId];
+
+  const setCombatModifier = (key: 'initiative' | 'stunSave' | 'deathSave', value: number) => {
     const next = {
       initiative: character.combatModifiers?.initiative ?? 0,
       stunSave: character.combatModifiers?.stunSave ?? 0,
+      deathSave: character.combatModifiers?.deathSave ?? 0,
       [key]: value,
     };
     updateCharacterField(character.id, 'combatModifiers', next);
@@ -185,7 +216,10 @@ export function CombatTab({ character, editable }: CombatTabProps) {
   const baseStunTarget = character.derivedStats?.stunSaveTarget ?? character.stats.bt.total;
   const effectiveStunTarget = baseStunTarget + stunSaveMod;
   const baseDeathTarget = character.derivedStats?.deathSaveTarget ?? -1;
-  const effectiveDeathTarget = baseDeathTarget >= 0 ? baseDeathTarget + stunSaveMod : -1;
+  const effectiveDeathTarget =
+    baseDeathTarget >= 0 ? baseDeathTarget + stunSaveMod + deathSaveOnlyMod : -1;
+  const deathSaveBlockedByStabilization =
+    character.isStabilized && baseDeathTarget >= 0;
 
   return (
     <>
@@ -200,7 +234,7 @@ export function CombatTab({ character, editable }: CombatTabProps) {
                     ? character.specialAbility.value
                     : 0;
                 const refTotal = character.stats.ref.total || 0;
-                openDiceRoller(`1d10+${refTotal + initMod + combatSense}`, {
+                openDiceRoller(`1d10+${refTotal + initMod + combatSense + cyberInitBonus}`, {
                   kind: 'custom',
                   characterId: character.id,
                   ...sheetRollContext(character, sessionId, 'Initiative'),
@@ -220,6 +254,13 @@ export function CombatTab({ character, editable }: CombatTabProps) {
                 )}
                 {character.specialAbility?.name === 'Combat Sense' &&
                   ` +${character.specialAbility.value} CS`}
+                {cyberInitBonus !== 0 && (
+                  <span>
+                    {' '}
+                    {cyberInitBonus > 0 ? '+' : ''}
+                    {cyberInitBonus} booster
+                  </span>
+                )}
               </div>
             </button>
 
@@ -246,30 +287,41 @@ export function CombatTab({ character, editable }: CombatTabProps) {
               type="button"
               onClick={() => beginDeathSaveRoll(character.id)}
               className={`border-2 border-black p-3 font-bold uppercase ${
-                baseDeathTarget >= 0
+                baseDeathTarget >= 0 && !deathSaveBlockedByStabilization
                   ? 'hover:bg-red-100 border-red-600 text-red-600'
-                  : 'bg-gray-100 text-gray-400 cursor-default'
+                  : 'bg-gray-100 text-gray-400 cursor-default border-gray-400'
               }`}
-              disabled={baseDeathTarget < 0}
+              disabled={baseDeathTarget < 0 || deathSaveBlockedByStabilization}
               title={
-                baseDeathTarget >= 0
-                  ? `Death: roll one d10 (flat). Success if ≤ ${effectiveDeathTarget} (same BT + wound row as stun; FNFF). Fail → dead.`
-                  : 'Not mortally wounded'
+                baseDeathTarget < 0
+                  ? 'Not mortally wounded'
+                  : deathSaveBlockedByStabilization
+                    ? 'Stabilized — no ongoing death saves until new damage (a new severing hit still forces one).'
+                    : `Death: roll one d10 (flat). Success if ≤ ${effectiveDeathTarget} (BT − mortal level; FNFF). Fail → dead.`
               }
             >
               Death Save
               <div className="text-xs font-normal mt-1">
-                {baseDeathTarget >= 0 ? (
+                {baseDeathTarget >= 0 && !deathSaveBlockedByStabilization ? (
                   <>
                     Target: ≤ {effectiveDeathTarget}
-                    {stunSaveMod !== 0 && (
+                    {(stunSaveMod !== 0 || deathSaveOnlyMod !== 0) && (
                       <span className="text-gray-600">
                         {' '}
-                        (base {baseDeathTarget}, mod {stunSaveMod >= 0 ? '+' : ''}
-                        {stunSaveMod})
+                        (base {baseDeathTarget}, stun {stunSaveMod >= 0 ? '+' : ''}
+                        {stunSaveMod}
+                        {deathSaveOnlyMod !== 0 && (
+                          <span>
+                            , death {deathSaveOnlyMod >= 0 ? '+' : ''}
+                            {deathSaveOnlyMod}
+                          </span>
+                        )}
+                        )
                       </span>
                     )}
                   </>
+                ) : baseDeathTarget >= 0 && deathSaveBlockedByStabilization ? (
+                  <span className="text-teal-800 font-semibold">Stabilized</span>
                 ) : (
                   'N/A'
                 )}
@@ -277,41 +329,105 @@ export function CombatTab({ character, editable }: CombatTabProps) {
             </button>
           </div>
 
+          {sessionId && (
+            <div className="mt-2">
+              <button
+                type="button"
+                onClick={() => beginStunOverrideRequest(character.id)}
+                className="text-[11px] uppercase font-semibold text-violet-900 border border-violet-700/60 bg-violet-100/80 px-2 py-1.5 rounded hover:bg-violet-200/90 w-full sm:w-auto"
+                title="Opens dice panel: send a stun ruling request to the AI-GM (no roll). GM applies isStunned via tools."
+              >
+                Ask AI-GM (stun ruling)
+              </button>
+            </div>
+          )}
+
+          {character.isStabilized && baseDeathTarget >= 0 && (
+            <p className="text-[10px] text-teal-900 font-medium mt-1.5 leading-snug">
+              Stabilized — ongoing Mortal death saves are skipped until this character takes new damage.
+            </p>
+          )}
+
           <div className="border-2 border-black bg-[#f5f5dc] p-3 mt-2">
-            <div className="text-xs font-bold uppercase mb-2">Combat modifiers (gear, drugs, referee)</div>
-            <div className="flex flex-wrap gap-4 items-end">
-              <label className="flex flex-col gap-0.5 text-xs">
-                <span className="font-semibold">Initiative</span>
-                {editable ? (
-                  <input
-                    type="number"
-                    value={initMod}
-                    onChange={(e) =>
-                      setCombatModifier('initiative', parseInt(e.target.value, 10) || 0)
-                    }
-                    className="w-16 border-2 border-black px-2 py-1 font-mono"
-                  />
-                ) : (
-                  <span className="font-mono font-bold">{initMod}</span>
-                )}
-                <span className="text-[10px] text-gray-600">Added to initiative roll</span>
-              </label>
-              <label className="flex flex-col gap-0.5 text-xs">
-                <span className="font-semibold">Stun save</span>
-                {editable ? (
-                  <input
-                    type="number"
-                    value={stunSaveMod}
-                    onChange={(e) =>
-                      setCombatModifier('stunSave', parseInt(e.target.value, 10) || 0)
-                    }
-                    className="w-16 border-2 border-black px-2 py-1 font-mono"
-                  />
-                ) : (
-                  <span className="font-mono font-bold">{stunSaveMod}</span>
-                )}
-                <span className="text-[10px] text-gray-600">Added to stun &amp; death save targets (easier if +)</span>
-              </label>
+            <div className="text-xs font-bold uppercase tracking-wide text-gray-900 mb-3">
+              Combat modifiers
+            </div>
+            <div className="grid gap-5 sm:grid-cols-2 sm:gap-8">
+              <div className="space-y-2 min-w-0">
+                <div className="text-[11px] font-semibold text-gray-900">Initiative</div>
+                <label className="flex flex-col gap-1.5 text-xs">
+                  <span className="text-[10px] uppercase tracking-wide text-gray-600">Manual</span>
+                  {editable ? (
+                    <input
+                      type="number"
+                      value={initMod}
+                      onChange={(e) =>
+                        setCombatModifier('initiative', parseInt(e.target.value, 10) || 0)
+                      }
+                      className="w-16 border-2 border-black px-2 py-1 font-mono bg-white"
+                    />
+                  ) : (
+                    <span className="font-mono font-bold text-sm">{initMod}</span>
+                  )}
+                  <p className="text-[10px] text-gray-600 leading-relaxed">
+                    Drugs, fast draw, referee. Rolls with REF + Combat Sense + 1d10.
+                  </p>
+                  {cyberInitBonus !== 0 && (
+                    <p className="text-[10px] text-teal-900 font-medium">
+                      Equipped cyber: +{cyberInitBonus} initiative
+                    </p>
+                  )}
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 pt-1 border-t border-black/15">
+                    <span className="text-[10px] uppercase tracking-wide text-gray-500">
+                      Flat bonus (excl. REF &amp; d10)
+                    </span>
+                    <span className="font-mono text-sm font-bold tabular-nums">
+                      {initMod + cyberInitBonus}
+                    </span>
+                  </div>
+                </label>
+              </div>
+              <div className="space-y-2 min-w-0">
+                <div className="text-[11px] font-semibold text-gray-900">Stun / death saves</div>
+                <label className="flex flex-col gap-1.5 text-xs">
+                  <span className="text-[10px] uppercase tracking-wide text-gray-600">Stun target modifier</span>
+                  {editable ? (
+                    <input
+                      type="number"
+                      value={stunSaveMod}
+                      onChange={(e) =>
+                        setCombatModifier('stunSave', parseInt(e.target.value, 10) || 0)
+                      }
+                      className="w-16 border-2 border-black px-2 py-1 font-mono bg-white"
+                    />
+                  ) : (
+                    <span className="font-mono font-bold text-sm">{stunSaveMod}</span>
+                  )}
+                  <p className="text-[10px] text-gray-600 leading-relaxed">
+                    Applies to stun saves only (+ easier). Death saves also add the death-only mod below.
+                  </p>
+                </label>
+                <label className="flex flex-col gap-1.5 text-xs">
+                  <span className="text-[10px] uppercase tracking-wide text-gray-600">
+                    Death-only modifier
+                  </span>
+                  {editable ? (
+                    <input
+                      type="number"
+                      value={deathSaveOnlyMod}
+                      onChange={(e) =>
+                        setCombatModifier('deathSave', parseInt(e.target.value, 10) || 0)
+                      }
+                      className="w-16 border-2 border-black px-2 py-1 font-mono bg-white"
+                    />
+                  ) : (
+                    <span className="font-mono font-bold text-sm">{deathSaveOnlyMod}</span>
+                  )}
+                  <p className="text-[10px] text-gray-600 leading-relaxed">
+                    Extra flat bonus on death saves only (stacks with stun mod). Rare gear / referee.
+                  </p>
+                </label>
+              </div>
             </div>
           </div>
 
@@ -330,6 +446,20 @@ export function CombatTab({ character, editable }: CombatTabProps) {
               patient&apos;s full damage; then they stop making death saves until hurt again.
             </p>
             <div className="flex flex-wrap gap-3 items-end text-xs">
+              <label className="flex flex-col gap-0.5 min-w-[10rem]">
+                <span className="font-semibold">Patient (stabilized if success)</span>
+                <select
+                  value={stabilizationPatientId}
+                  onChange={(e) => setStabilizationPatientId(e.target.value)}
+                  className="border-2 border-black px-2 py-1 font-mono bg-white max-w-[14rem]"
+                >
+                  {stabilizationPatientOptions.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <label className="flex flex-col gap-0.5">
                 <span className="font-semibold">Patient damage (target)</span>
                 <input
@@ -352,11 +482,12 @@ export function CombatTab({ character, editable }: CombatTabProps) {
                   const tgt = Math.max(1, Math.min(40, stabilizationTarget));
                   openDiceRoller(`1d10+${stabBonus}`, {
                     kind: 'stabilization',
+                    patientCharacterId: stabilizationPatientId,
                     targetDamage: tgt,
                     ...sheetRollContext(
                       character,
                       sessionId,
-                      `Stabilization (patient damage ${tgt})`,
+                      `Stabilization (${stabilizationPatient?.name ?? 'patient'} damage ${tgt})`,
                     ),
                   });
                 }}
@@ -367,17 +498,23 @@ export function CombatTab({ character, editable }: CombatTabProps) {
               <button
                 type="button"
                 onClick={() =>
-                  setStabilizationTarget(Math.max(1, Math.min(40, character.damage)))
+                  setStabilizationTarget(
+                    Math.max(
+                      1,
+                      Math.min(40, stabilizationPatient?.damage ?? character.damage),
+                    ),
+                  )
                 }
                 className="border border-teal-800 px-2 py-1 text-[10px] font-bold uppercase hover:bg-teal-100"
-                title="Set target to this character’s current damage (when stabilizing yourself or copying from the sheet)"
+                title="Set target to the selected patient’s current damage track"
               >
-                Use my damage ({character.damage})
+                Use patient damage ({stabilizationPatient?.damage ?? '—'})
               </button>
             </div>
             <p className="text-[10px] text-teal-950 mt-2">
               Medic bonus on this sheet: <strong>{stabBonus}</strong> (TECH {character.stats.tech.total} + medical{' '}
-              {medSkillForStab}). Stabilization does not change the sheet automatically.
+              {medSkillForStab}). On success, the selected patient gets the <strong>Stabilized</strong> flag (cleared
+              automatically when they take new damage).
             </p>
           </div>
 

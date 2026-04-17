@@ -393,17 +393,39 @@ export function DamageApplicator({
                   <div>
                     − SP {getSP(selectedLocation)}
                     {isAP && ` (halved to ${preview.effectiveSP})`}= −{preview.spReduction}
+                    {preview.penetrated ? (
+                      <span className="text-red-700"> (penetrated → armor ablates 1)</span>
+                    ) : (
+                      <span className="text-green-700"> (stopped — no ablation)</span>
+                    )}
                   </div>
                 )}
                 <div>
                   − BTM {btm} = −{preview.btmReduction}
+                  {preview.btmClampedToOne && (
+                    <span className="text-amber-700"> (BTM min 1 applied)</span>
+                  )}
                 </div>
                 <div className="border-t border-gray-400 pt-1 mt-1 font-bold text-lg">
                   Final Damage: {preview.finalDamage}
                 </div>
+                {preview.headAutoKill && (
+                  <div className="font-bold text-red-700">
+                    HEAD hit &gt; 8 damage — FNFF: automatic death (damage → 41).
+                  </div>
+                )}
+                {preview.limbSevered && !preview.headAutoKill && (
+                  <div className="font-bold text-red-700">
+                    LIMB hit &gt; 8 damage — FNFF: severed, forced Mortal 0 death save.
+                  </div>
+                )}
                 <div className="text-gray-600">
                   New Total: {character.damage} + {preview.finalDamage} ={' '}
-                  {Math.min(41, character.damage + preview.finalDamage)}
+                  {preview.headAutoKill
+                    ? 41
+                    : preview.limbSevered
+                      ? Math.min(41, Math.max(character.damage + preview.finalDamage, 13))
+                      : Math.min(41, character.damage + preview.finalDamage)}
                 </div>
               </div>
             </div>
@@ -446,7 +468,8 @@ export function DamageApplicator({
               <code className="bg-gray-100 px-1">raw_damage</code> (no d10 in the API).
             </p>
             <p>
-              <strong>Pipeline:</strong> Base → Head ×2 → −SP → −BTM → Final
+              <strong>Pipeline:</strong> Base → Head ×2 → −SP → −BTM (min 1 if armor pierced) → Final.
+              Armor ablates 1 only on a penetrating hit. Any damage auto-prompts a Stun Save.
             </p>
           </div>
         </div>

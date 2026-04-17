@@ -22,6 +22,7 @@ import type {
   Zone,
 } from '../types';
 import { createStatBlock } from '../types';
+import { resolveCyberwareInitiativeFromRaw } from '../game-logic/cyberware-initiative-resolve';
 
 const WEAPON_TYPES: WeaponType[] = ['Pistol', 'SMG', 'Shotgun', 'Rifle', 'Heavy', 'Melee', 'Exotic'];
 const ZONES: Zone[] = ['Head', 'Torso', 'rArm', 'lArm', 'rLeg', 'lLeg'];
@@ -179,6 +180,8 @@ export function normalizeOneItem(entry: unknown): Item | null {
     };
     if (o.statMods && typeof o.statMods === 'object') cw.statMods = o.statMods as Cyberware['statMods'];
     if (o.stat_mods && typeof o.stat_mods === 'object') cw.statMods = o.stat_mods as Cyberware['statMods'];
+    const iniBonus = resolveCyberwareInitiativeFromRaw(o as Record<string, unknown>);
+    if (iniBonus !== 0) cw.initiativeBonus = iniBonus;
     return cw;
   }
 
@@ -373,6 +376,7 @@ export function characterRowToCharacter(row: Record<string, unknown>): Character
     skills: Array.isArray(row.skills) ? (row.skills as Character['skills']) : [],
     damage: num(row.damage, 0),
     isStunned: Boolean(row.is_stunned),
+    isStabilized: Boolean(row.is_stabilized),
     conditions: safeConditions(row.conditions),
     hitLocations: (row.hit_locations as Character['hitLocations']) ?? ({} as Character['hitLocations']),
     sdp: (row.sdp as Character['sdp']) ?? {
