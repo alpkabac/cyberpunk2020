@@ -1,9 +1,11 @@
 'use client';
 
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import { Character, RoleType, ROLE_SPECIAL_ABILITIES } from '@/lib/types';
 import { useGameStore } from '@/lib/store/game-store';
 import { getActiveCombatCharacterId } from '@/lib/session/combat-state';
+import { supabase } from '@/lib/supabase';
+import { syncMapTokensPortrait, uploadCharacterAvatar } from '@/lib/storage/character-avatar';
 import { StatsRow } from './StatsRow';
 import { WoundTracker } from './WoundTracker';
 
@@ -22,6 +24,9 @@ export function CharacterHeader({ character, editable }: CharacterHeaderProps) {
   const combatState = useGameStore((s) => s.session.combatState);
   const activeCombatId = getActiveCombatCharacterId(combatState);
   const isTheirTurn = activeCombatId != null && activeCombatId === character.id;
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
 
   const handleFieldChange = (field: string, value: unknown) => {
     if (!editable) return;
@@ -34,6 +39,35 @@ export function CharacterHeader({ character, editable }: CharacterHeaderProps) {
       name: ROLE_SPECIAL_ABILITIES[newRole],
       value: character.specialAbility?.value || 0,
     });
+  };
+
+  const handleAvatarFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !editable) return;
+    setAvatarError(null);
+    setAvatarBusy(true);
+    try {
+      const { publicUrl, error: upErr } = await uploadCharacterAvatar(supabase, {
+        sessionId: character.sessionId,
+        characterId: character.id,
+        file,
+      });
+      if (upErr || !publicUrl) {
+        setAvatarError(upErr?.message ?? 'Upload failed');
+        return;
+      }
+      handleFieldChange('imageUrl', publicUrl);
+      const { error: tokErr } = await syncMapTokensPortrait(
+        supabase,
+        character.sessionId,
+        character.id,
+        publicUrl,
+      );
+      if (tokErr) setAvatarError(tokErr.message);
+    } finally {
+      setAvatarBusy(false);
+    }
   };
 
   return (
@@ -151,6 +185,31 @@ export function CharacterHeader({ character, editable }: CharacterHeaderProps) {
                 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="128" height="160" viewBox="0 0 128 160"%3E%3Crect fill="%23ddd" width="128" height="160"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" font-family="monospace" font-size="16" fill="%23999"%3ENo Image%3C/text%3E%3C/svg%3E';
             }}
           />
+          {editable && (
+            <div className="border-b border-black/25 px-1 py-1 space-y-1">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                className="sr-only"
+                aria-label="Upload portrait image"
+                onChange={handleAvatarFile}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={avatarBusy}
+                className="w-full text-[10px] font-bold uppercase border border-black bg-white hover:bg-black/5 disabled:opacity-50 py-0.5"
+              >
+                {avatarBusy ? 'Uploading…' : 'Upload portrait'}
+              </button>
+              {avatarError && (
+                <p className="text-[9px] text-red-700 leading-tight" role="alert">
+                  {avatarError}
+                </p>
+              )}
+            </div>
+          )}
           <div className="flex items-center justify-center gap-1.5 px-1 py-1">
             <span className="font-bold uppercase text-[10px] text-black/80 leading-none shrink-0">IP</span>
             {editable ? (
