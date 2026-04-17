@@ -41,6 +41,13 @@ import {
 } from '../session/session-combat-service';
 import type { LoreRule } from './lorebook';
 import { lookupRulesText } from './lorebook';
+import { fetchSessionSettings } from '../session/fetch-session-settings';
+import {
+  MAP_GRID_DEFAULT_COLS,
+  MAP_GRID_DEFAULT_ROWS,
+  normalizeGridDimension,
+  snapPctToGrid,
+} from '../map/grid';
 
 const ZONES: Zone[] = ['Head', 'Torso', 'rArm', 'lArm', 'lLeg', 'rLeg'];
 
@@ -557,6 +564,26 @@ async function insertChatMessage(
   return error ? new Error(error.message) : null;
 }
 
+function clampTokenPct(n: number): number {
+  return Math.max(0, Math.min(100, Math.round(n * 100) / 100));
+}
+
+async function resolveTokenPositionForSession(
+  supabase: SupabaseClient,
+  sessionId: string,
+  x: number,
+  y: number,
+): Promise<{ x: number; y: number }> {
+  const settings = await fetchSessionSettings(supabase, sessionId);
+  const cx = clampTokenPct(Number.isFinite(x) ? x : 50);
+  const cy = clampTokenPct(Number.isFinite(y) ? y : 50);
+  if (!settings.mapSnapToGrid) return { x: cx, y: cy };
+  const cols = normalizeGridDimension(settings.mapGridCols, MAP_GRID_DEFAULT_COLS);
+  const rows = normalizeGridDimension(settings.mapGridRows, MAP_GRID_DEFAULT_ROWS);
+  const s = snapPctToGrid(cx, cy, cols, rows);
+  return { x: clampTokenPct(s.x), y: clampTokenPct(s.y) };
+}
+
 async function persistNewNpcWithOptionalToken(
   ctx: ToolExecutorContext,
   built: Character,
@@ -579,8 +606,9 @@ async function persistNewNpcWithOptionalToken(
 
   let token_id: string | null = null;
   if (placeToken) {
-    const x = 15 + Math.floor(rng() * 70);
-    const y = 15 + Math.floor(rng() * 70);
+    const rawX = 15 + Math.floor(rng() * 70);
+    const rawY = 15 + Math.floor(rng() * 70);
+    const { x, y } = await resolveTokenPositionForSession(ctx.supabase, ctx.sessionId, rawX, rawY);
     const { data: tok, error: tokErr } = await ctx.supabase
       .from('tokens')
       .insert({
@@ -765,8 +793,9 @@ export async function executeGmTool(
     }
     case 'move_token': {
       const tokenId = String(args.token_id);
-      const x = Number(args.x);
-      const y = Number(args.y);
+      const xIn = Number(args.x);
+      const yIn = Number(args.y);
+      const { x, y } = await resolveTokenPositionForSession(ctx.supabase, ctx.sessionId, xIn, yIn);
       const { error } = await ctx.supabase
         .from('tokens')
         .update({ x, y })
@@ -777,8 +806,9 @@ export async function executeGmTool(
     }
     case 'add_token': {
       const nm = String(args.name);
-      const x = args.x !== undefined && args.x !== null ? Number(args.x) : 50;
-      const y = args.y !== undefined && args.y !== null ? Number(args.y) : 50;
+      const rawX = args.x !== undefined && args.x !== null ? Number(args.x) : 50;
+      const rawY = args.y !== undefined && args.y !== null ? Number(args.y) : 50;
+      const { x, y } = await resolveTokenPositionForSession(ctx.supabase, ctx.sessionId, rawX, rawY);
       const controlledBy = args.controlled_by === 'player' ? 'player' : 'gm';
       const characterId =
         controlledBy === 'player' && typeof args.character_id === 'string' && args.character_id.trim()

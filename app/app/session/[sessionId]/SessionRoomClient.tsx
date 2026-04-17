@@ -18,6 +18,12 @@ import { useShallow } from 'zustand/react/shallow';
 import type { Character } from '@/lib/types';
 import { generateCp2020Character, randomRole } from '@/lib/character-gen/cp2020-char-gen';
 import { serializeCharacterForDb } from '@/lib/db/character-serialize';
+import {
+  MAP_GRID_DEFAULT_COLS,
+  MAP_GRID_DEFAULT_ROWS,
+  normalizeGridDimension,
+  snapPctToGrid,
+} from '@/lib/map/grid';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -197,13 +203,23 @@ export function SessionRoomClient() {
   // "Place my token" callback
   const handlePlaceMyToken = useCallback(async () => {
     if (!myCharacter || !sessionId) return;
+    const st = useGameStore.getState().session.settings;
+    let x = 50;
+    let y = 50;
+    if (st.mapSnapToGrid) {
+      const cols = normalizeGridDimension(st.mapGridCols, MAP_GRID_DEFAULT_COLS);
+      const rows = normalizeGridDimension(st.mapGridRows, MAP_GRID_DEFAULT_ROWS);
+      const s = snapPctToGrid(50, 50, cols, rows);
+      x = s.x;
+      y = s.y;
+    }
     await supabase.from('tokens').insert({
       session_id: sessionId,
       character_id: myCharacter.id,
       name: myCharacter.name,
       image_url: myCharacter.imageUrl ?? '',
-      x: 50,
-      y: 50,
+      x,
+      y,
       size: 50,
       controlled_by: 'player',
     });

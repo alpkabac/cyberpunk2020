@@ -12,6 +12,7 @@ import {
   tokenRowToToken,
 } from './db-mapper';
 import { parseCombatStateJson } from '../session/combat-state';
+import { parseMapStateJson, type SessionMapState } from '../map/map-state';
 
 export interface LoadedSessionSnapshot {
   session: {
@@ -24,6 +25,7 @@ export interface LoadedSessionSnapshot {
     sessionSummary: string;
     mapBackgroundUrl: string;
     combatState: CombatState | null;
+    mapState: SessionMapState;
   };
   characters: Character[];
   tokens: Token[];
@@ -46,7 +48,7 @@ export async function fetchSessionSnapshot(
   const { data: sessionRow, error: sessionError } = await client
     .from('sessions')
     .select(
-      'id, name, created_by, created_at, map_background_url, active_scene, settings, session_summary, combat_state',
+      'id, name, created_by, created_at, map_background_url, active_scene, settings, session_summary, combat_state, map_state',
     )
     .eq('id', sessionId)
     .maybeSingle();
@@ -87,6 +89,7 @@ export async function fetchSessionSnapshot(
       sessionSummary: String(s.session_summary ?? ''),
       mapBackgroundUrl: String(s.map_background_url ?? ''),
       combatState: parseCombatStateJson(s.combat_state),
+      mapState: parseMapStateJson(s.map_state),
     },
     characters,
     tokens,

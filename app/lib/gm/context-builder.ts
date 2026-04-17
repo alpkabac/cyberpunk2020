@@ -2,8 +2,16 @@
  * Assembles LLM messages for the AI-GM (Requirements 3.6, 4.1).
  */
 
-import type { Character, ChatMessage, CombatState, Scene, Token } from '../types';
+import type { Character, ChatMessage, CombatState, MapCoverRegion, Scene, SessionSettings, Token } from '../types';
 import { estimateTokens } from './lorebook';
+import {
+  MAP_GRID_DEFAULT_COLS,
+  MAP_GRID_DEFAULT_ROWS,
+  normalizeGridDimension,
+  pctToCell,
+} from '../map/grid';
+import { CP2020_COVER_TYPES, coverTypeLabel } from '../map/cover-types';
+import { parseSessionSettingsJson } from '../realtime/db-mapper';
 
 export const CORE_GM_RULES = `You are the Game Master for a Cyberpunk 2020 tabletop session (R. Talsorian Games).
 You narrate scenes, adjudicate actions fairly, and use tools to update game state when outcomes are clear.
@@ -14,6 +22,8 @@ Output engaging but concise narration; use tools for concrete state changes (dam
 **Character sheets and tools:** The user message block includes CHARACTERS_JSON. Every entry has an \`id\` field (UUID) and \`name\`. You always have this data—do not claim you lack access to character sheets.
 For character tools (apply_damage, deduct_money, add_money, heal_damage, add_item, remove_item, equip_item, modify_skill, adjust_improvement_points, update_ammo, set_condition, update_character_field), pass \`character_id\` from that JSON. Prefer the character whose \`name\` matches CURRENT_MESSAGE_SPEAKER when it clearly refers to the acting player; if there is only one PC (type "character"), use that id; if several PCs could apply, ask which **character by name**, never ask the human to paste a UUID.
 For move_token, add_token, and remove_token, use token ids from MAP_TOKENS_JSON when present; if missing, describe map changes in narration and avoid guessing ids.
+**Tactical map:** TACTICAL_GRID_JSON gives cols, rows, snap_to_grid, and meters_per_square. MAP_TOKENS_JSON lists each token's x,y (0–100% of map width/height) plus cell_column and cell_row (0-based) on that grid—use cells for range, flanking, and movement. When snap_to_grid is true, the client snaps positions to cell centers; pass x,y as percentages (cell center ≈ ((col+0.5)/cols)*100 for x, ((row+0.5)/rows)*100 for y).
+**Cover:** MAP_COVER_JSON lists drawn cover zones (grid cell ranges) and CP2020 **SP** values from the Common Cover table (Friday Night Firefight). Use these when narrating hits through cover, penetration, and line of sight.
 If CHARACTERS_JSON is empty, the session has no sheets synced yet—say that and skip character tools.
 
 **Money:** Use \`add_money\` to reward eurobucks (payment, loot, rewards). Use \`deduct_money\` to subtract (purchases, bribes, fees). Never use update_character_field for eurobucks—use the dedicated tools.
@@ -137,17 +147,69 @@ export interface MapTokenForLlm {
   x: number;
   y: number;
   character_id: string | null;
+  /** 0-based column on the tactical grid (see TACTICAL_GRID_JSON.cols). */
+  cell_column: number;
+  /** 0-based row on the tactical grid (see TACTICAL_GRID_JSON.rows). */
+  cell_row: number;
 }
 
-export function serializeTokensForLlm(tokens: Token[]): MapTokenForLlm[] {
-  return tokens.map((t) => ({
-    id: t.id,
-    name: t.name,
-    controlled_by: t.controlledBy,
-    x: t.x,
-    y: t.y,
-    character_id: t.characterId ?? null,
-  }));
+export interface TacticalGridForLlm {
+  cols: number;
+  rows: number;
+  snap_to_grid: boolean;
+  meters_per_square: number;
+}
+
+export function tacticalGridPayloadFromSettings(settings: SessionSettings): TacticalGridForLlm {
+  return {
+    cols: normalizeGridDimension(settings.mapGridCols, MAP_GRID_DEFAULT_COLS),
+    rows: normalizeGridDimension(settings.mapGridRows, MAP_GRID_DEFAULT_ROWS),
+    snap_to_grid: settings.mapSnapToGrid,
+    meters_per_square: settings.mapMetersPerSquare,
+  };
+}
+
+export interface MapCoverRegionForLlm {
+  id: string;
+  cell_c0: number;
+  cell_r0: number;
+  cell_c1: number;
+  cell_r1: number;
+  label: string;
+  sp: number;
+}
+
+export function serializeMapCoverForLlm(regions: MapCoverRegion[]): MapCoverRegionForLlm[] {
+  return regions.map((r) => {
+    const def = CP2020_COVER_TYPES.find((t) => t.id === r.coverTypeId);
+    return {
+      id: r.id,
+      cell_c0: r.c0,
+      cell_r0: r.r0,
+      cell_c1: r.c1,
+      cell_r1: r.r1,
+      label: def?.label ?? coverTypeLabel(r.coverTypeId),
+      sp: def?.sp ?? 0,
+    };
+  });
+}
+
+export function serializeTokensForLlm(tokens: Token[], settings: SessionSettings): MapTokenForLlm[] {
+  const cols = normalizeGridDimension(settings.mapGridCols, MAP_GRID_DEFAULT_COLS);
+  const rows = normalizeGridDimension(settings.mapGridRows, MAP_GRID_DEFAULT_ROWS);
+  return tokens.map((t) => {
+    const { c, r } = pctToCell(t.x, t.y, cols, rows);
+    return {
+      id: t.id,
+      name: t.name,
+      controlled_by: t.controlledBy,
+      x: t.x,
+      y: t.y,
+      character_id: t.characterId ?? null,
+      cell_column: c,
+      cell_row: r,
+    };
+  });
 }
 
 /** Per-row initiative + wound state for the AI-GM (merged from tracker + sheets). */
@@ -230,6 +292,10 @@ export interface BuildContextInput {
   combatState?: CombatState | null;
   /** Map tokens for move_token / add_token / remove_token tool calls. */
   mapTokens: Token[];
+  /** Session grid + measurement defaults; drives TACTICAL_GRID_JSON and per-token cell indices. */
+  sessionSettings?: SessionSettings;
+  /** Tactical cover rectangles (from sessions.map_state); omit for empty. */
+  mapCoverRegions?: MapCoverRegion[];
   chatHistory: ChatMessage[];
   /** Latest user line (also usually last in chatHistory). */
   playerMessage: string;
@@ -281,9 +347,12 @@ export function buildGmUserContent(input: BuildContextInput): string {
   const history = sliceRecentChat(input.chatHistory, input.maxHistoryMessages ?? 40);
   const historyBlock = history.map(formatChatLine).join('\n');
 
+  const settings = input.sessionSettings ?? parseSessionSettingsJson(null);
   const charsJson = JSON.stringify(input.characters.map(serializeCharacterForLlm));
   const sceneJson = JSON.stringify(sceneToPayload(input.activeScene));
-  const mapTokensJson = JSON.stringify(serializeTokensForLlm(input.mapTokens));
+  const mapTokensJson = JSON.stringify(serializeTokensForLlm(input.mapTokens, settings));
+  const tacticalGridJson = JSON.stringify(tacticalGridPayloadFromSettings(settings));
+  const mapCoverJson = JSON.stringify(serializeMapCoverForLlm(input.mapCoverRegions ?? []));
   const combatTrackerJson = JSON.stringify(
     buildCombatTrackerContextPayload(input.combatState ?? null, input.characters),
   );
@@ -295,6 +364,8 @@ export function buildGmUserContent(input: BuildContextInput): string {
     `SUMMARY: ${input.sessionSummary || '(none)'}`,
     `CURRENT_MESSAGE_SPEAKER: ${input.messageSpeaker || 'Player'}`,
     `ACTIVE_SCENE_JSON: ${sceneJson}`,
+    `TACTICAL_GRID_JSON: ${tacticalGridJson}`,
+    `MAP_COVER_JSON: ${mapCoverJson}`,
     `MAP_TOKENS_JSON: ${mapTokensJson}`,
     `COMBAT_TRACKER_JSON: ${combatTrackerJson}`,
     `CHARACTERS_JSON: ${charsJson}`,

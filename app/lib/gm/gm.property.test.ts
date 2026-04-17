@@ -124,6 +124,8 @@ describe('Property 7: Conversation continuity', () => {
       loreInjection: 'RULE: test',
       maxHistoryMessages: 10,
     });
+    expect(out).toContain('TACTICAL_GRID_JSON');
+    expect(out).toContain('MAP_COVER_JSON');
     expect(out).toContain('MAP_TOKENS_JSON');
     expect(out).toContain('COMBAT_TRACKER_JSON');
     expect(out).toContain('"inCombat":false');

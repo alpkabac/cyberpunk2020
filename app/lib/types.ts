@@ -345,9 +345,20 @@ export interface Session {
   combatState?: CombatState | null;
 }
 
+/** Tactical cover on the grid (CP2020 common cover SPs). Cell indices 0-based inclusive. */
+export interface MapCoverRegion {
+  id: string;
+  c0: number;
+  r0: number;
+  c1: number;
+  r1: number;
+  coverTypeId: string;
+}
+
 export interface MapState {
   backgroundImageUrl: string;
   tokens: Token[];
+  coverRegions: MapCoverRegion[];
 }
 
 export interface Token {
@@ -387,6 +398,15 @@ export interface SessionSettings {
   voiceInputMode: 'pushToTalk' | 'session';
   /** Display name of who last turned on group Session mode (best-effort). */
   sessionRecordingStartedBy: string | null;
+
+  /** Tactical map grid: column count (2–99). */
+  mapGridCols: number;
+  /** Tactical map grid: row count (2–99). */
+  mapGridRows: number;
+  mapShowGrid: boolean;
+  mapSnapToGrid: boolean;
+  /** If greater than zero, distance labels also show approximate meters (× cell distance). */
+  mapMetersPerSquare: number;
 }
 
 /** Initiative row for FNFF turn order (persisted on `sessions.combat_state`). */

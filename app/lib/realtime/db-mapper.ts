@@ -23,6 +23,11 @@ import type {
 } from '../types';
 import { createStatBlock } from '../types';
 import { resolveCyberwareInitiativeFromRaw } from '../game-logic/cyberware-initiative-resolve';
+import {
+  MAP_GRID_DEFAULT_COLS,
+  MAP_GRID_DEFAULT_ROWS,
+  normalizeGridDimension,
+} from '../map/grid';
 
 const WEAPON_TYPES: WeaponType[] = ['Pistol', 'SMG', 'Shotgun', 'Rifle', 'Heavy', 'Melee', 'Exotic'];
 const ZONES: Zone[] = ['Head', 'Torso', 'rArm', 'lArm', 'rLeg', 'lLeg'];
@@ -292,6 +297,11 @@ const DEFAULT_SETTINGS: SessionSettings = {
   allowPlayerTokenMovement: true,
   voiceInputMode: 'pushToTalk',
   sessionRecordingStartedBy: null,
+  mapGridCols: MAP_GRID_DEFAULT_COLS,
+  mapGridRows: MAP_GRID_DEFAULT_ROWS,
+  mapShowGrid: true,
+  mapSnapToGrid: false,
+  mapMetersPerSquare: 0,
 };
 
 export function parseSceneJson(v: unknown): Scene {
@@ -319,6 +329,12 @@ export function parseSessionSettingsJson(v: unknown): SessionSettings {
         ? o.sessionRecordingStartedBy
         : DEFAULT_SETTINGS.sessionRecordingStartedBy;
 
+  const mapMetersRaw = o.mapMetersPerSquare;
+  const mapMetersPerSquare =
+    typeof mapMetersRaw === 'number' && Number.isFinite(mapMetersRaw)
+      ? Math.max(0, mapMetersRaw)
+      : DEFAULT_SETTINGS.mapMetersPerSquare;
+
   return {
     ttsEnabled: typeof o.ttsEnabled === 'boolean' ? o.ttsEnabled : DEFAULT_SETTINGS.ttsEnabled,
     ttsVoice: str(o.ttsVoice, DEFAULT_SETTINGS.ttsVoice),
@@ -330,6 +346,17 @@ export function parseSessionSettingsJson(v: unknown): SessionSettings {
         : DEFAULT_SETTINGS.allowPlayerTokenMovement,
     voiceInputMode,
     sessionRecordingStartedBy,
+    mapGridCols: normalizeGridDimension(
+      typeof o.mapGridCols === 'number' ? o.mapGridCols : Number.NaN,
+      DEFAULT_SETTINGS.mapGridCols,
+    ),
+    mapGridRows: normalizeGridDimension(
+      typeof o.mapGridRows === 'number' ? o.mapGridRows : Number.NaN,
+      DEFAULT_SETTINGS.mapGridRows,
+    ),
+    mapShowGrid: typeof o.mapShowGrid === 'boolean' ? o.mapShowGrid : DEFAULT_SETTINGS.mapShowGrid,
+    mapSnapToGrid: typeof o.mapSnapToGrid === 'boolean' ? o.mapSnapToGrid : DEFAULT_SETTINGS.mapSnapToGrid,
+    mapMetersPerSquare,
   };
 }
 

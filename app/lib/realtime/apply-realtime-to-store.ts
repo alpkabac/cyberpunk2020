@@ -6,6 +6,7 @@ import type { Session } from '../types';
 import { useGameStore } from '../store/game-store';
 import { parseCombatStateJson } from '../session/combat-state';
 import { chatRowToMessage, parseSceneJson, parseSessionSettingsJson } from './db-mapper';
+import { parseMapStateJson } from '../map/map-state';
 import type { PostgresChangeHandlers } from './session-channel';
 
 export function createDefaultPostgresHandlersForGameStore(): PostgresChangeHandlers {
@@ -25,6 +26,10 @@ export function createDefaultPostgresHandlersForGameStore(): PostgresChangeHandl
 
       if ('map_background_url' in row) {
         useGameStore.getState().setMapBackground(String(row.map_background_url ?? ''));
+      }
+
+      if ('map_state' in row) {
+        useGameStore.getState().setMapCoverRegions(parseMapStateJson(row.map_state).coverRegions);
       }
 
       if ('combat_state' in row) {

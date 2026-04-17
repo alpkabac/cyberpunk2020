@@ -8,6 +8,7 @@ import {
   Character,
   Session,
   Token,
+  MapCoverRegion,
   ChatMessage,
   Scene,
   SessionSettings,
@@ -70,6 +71,7 @@ interface GameState {
   map: {
     backgroundImageUrl: string;
     tokens: Token[];
+    coverRegions: MapCoverRegion[];
   };
 
   chat: {
@@ -188,6 +190,7 @@ interface GameActions {
 
   // Map actions
   setMapBackground: (url: string) => void;
+  setMapCoverRegions: (coverRegions: MapCoverRegion[]) => void;
   addToken: (token: Token) => void;
   moveToken: (tokenId: string, x: number, y: number) => void;
   removeToken: (tokenId: string) => void;
@@ -385,6 +388,11 @@ const initialState: GameState = {
       allowPlayerTokenMovement: true,
       voiceInputMode: 'pushToTalk',
       sessionRecordingStartedBy: null,
+      mapGridCols: 20,
+      mapGridRows: 12,
+      mapShowGrid: true,
+      mapSnapToGrid: false,
+      mapMetersPerSquare: 0,
     },
     sessionSummary: '',
     combatState: null,
@@ -403,6 +411,7 @@ const initialState: GameState = {
   map: {
     backgroundImageUrl: '',
     tokens: [],
+    coverRegions: [],
   },
 
   chat: {
@@ -1025,6 +1034,11 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
       map: { ...state.map, backgroundImageUrl: url },
     })),
 
+  setMapCoverRegions: (coverRegions) =>
+    set((state) => ({
+      map: { ...state.map, coverRegions },
+    })),
+
   addToken: (token) =>
     set((state) => ({
       map: { ...state.map, tokens: [...state.map.tokens, token] },
@@ -1514,6 +1528,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
         map: {
           backgroundImageUrl: snapshot.session.mapBackgroundUrl,
           tokens: snapshot.tokens,
+          coverRegions: snapshot.session.mapState.coverRegions,
         },
         chat: {
           messages: snapshot.chatMessages,

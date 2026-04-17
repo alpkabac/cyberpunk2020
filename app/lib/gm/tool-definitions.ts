@@ -159,7 +159,8 @@ export const GM_TOOL_DEFINITIONS = [
     type: 'function' as const,
     function: {
       name: 'move_token',
-      description: 'Move a map token to percentage coordinates (0–100).',
+      description:
+        'Move a map token to x,y as percentages of map width/height (0–100). TACTICAL_GRID_JSON (user message) defines cols/rows and snap; MAP_TOKENS_JSON includes cell_column/cell_row per token.',
       parameters: {
         type: 'object',
         properties: {
@@ -181,8 +182,18 @@ export const GM_TOOL_DEFINITIONS = [
         type: 'object',
         properties: {
           name: { type: 'string', description: 'Label on the map' },
-          x: { type: 'number', minimum: 0, maximum: 100, description: 'Horizontal position 0–100 (default 50)' },
-          y: { type: 'number', minimum: 0, maximum: 100, description: 'Vertical position 0–100 (default 50)' },
+          x: {
+            type: 'number',
+            minimum: 0,
+            maximum: 100,
+            description: 'Horizontal % 0–100; align with TACTICAL_GRID_JSON / cell centers when snap is on (default 50)',
+          },
+          y: {
+            type: 'number',
+            minimum: 0,
+            maximum: 100,
+            description: 'Vertical % 0–100 (default 50)',
+          },
           image_url: { type: 'string', description: 'Optional portrait URL' },
           controlled_by: {
             type: 'string',
