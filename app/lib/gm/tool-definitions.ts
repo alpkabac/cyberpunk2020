@@ -365,6 +365,26 @@ export const GM_TOOL_DEFINITIONS = [
   {
     type: 'function' as const,
     function: {
+      name: 'adjust_improvement_points',
+      description:
+        'Add or subtract Improvement Points (IP) by delta. Prefer this over update_character_field for awards—total IP clamps at 0. Use at session milestones, after danger or completed goals, strong roleplay—not every message. Posts an audit line to chat.',
+      parameters: {
+        type: 'object',
+        properties: {
+          character_id: { type: 'string' },
+          delta: {
+            type: 'integer',
+            description: 'IP change (e.g. +2 award, -1 correction). Must be non-zero.',
+          },
+          reason: { type: 'string', description: 'Short table-visible reason (max 500 chars)' },
+        },
+        required: ['character_id', 'delta', 'reason'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
       name: 'update_ammo',
       description:
         'Set shots remaining for a weapon. Pass shots_left for an absolute value, or reload:true to restore to full magazine capacity.',

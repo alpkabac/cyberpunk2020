@@ -32,6 +32,11 @@ export interface SessionRealtimeSubscribeOptions {
   postgresHandlers?: PostgresChangeHandlers;
   onSubscribeStatus?: (status: 'SUBSCRIBED' | 'TIMED_OUT' | 'CLOSED' | 'CHANNEL_ERROR') => void;
   onBroadcast?: (event: string, payload: unknown) => void;
+  /**
+   * After a Realtime `CHANNEL_ERROR` or `TIMED_OUT`, schedule a full recover (refetch + new channel).
+   * Set to `0` to disable. Default `2000` ms debounce.
+   */
+  recoverOnChannelErrorDebounceMs?: number;
 }
 
 export interface SessionRealtimeHandle {
@@ -91,6 +96,7 @@ function buildChannel(
   handlers: PostgresChangeHandlers | undefined,
   onSubscribeStatus: SessionRealtimeSubscribeOptions['onSubscribeStatus'],
   onBroadcast: SessionRealtimeSubscribeOptions['onBroadcast'],
+  scheduleRecoverFromChannelIssue: (() => void) | null,
 ): RealtimeChannel {
   const filter = `session_id=eq.${sessionId}`;
   const sessionRowFilter = `id=eq.${sessionId}`;
@@ -152,9 +158,11 @@ function buildChannel(
         if (typeof console !== 'undefined' && err) {
           console.debug('[realtime] CHANNEL_ERROR', err);
         }
+        scheduleRecoverFromChannelIssue?.();
         break;
       case 'TIMED_OUT':
         onSubscribeStatus?.('TIMED_OUT');
+        scheduleRecoverFromChannelIssue?.();
         break;
       case 'CLOSED':
         onSubscribeStatus?.('CLOSED');
@@ -177,20 +185,14 @@ export function createSessionRealtimeHandle(
 ): SessionRealtimeHandle {
   let channel: RealtimeChannel | null = null;
   let disposed = false;
+  let errorRecoverTimer: ReturnType<typeof setTimeout> | null = null;
+  const debounceMs = options.recoverOnChannelErrorDebounceMs ?? 2000;
 
-  const attach = () => {
-    if (disposed) return;
-    channel = buildChannel(
-      client,
-      options.sessionId,
-      options.postgresHandlers,
-      options.onSubscribeStatus,
-      options.onBroadcast,
-    );
-  };
-
-  const subscribe = () => {
-    if (!channel) attach();
+  const clearRecoverTimer = () => {
+    if (errorRecoverTimer) {
+      clearTimeout(errorRecoverTimer);
+      errorRecoverTimer = null;
+    }
   };
 
   const unsubscribe = async () => {
@@ -200,21 +202,55 @@ export function createSessionRealtimeHandle(
     }
   };
 
-  const sendBroadcast: SessionRealtimeHandle['sendBroadcast'] = async (event, payload) => {
-    if (!channel) attach();
-    if (!channel) return;
-    await channel.send({ type: 'broadcast', event, payload });
-  };
-
   const recover = async () => {
+    clearRecoverTimer();
     await options.refreshFromDatabase();
     await unsubscribe();
     attach();
     subscribe();
   };
 
+  const scheduleRecoverFromChannelIssue =
+    debounceMs <= 0
+      ? null
+      : () => {
+          if (disposed) return;
+          clearRecoverTimer();
+          errorRecoverTimer = setTimeout(() => {
+            errorRecoverTimer = null;
+            void recover().catch((e) => {
+              if (typeof console !== 'undefined') {
+                console.warn('[realtime] recover after channel error failed', e);
+              }
+            });
+          }, debounceMs);
+        };
+
+  const attach = () => {
+    if (disposed) return;
+    channel = buildChannel(
+      client,
+      options.sessionId,
+      options.postgresHandlers,
+      options.onSubscribeStatus,
+      options.onBroadcast,
+      scheduleRecoverFromChannelIssue,
+    );
+  };
+
+  const subscribe = () => {
+    if (!channel) attach();
+  };
+
+  const sendBroadcast: SessionRealtimeHandle['sendBroadcast'] = async (event, payload) => {
+    if (!channel) attach();
+    if (!channel) return;
+    await channel.send({ type: 'broadcast', event, payload });
+  };
+
   const dispose = () => {
     disposed = true;
+    clearRecoverTimer();
     void unsubscribe();
   };
 

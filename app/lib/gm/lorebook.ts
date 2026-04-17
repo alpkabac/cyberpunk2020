@@ -1,14 +1,16 @@
 /**
  * Keyword-triggered rule injection with priority and token budget (Requirements 4.1–4.3).
+ * Rule text is loaded from Markdown files on the server (`load-lore-rules.ts`).
  */
-
-import defaultRules from './lore/default-rules.json';
 
 export interface LoreRule {
   id: string;
   keywords: string[];
   priority: number;
+  /** Markdown/plain text for the model */
   content: string;
+  /** Optional citation to repo rulebooks (CP2020Gameplay.md / CP2020Character.md) */
+  refs?: string;
 }
 
 /** Rough token estimate (~4 chars per token for Latin text). */
@@ -78,7 +80,8 @@ export function enforceTokenBudget(rules: readonly LoreRule[], opts: LoreBudgetO
   const parts: string[] = [];
 
   for (const rule of rules) {
-    const block = `[${rule.id}] ${rule.content}`;
+    const head = rule.refs ? `[${rule.id}] Refs: ${rule.refs}` : `[${rule.id}]`;
+    const block = `${head}\n${rule.content}`;
     const cost = estimateTokens(block);
     if (used + cost <= opts.maxTokens) {
       parts.push(block);
@@ -86,9 +89,10 @@ export function enforceTokenBudget(rules: readonly LoreRule[], opts: LoreBudgetO
     } else {
       const remaining = opts.maxTokens - used;
       if (remaining <= 0) break;
-      const truncated = truncateToTokenBudget(rule.content, remaining - estimateTokens(`[${rule.id}] `));
+      const head = rule.refs ? `[${rule.id}] Refs: ${rule.refs}` : `[${rule.id}]`;
+      const truncated = truncateToTokenBudget(rule.content, remaining - estimateTokens(`${head}\n`));
       if (truncated.trim()) {
-        parts.push(`[${rule.id}] ${truncated}`);
+        parts.push(`${head}\n${truncated}`);
       }
       break;
     }
@@ -104,13 +108,8 @@ function truncateToTokenBudget(text: string, maxTokens: number): string {
   return `${text.slice(0, maxChars)}...`;
 }
 
-export function loadDefaultLoreRules(): LoreRule[] {
-  return defaultRules as LoreRule[];
-}
-
-export function buildLoreInjection(playerInput: string, maxTokens: number, rules?: readonly LoreRule[]): string {
-  const all = rules ?? loadDefaultLoreRules();
-  const matched = sortByPriority(matchRules(playerInput, all));
+export function buildLoreInjection(playerInput: string, maxTokens: number, rules: readonly LoreRule[]): string {
+  const matched = sortByPriority(matchRules(playerInput, rules));
   return enforceTokenBudget(matched, { maxTokens });
 }
 
@@ -140,7 +139,7 @@ export function lookupRulesText(query: string, rules: readonly LoreRule[], maxRe
     .map((r) => {
       let score = 0;
       const idLower = r.id.toLowerCase();
-      const contentLower = r.content.toLowerCase();
+      const contentLower = `${r.content}\n${r.refs ?? ''}`.toLowerCase();
 
       if (q.length >= 4 && (contentLower.includes(q) || idLower.includes(q))) {
         score += 12;
@@ -170,6 +169,13 @@ export function lookupRulesText(query: string, rules: readonly LoreRule[], maxRe
 
   return (
     header +
-    picks.map(({ r }) => `[${r.id}] (p${r.priority}) ${r.content}`).join('\n\n')
+    picks
+      .map(({ r }) => {
+        const head = r.refs
+          ? `[${r.id}] (p${r.priority}) Refs: ${r.refs}`
+          : `[${r.id}] (p${r.priority})`;
+        return `${head}\n${r.content}`;
+      })
+      .join('\n\n')
   );
 }

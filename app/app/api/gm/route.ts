@@ -1,24 +1,17 @@
 import { after } from 'next/server';
 import { NextResponse } from 'next/server';
+import { gmPostBodySchema } from '@/lib/api/schemas/session-routes';
+import { readJsonBody, validationErrorResponse } from '@/lib/api/validation';
 import { requireAuthFromRequest } from '@/lib/auth/require-auth';
 import { userHasSessionAccess } from '@/lib/auth/session-access';
 import { runGmCompletionAfterPlayerInsert } from '@/lib/gm/run-gm-completion-after-insert';
 import { chatRowToMessage } from '@/lib/realtime/db-mapper';
 import { fetchSessionSnapshot } from '@/lib/realtime/session-load';
+import { reportServerError } from '@/lib/logging/server-report';
 import { getServiceRoleClient } from '@/lib/supabase';
 import { getOpenRouterApiKeyFromEnv } from '@/lib/gm/openrouter-env';
 
 export const maxDuration = 120;
-
-interface GmRequestBody {
-  sessionId?: string;
-  playerMessage?: string;
-  speakerName?: string;
-  /** Optional metadata for the player chat row (e.g. voice STT provenance). */
-  playerMessageMetadata?: Record<string, unknown>;
-  /** Override lore token budget (estimated tokens). */
-  loreTokenBudget?: number;
-}
 
 export async function POST(request: Request) {
   const auth = await requireAuthFromRequest(request);
@@ -37,26 +30,17 @@ export async function POST(request: Request) {
 
   const model = process.env.OPENROUTER_MODEL?.trim() || 'deepseek/deepseek-v3.2';
 
-  let body: GmRequestBody;
-  try {
-    body = (await request.json()) as GmRequestBody;
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  const rawBody = await readJsonBody(request);
+  if (!rawBody.ok) return rawBody.response;
+
+  const parsed = gmPostBodySchema.safeParse(rawBody.data);
+  if (!parsed.success) {
+    return validationErrorResponse(parsed.error, 'api/gm:body');
   }
 
-  const sessionId = body.sessionId?.trim();
-  const playerMessage = body.playerMessage?.trim();
-  const speakerName = body.speakerName?.trim() || 'Player';
-  const loreBudget =
-    typeof body.loreTokenBudget === 'number' && body.loreTokenBudget > 0 ? body.loreTokenBudget : 2000;
-  const playerMessageMetadata =
-    body.playerMessageMetadata && typeof body.playerMessageMetadata === 'object'
-      ? body.playerMessageMetadata
-      : {};
-
-  if (!sessionId || !playerMessage) {
-    return NextResponse.json({ error: 'sessionId and playerMessage are required' }, { status: 400 });
-  }
+  const { sessionId, playerMessage, speakerName, loreTokenBudget, playerMessageMetadata } = parsed.data;
+  const loreBudget = loreTokenBudget && loreTokenBudget > 0 ? loreTokenBudget : 2000;
+  const meta = playerMessageMetadata ?? {};
 
   const supabase = getServiceRoleClient();
   if (!(await fetchSessionSnapshot(supabase, sessionId))) {
@@ -75,12 +59,17 @@ export async function POST(request: Request) {
       speaker: speakerName,
       text: playerMessage,
       type: 'player',
-      metadata: playerMessageMetadata,
+      metadata: meta,
     })
     .select('*')
     .single();
 
   if (playerInsertError || !inserted) {
+    reportServerError(
+      'api/gm:player-insert',
+      new Error(playerInsertError?.message ?? 'insert returned no row'),
+      { sessionId },
+    );
     return NextResponse.json(
       { error: `Failed to save player message: ${playerInsertError?.message ?? 'unknown'}` },
       { status: 500 },

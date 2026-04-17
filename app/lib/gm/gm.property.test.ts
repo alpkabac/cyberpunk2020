@@ -15,12 +15,12 @@ import {
 import {
   enforceTokenBudget,
   estimateTokens,
-  loadDefaultLoreRules,
   lookupRulesText,
   matchRules,
   sortByPriority,
   tokenizeForKeywords,
 } from './lorebook';
+import { loadDefaultLoreRules } from './load-lore-rules';
 import { validateGmToolParameters } from './tool-executor';
 
 const minimalScene: Scene = {
@@ -132,7 +132,7 @@ describe('Property 8: Keyword-based rule injection', () => {
     const m = matchRules('I need to shoot the ganger in combat', rules);
     expect(m.length).toBeGreaterThan(0);
     const ids = new Set(m.map((r) => r.id));
-    expect(ids.has('fnff-damage')).toBe(true);
+    expect(ids.has('damage-pipeline')).toBe(true);
   });
 });
 
@@ -313,7 +313,7 @@ describe('Property 11: Rule lookup tool', () => {
       'Before I roll, refresh me: how does armor SP and BTM interact with damage in Friday Night Firefight?',
       rules,
     );
-    expect(t).toContain('fnff-damage');
+    expect(t).toContain('damage-pipeline');
     expect(t).not.toMatch(/^\s*$/);
   });
 
@@ -330,6 +330,30 @@ describe('Property 31: Tool Call Error Logging (validation surface)', () => {
     const v = validateGmToolParameters('not_a_real_tool', {});
     expect(v.ok).toBe(false);
     if (!v.ok) expect(v.error).toContain('Unknown');
+  });
+
+  it('adjust_improvement_points validates delta and reason', () => {
+    expect(
+      validateGmToolParameters('adjust_improvement_points', {
+        character_id: 'c',
+        delta: 2,
+        reason: 'Survived the extraction',
+      }).ok,
+    ).toBe(true);
+    expect(
+      validateGmToolParameters('adjust_improvement_points', {
+        character_id: 'c',
+        delta: 0,
+        reason: 'x',
+      }).ok,
+    ).toBe(false);
+    expect(
+      validateGmToolParameters('adjust_improvement_points', {
+        character_id: 'c',
+        delta: 1,
+        reason: '',
+      }).ok,
+    ).toBe(false);
   });
 });
 

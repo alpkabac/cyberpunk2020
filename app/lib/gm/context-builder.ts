@@ -12,7 +12,7 @@ When uncertain about a PC's action, ask for a roll via request_roll (prefer stru
 Output engaging but concise narration; use tools for concrete state changes (damage, money, items, map, etc.).
 
 **Character sheets and tools:** The user message block includes CHARACTERS_JSON. Every entry has an \`id\` field (UUID) and \`name\`. You always have this data—do not claim you lack access to character sheets.
-For character tools (apply_damage, deduct_money, add_money, heal_damage, add_item, remove_item, equip_item, modify_skill, update_ammo, set_condition, update_character_field), pass \`character_id\` from that JSON. Prefer the character whose \`name\` matches CURRENT_MESSAGE_SPEAKER when it clearly refers to the acting player; if there is only one PC (type "character"), use that id; if several PCs could apply, ask which **character by name**, never ask the human to paste a UUID.
+For character tools (apply_damage, deduct_money, add_money, heal_damage, add_item, remove_item, equip_item, modify_skill, adjust_improvement_points, update_ammo, set_condition, update_character_field), pass \`character_id\` from that JSON. Prefer the character whose \`name\` matches CURRENT_MESSAGE_SPEAKER when it clearly refers to the acting player; if there is only one PC (type "character"), use that id; if several PCs could apply, ask which **character by name**, never ask the human to paste a UUID.
 For move_token, add_token, and remove_token, use token ids from MAP_TOKENS_JSON when present; if missing, describe map changes in narration and avoid guessing ids.
 If CHARACTERS_JSON is empty, the session has no sheets synced yet—say that and skip character tools.
 
@@ -33,6 +33,8 @@ Use \`roll_dice\` to roll server-side for NPCs, random encounters, hit location,
 
 **Skills:** Use \`modify_skill\` to change a skill value by name (IP spending, training).
 
+**Improvement Points (IP):** CHARACTERS_JSON includes \`improvementPoints\` per sheet. Award IP sparingly: end of a job, after real danger, major goals, memorable roleplay—not every exchange. Typical Referee awards are often ~1–3 IP per session for solid play, more for exceptional arcs (see lore \`improvement-points\`). Use \`adjust_improvement_points\` with a non-zero \`delta\` and short \`reason\` (audited in chat). For absolute totals only when needed, \`update_character_field\` path \`improvementPoints\` is allowed but does not post an audit line—prefer \`adjust_improvement_points\`.
+
 **Conditions:** Use \`set_condition\` to apply or remove status effects. "stunned" toggles only the isStunned flag (not stored in conditions[]). Other conditions are persisted in the character's conditions array (with optional \`duration_rounds\`) and visible to all players. Specify \`duration_rounds\` when the CP2020 rules define one (Dazzle grenade = blinded 12 rounds, Sonic grenade = deafened 12 rounds, Incendiary = on_fire 9 rounds; 1 CP2020 "turn" = 3 rounds). Omit duration for indefinite conditions. CP2020-relevant conditions: unconscious, asleep (also sets isStunned), blinded, on_fire, grappled, prone, deafened, poisoned, drugged, cyberpsychosis.
 
 **NPCs:** Use \`spawn_random_npc\` (or equivalent \`spawn_npc\`) for **generic** CP2020 **Fast Character System** mooks: 2D6 stats, 40-pt career, book armor/weapon table; optional \`stat_overrides\` (2–10), \`threat\`, \`announce\`, \`place_token\`. For **named or boss NPCs** where you must set the sheet yourself (custom stats, special ability label, arbitrary skills including homebrew names, cyberware/weapons with specific stats), use \`spawn_unique_npc\` with \`name\`, \`role\`, \`special_ability\`, optional \`stats\`, \`skills[]\`, \`items[]\`, and optional \`announcement_text\`. Use \`add_chat_as_npc\` for dialogue-only when no sheet is needed.
@@ -52,6 +54,7 @@ export interface CompactCharacterPayload {
   isStunned: boolean;
   conditions: Array<{ name: string; duration: number | null }>;
   eurobucks: number;
+  improvementPoints: number;
   woundState: string | undefined;
   stats: Record<string, { total: number }>;
   /** Include id + linkedStat so request_roll can use skill_id + character_id. */
@@ -96,6 +99,7 @@ export function serializeCharacterForLlm(c: Character): CompactCharacterPayload 
     isStunned: c.isStunned,
     conditions: c.conditions ?? [],
     eurobucks: c.eurobucks,
+    improvementPoints: c.improvementPoints,
     woundState: c.derivedStats?.woundState,
     stats,
     skills,

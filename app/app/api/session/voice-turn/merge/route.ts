@@ -1,5 +1,7 @@
 import { after } from 'next/server';
 import { NextResponse } from 'next/server';
+import { voiceTurnMergeBodySchema } from '@/lib/api/schemas/session-routes';
+import { readJsonBody, validationErrorResponse } from '@/lib/api/validation';
 import { requireAuthFromRequest } from '@/lib/auth/require-auth';
 import { userHasSessionAccess } from '@/lib/auth/session-access';
 import { runGmCompletionAfterPlayerInsert } from '@/lib/gm/run-gm-completion-after-insert';
@@ -12,11 +14,6 @@ import { mergeSessionVoiceTurnFragmentsForGm } from '@/lib/voice/merge-session-v
 export const maxDuration = 120;
 
 const STABILITY_MS = 1800;
-
-interface MergeBody {
-  sessionId?: string;
-  turnId?: string;
-}
 
 export async function POST(request: Request) {
   const auth = await requireAuthFromRequest(request);
@@ -33,18 +30,15 @@ export async function POST(request: Request) {
     );
   }
 
-  let body: MergeBody;
-  try {
-    body = (await request.json()) as MergeBody;
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  const rawBody = await readJsonBody(request);
+  if (!rawBody.ok) return rawBody.response;
+
+  const parsed = voiceTurnMergeBodySchema.safeParse(rawBody.data);
+  if (!parsed.success) {
+    return validationErrorResponse(parsed.error, 'api/session/voice-turn/merge:body');
   }
 
-  const sessionId = body.sessionId?.trim();
-  const turnId = body.turnId?.trim();
-  if (!sessionId || !turnId) {
-    return NextResponse.json({ error: 'sessionId and turnId are required' }, { status: 400 });
-  }
+  const { sessionId, turnId } = parsed.data;
 
   const model = process.env.OPENROUTER_MODEL?.trim() || 'deepseek/deepseek-v3.2';
   const loreBudget = 2000;

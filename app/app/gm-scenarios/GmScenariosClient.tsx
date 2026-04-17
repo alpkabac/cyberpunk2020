@@ -32,7 +32,7 @@ export const GM_SCENARIOS: Scenario[] = [
     playerMessage:
       'That hit his torso — raw 12 damage, not AP. Apply it to the ganger I was shooting at (use his character sheet).',
     expect:
-      'The model may call apply_damage with location Torso. Lore injection often includes fnff-damage when your text mentions combat, damage, or shooting.',
+      'The model may call apply_damage with location Torso. Lore injection often includes damage-pipeline when your text mentions combat, damage, or shooting.',
   },
   {
     id: 'skill-roll',
@@ -92,9 +92,9 @@ export const GM_SCENARIOS: Scenario[] = [
     id: 'net',
     title: 'Netrun vibe',
     summary: 'Lore injection for Interface / ICE without full net combat UI.',
-    features: ['Lore: netrunning-basic'],
+    features: ['Lore: netrunning'],
     playerMessage: 'I jack in and probe the subnet for the security daemon — Interface check, what do I see?',
-    expect: 'Keywords like net, deck, or ice can inject netrunning-basic into LORE_RULES for this turn.',
+    expect: 'Keywords like net, deck, or ice can inject netrunning into LORE_RULES for this turn.',
   },
   // ── New tools ─────────────────────────────────────────────────────
   {

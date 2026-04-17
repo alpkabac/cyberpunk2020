@@ -24,6 +24,7 @@ import {
   applyGmDeductMoney,
   applyGmEquipItem,
   applyGmFieldUpdate,
+  applyGmAdjustImprovementPoints,
   applyGmHealDamage,
   applyGmModifySkill,
   applyGmRemoveItem,
@@ -55,6 +56,7 @@ export type GmToolName =
   | 'roll_dice'
   | 'equip_item'
   | 'modify_skill'
+  | 'adjust_improvement_points'
   | 'update_ammo'
   | 'set_condition'
   | 'update_summary'
@@ -325,6 +327,20 @@ export function validateGmToolParameters(name: string, raw: unknown): { ok: true
       if (typeof new_value !== 'number') return { ok: false, error: new_value.error };
       if (new_value < 0 || new_value > 10) return { ok: false, error: 'new_value must be 0–10' };
       return { ok: true, name: 'modify_skill', args: raw };
+    }
+    case 'adjust_improvement_points': {
+      const character_id = str(raw.character_id, 'character_id');
+      if (typeof character_id !== 'string') return { ok: false, error: character_id.error };
+      const delta = num(raw.delta, 'delta');
+      if (typeof delta !== 'number') return { ok: false, error: delta.error };
+      if (!Number.isFinite(delta) || Math.trunc(delta) !== delta) {
+        return { ok: false, error: 'delta must be a finite integer' };
+      }
+      if (delta === 0) return { ok: false, error: 'delta must be non-zero' };
+      const reason = str(raw.reason, 'reason');
+      if (typeof reason !== 'string') return { ok: false, error: reason.error };
+      if (reason.length > 500) return { ok: false, error: 'reason must be at most 500 characters' };
+      return { ok: true, name: 'adjust_improvement_points', args: raw };
     }
     case 'update_ammo': {
       const character_id = str(raw.character_id, 'character_id');
@@ -827,6 +843,38 @@ export async function executeGmTool(
       const { error } = await saveCharacterToSupabase(ctx.supabase, updated);
       if (error) return { ok: false, name, error: error.message };
       return { ok: true, name, result: { character_id: id, skill_name: args.skill_name, new_value: args.new_value } };
+    }
+    case 'adjust_improvement_points': {
+      const id = String(args.character_id);
+      const c = ctx.charactersById.get(id);
+      if (!c) return { ok: false, name, error: `Character not in session: ${id}` };
+      const delta = Math.trunc(Number(args.delta));
+      const reason = String(args.reason).trim();
+      const before = c.improvementPoints;
+      const updated = applyGmAdjustImprovementPoints(c, delta);
+      ctx.charactersById.set(id, updated);
+      const { error } = await saveCharacterToSupabase(ctx.supabase, updated);
+      if (error) return { ok: false, name, error: error.message };
+      const sign = delta > 0 ? '+' : '';
+      const line = `Improvement Points: **${updated.name}** ${sign}${delta} (${reason}). Total IP: **${updated.improvementPoints}**.`;
+      const errChat = await insertChatMessage(ctx.supabase, ctx.sessionId, 'Game Master', line, 'system', {
+        kind: 'improvement_points',
+        character_id: id,
+        delta,
+        before,
+        after: updated.improvementPoints,
+        reason,
+      });
+      if (errChat) return { ok: false, name, error: errChat.message };
+      return {
+        ok: true,
+        name,
+        result: {
+          character_id: id,
+          improvement_points: updated.improvementPoints,
+          delta,
+        },
+      };
     }
     case 'update_ammo': {
       const id = String(args.character_id);

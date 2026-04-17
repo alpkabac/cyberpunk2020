@@ -33,7 +33,6 @@ export function CharacterSheet({ characterId, editable = false }: CharacterSheet
 
   return (
     <div className="character-sheet bg-[#f5f5dc] text-black rounded-lg border-2 border-black shadow-xl max-w-[900px] mx-auto">
-      {/* Header */}
       <CharacterHeader character={character} editable={editable} />
 
       {/* Tab Navigation */}

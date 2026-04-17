@@ -8,9 +8,16 @@ import {
   fetchSessionSnapshot,
 } from '@/lib/realtime';
 import { createDefaultPostgresHandlersForGameStore } from '@/lib/realtime/apply-realtime-to-store';
+import { reportClientError } from '@/lib/logging/client-report';
 import { BROADCAST_EVENTS } from '@/lib/realtime/realtime-events';
 import { useGameStore } from '@/lib/store/game-store';
 import type { SessionRealtimeHandle } from '@/lib/realtime/session-channel';
+
+const CONNECT_RETRY_MAX = 4;
+
+function connectRetryDelayMs(attempt: number): number {
+  return 600 * Math.pow(2, attempt);
+}
 
 /**
  * Hydrate the game store from Postgres and keep Realtime subscriptions for a session.
@@ -35,6 +42,8 @@ export function useSessionRealtimeSync(
     }
 
     let cancelled = false;
+    let connectAttempt = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
     const run = async () => {
       recoveryRef.current?.();
@@ -64,6 +73,7 @@ export function useSessionRealtimeSync(
             }
           },
         });
+        connectAttempt = 0;
         if (cancelled) {
           await handle.dispose();
           return;
@@ -72,9 +82,21 @@ export function useSessionRealtimeSync(
         useGameStore.getState().registerSessionBroadcastSend(handle.sendBroadcast.bind(handle));
         recoveryRef.current = attachSessionRealtimeRecovery(handle);
         onDoneRef.current?.();
-      } catch {
-        /* connect errors surfaced via Realtime UI elsewhere */
-        onDoneRef.current?.();
+      } catch (e) {
+        reportClientError('session-realtime:connect-failed', e, {
+          sessionId,
+          attempt: connectAttempt,
+        });
+        if (!cancelled && connectAttempt < CONNECT_RETRY_MAX - 1) {
+          connectAttempt += 1;
+          const delay = connectRetryDelayMs(connectAttempt - 1);
+          retryTimer = setTimeout(() => {
+            retryTimer = null;
+            void run();
+          }, delay);
+        } else {
+          onDoneRef.current?.();
+        }
       }
     };
 
@@ -82,6 +104,10 @@ export function useSessionRealtimeSync(
 
     return () => {
       cancelled = true;
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
       useGameStore.getState().registerSessionBroadcastSend(null);
       recoveryRef.current?.();
       recoveryRef.current = null;

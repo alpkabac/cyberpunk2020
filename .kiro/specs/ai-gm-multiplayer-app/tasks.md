@@ -495,7 +495,7 @@ This implementation plan breaks down the design into discrete coding tasks. The 
     - Implement keyword matching on player input
     - Sort by priority and enforce token budget
     - _Requirements: 4.1, 4.2, 4.3_
-    - **COMPLETED:** `app/lib/gm/lorebook.ts`, `app/lib/gm/lore/default-rules.json`
+    - **COMPLETED:** `app/lib/gm/lorebook.ts`, `app/lib/gm/load-lore-rules.ts`, `app/lib/gm/lore/rules/*.md`
 
   - [x] 10.4 Write property test for keyword-based rule injection
     - **Property 8: Keyword-Based Rule Injection**
@@ -750,42 +750,47 @@ This implementation plan breaks down the design into discrete coding tasks. The 
     - **Validates: Requirements 1.4, 11.1, 11.2, 11.3**
     - **COMPLETED:** `lib/realtime/session-persistence.property.test.ts` — 6 property tests (100 runs each) verifying that `characterRowToCharacter`, `tokenRowToToken`, and `chatRowToMessage` are left-inverses of their row-serialisation counterparts; includes idempotency test for the Character mapper. Existing `session-sync.property.test.ts` covers Property 22 (reconnect state sync) and Property 23 (optimistic rollback).
 
-- [ ] 17. Add error handling and validation
-  - [ ] 17.1 Add input validation to all API routes
+- [x] 17. Add error handling and validation
+  - [x] 17.1 Add input validation to all API routes
     - Validate request bodies against schemas
     - Return 422 for validation errors
     - _Requirements: 16.4_
+    - **COMPLETED:** Zod schemas in `lib/api/schemas/session-routes.ts`, helpers in `lib/api/validation.ts`; `/api/gm`, `/api/session/voice-turn/fragment`, `/api/session/voice-turn/merge`, and `/api/voice` (language tag) return **422** with `issues[]` on schema failure; malformed JSON stays **400**.
 
-  - [ ]* 17.2 Write property test for input validation
+  - [x]* 17.2 Write property test for input validation
     - **Property 32: Input Validation**
     - **Validates: Requirements 16.4**
+    - **COMPLETED:** `lib/api/schemas/session-routes.property.test.ts`
 
-  - [ ] 17.3 Add error handling to AI-GM endpoint
+  - [x] 17.3 Add error handling to AI-GM endpoint
     - Handle OpenRouter API failures with retries
     - Return fallback responses on errors
     - _Requirements: 16.2_
+    - **COMPLETED:** Exponential backoff retries in `callOpenRouterChat` (transient HTTP/network) and in `runGmCompletionAfterPlayerInsert` `withRetry`; on failure or empty narration, inserts fallback narration row via `insertFallbackNarration`.
 
-  - [ ] 17.4 Add error handling for Realtime subscriptions
+  - [x] 17.4 Add error handling for Realtime subscriptions
     - Handle channel subscribe failures and connection drops gracefully
     - Implement client resubscribe / refetch after errors
     - _Requirements: 16.3_
+    - **COMPLETED:** `session-channel.ts` debounced `recover()` on `CHANNEL_ERROR` / `TIMED_OUT` (default 2000ms, `recoverOnChannelErrorDebounceMs: 0` to disable); `useSessionRealtimeSync` logs connect failures and retries with backoff (existing `attachSessionRealtimeRecovery` for online/visibility unchanged).
 
-  - [ ] 17.5 Add error logging
+  - [x] 17.5 Add error logging
     - Log all errors with context
     - Set up error tracking (Sentry or similar)
     - _Requirements: 16.1_
+    - **COMPLETED:** `lib/logging/server-report.ts` (structured JSON **stderr** for routes + AI-GM background); `lib/logging/client-report.ts` for Realtime hook failures. Optional Sentry: add `@sentry/node` and call `captureException` from the same central helper if desired.
 
-- [ ] 18. Create rule files for lorebook _(deferred — engine complete, content expansion needed)_
-    - **Current state:** Lorebook engine fully implemented (Task 10.3): keyword matching, priority sorting, token budget enforcement, `lookup_rules` tool. Only 4 basic rules exist in `app/lib/gm/lore/default-rules.json` (core-attributes, fnff-damage, netrunning-basic, economy-eurobucks).
-    - **Format:** Rules live as JSON entries in `default-rules.json` with `{ id, keywords[], priority, content }`. Task originally called for separate `.md` files with YAML frontmatter — either approach works, but the current JSON format is already wired into `lorebook.ts`.
+- [x] 18. Create rule files for lorebook
+    - **Done:** `app/lib/gm/lore/rules/*.md` — frontmatter (`id`, `priority`, `keywords`, `refs` to CP2020Gameplay.md / CP2020Character.md) + Markdown body; loaded by `load-lore-rules.ts`. Lore matching unchanged (`lorebook.ts`).
+    - **IP:** `adjust_improvement_points` tool + system chat audit; `improvementPoints` in `CHARACTERS_JSON`; `improvement-points` lore entry; prompt guidance in `context-builder.ts`.
 
-  - [ ] 18.1 Write core rule files
+  - [x] 18.1 Write core rule files
     - combat-basics: turn order, actions per round, initiative (REF + 1d10), fumble tables
     - damage-pipeline: hit roll → location → SP → BTM → wound track → stun/death saves
     - skill-checks: DC table (Easy 10, Average 15, Difficult 20, Very Difficult 25, Nearly Impossible 30), modifiers
     - _Requirements: 4.5_
 
-  - [ ] 18.2 Write topic rule files
+  - [x] 18.2 Write topic rule files
     - ranged-combat: range DCs by weapon type, fire modes (single/burst/full-auto), aimed shots, cover modifiers
     - melee-combat: melee attacks, martial arts actions and bonuses, grappling
     - autofire: full auto hit calculation (1 hit per point over DC), burst fire, suppressive fire zones
@@ -797,13 +802,13 @@ This implementation plan breaks down the design into discrete coding tasks. The 
     - drugs-pharmaceuticals: common drugs (speedheal, stim, dorph), effects, addiction, overdose
     - _Requirements: 4.5_
 
-  - [ ] 18.3 Add keyword metadata to all rule files
+  - [x] 18.3 Add keyword metadata to all rule files
     - Ensure each rule has comprehensive `keywords[]` for reliable matching
     - Set appropriate `priority` (higher = injected first under budget)
     - Test against common player queries to verify coverage
     - _Requirements: 4.1_
 
-  - [ ] 18.4 AI tracks and awards Improvement Points (IP) when appropriate
+  - [x] 18.4 AI tracks and awards Improvement Points (IP) when appropriate
     - Extend GM system prompt / `context-builder` so the model considers CP2020-style IP awards (danger, goals achieved, strong roleplay, session milestones) and applies them at sensible breakpoints (e.g. end of a job, session wrap-up), not every trivial chat turn.
     - Persist changes via existing tools: `update_character_field` on `improvementPoints` (absolute) or add a small `adjust_improvement_points` tool (delta + `character_id` + short reason) if relative updates are safer.
     - Add or extend a lorebook rule entry (e.g. `improvement-points`) with Referee guideline ranges so `lookup_rules` and injection stay consistent across sessions.

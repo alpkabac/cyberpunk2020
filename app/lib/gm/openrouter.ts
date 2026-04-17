@@ -25,7 +25,20 @@ function formatOpenRouterErrorBody(parsed: unknown, fallbackText: string): strin
   return fallbackText;
 }
 
-export async function callOpenRouterChat(params: {
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetriableOpenRouterFailure(message: string): boolean {
+  if (/OpenRouter error (\d+)/.test(message)) {
+    const m = /OpenRouter error (\d+)/.exec(message);
+    const status = m ? parseInt(m[1]!, 10) : 0;
+    return status === 429 || status === 502 || status === 503 || status === 504;
+  }
+  return /fetch|network|ECONNRESET|ETIMEDOUT|Failed to fetch|ECONNREFUSED/i.test(message);
+}
+
+async function callOpenRouterChatOnce(params: {
   apiKey: string;
   model: string;
   messages: OpenRouterChatMessage[];
@@ -42,8 +55,6 @@ export async function callOpenRouterChat(params: {
     body.tool_choice = 'auto';
   }
 
-  // Only Authorization + Content-Type by default. Optional Referer/Title can confuse some proxies;
-  // set OPENROUTER_HTTP_REFERER (and optionally OPENROUTER_APP_TITLE) if you want OpenRouter usage attribution.
   const headers: Record<string, string> = {
     Authorization: `Bearer ${params.apiKey}`,
     'Content-Type': 'application/json',
@@ -82,6 +93,32 @@ export async function callOpenRouterChat(params: {
 
   const content = extractAssistantContent(raw);
   return { content, raw };
+}
+
+export async function callOpenRouterChat(params: {
+  apiKey: string;
+  model: string;
+  messages: OpenRouterChatMessage[];
+  tools?: boolean;
+  /** Retries for transient HTTP / network failures (default 4). */
+  maxRetries?: number;
+}): Promise<OpenRouterCompletionResult> {
+  const maxAttempts = Math.max(1, params.maxRetries ?? 4);
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await callOpenRouterChatOnce(params);
+    } catch (e) {
+      lastErr = e;
+      const msg = e instanceof Error ? e.message : String(e);
+      const retriable = isRetriableOpenRouterFailure(msg);
+      if (!retriable || attempt === maxAttempts - 1) {
+        throw e;
+      }
+      await sleep(350 * Math.pow(2, attempt));
+    }
+  }
+  throw lastErr;
 }
 
 function extractAssistantContent(data: unknown): string | null {

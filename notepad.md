@@ -213,3 +213,7 @@ Implementing caller-supplied rollSummary plus sessionId/speakerName on dice inte
 
 The send should wait until we send the voice file to tts and then the AI so they go with our prompt
 we also need to edit the stt to wait until we send
+
+
+
+ip tracking in sheet and gm, chat controls(regenerate delete swipe), grid based movement and distance tracking

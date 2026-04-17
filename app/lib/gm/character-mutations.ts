@@ -134,6 +134,15 @@ export function applyGmHealDamage(character: Character, amount: number): Charact
   });
 }
 
+/** Delta IP (can be negative for corrections); total clamps at 0. */
+export function applyGmAdjustImprovementPoints(character: Character, delta: number): Character {
+  const d = Math.trunc(delta);
+  return recalcCharacterForGm({
+    ...character,
+    improvementPoints: Math.max(0, character.improvementPoints + d),
+  });
+}
+
 export function applyGmEquipItem(
   character: Character,
   itemId: string,

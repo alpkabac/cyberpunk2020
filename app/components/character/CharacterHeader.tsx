@@ -34,7 +34,7 @@ export function CharacterHeader({ character, editable }: CharacterHeaderProps) {
 
   return (
     <header className="p-4 bg-[#f5f5dc] border-b-2 border-black">
-      {/* Top Row: Name, Role, Age, Points, REP, IP */}
+      {/* Top Row: Name, Role, Age, REP, PTS */}
       <div className="flex items-center gap-4 mb-4">
         <div className="flex-grow">
           {editable ? (
@@ -119,46 +119,50 @@ export function CharacterHeader({ character, editable }: CharacterHeaderProps) {
           </div>
 
           <div className="flex flex-col">
-            <label className="font-bold uppercase text-xs">IP</label>
-            {editable ? (
-              <input
-                type="number"
-                value={character.improvementPoints}
-                onChange={(e) =>
-                  handleFieldChange(
-                    'improvementPoints',
-                    Math.max(0, parseInt(e.target.value) || 0),
-                  )
-                }
-                className="border border-black px-2 py-1 w-14"
-                min="0"
-              />
-            ) : (
-              <span>{character.improvementPoints}</span>
-            )}
-          </div>
-
-          <div className="flex flex-col">
             <label className="font-bold uppercase text-xs">EUR</label>
             <span className="font-bold text-green-700">€{character.eurobucks.toLocaleString()}</span>
           </div>
         </div>
       </div>
 
-      {/* Bottom Row: Image, Stats, Wound Tracker */}
-      <div className="flex gap-4">
-        {/* Character Image */}
-        <div className="flex-shrink-0">
+      {/* Bottom Row: Image, Stats, Wound Tracker — items-start so portrait column is not stretched to stats height */}
+      <div className="flex items-start gap-4">
+        {/* Portrait + IP (compact; only as tall as image + IP row) */}
+        <div
+          className="shrink-0 w-32 flex flex-col self-start border-2 border-black bg-[#faf8ef]"
+          title="Improvement Points — editable here; the AI-GM can also update this (e.g. adjust_improvement_points)."
+        >
           {/* eslint-disable-next-line @next/next/no-img-element -- character portraits use arbitrary external URLs with inline SVG fallback */}
           <img
             src={character.imageUrl || '/placeholder-character.png'}
             alt={character.name}
-            className="w-32 h-40 object-cover border-2 border-black"
+            className="w-full h-40 object-cover block border-b border-black/25"
             onError={(e) => {
               (e.target as HTMLImageElement).src =
                 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="128" height="160" viewBox="0 0 128 160"%3E%3Crect fill="%23ddd" width="128" height="160"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" font-family="monospace" font-size="16" fill="%23999"%3ENo Image%3C/text%3E%3C/svg%3E';
             }}
           />
+          <div className="flex items-center justify-center gap-1.5 px-1 py-1">
+            <span className="font-bold uppercase text-[10px] text-black/80 leading-none shrink-0">IP</span>
+            {editable ? (
+              <input
+                type="number"
+                inputMode="numeric"
+                min={0}
+                value={character.improvementPoints}
+                onChange={(e) =>
+                  handleFieldChange(
+                    'improvementPoints',
+                    Math.max(0, parseInt(e.target.value, 10) || 0),
+                  )
+                }
+                className="min-w-0 flex-1 border border-black/60 bg-white px-1 py-0.5 text-center text-xs font-mono font-bold tabular-nums focus:outline-none focus:ring-1 focus:ring-black"
+                aria-label="Improvement points"
+              />
+            ) : (
+              <span className="text-xs font-mono font-bold tabular-nums">{character.improvementPoints}</span>
+            )}
+          </div>
         </div>
 
         {/* Stats and Wound Tracker */}

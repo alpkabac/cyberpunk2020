@@ -1,5 +1,8 @@
 import { DeepgramClient } from '@deepgram/sdk';
 import { NextResponse } from 'next/server';
+import { voiceSttLanguageSchema } from '@/lib/api/schemas/session-routes';
+import { validationErrorResponse } from '@/lib/api/validation';
+import { reportServerError } from '@/lib/logging/server-report';
 import { requireAuthFromRequest } from '@/lib/auth/require-auth';
 import { parseDeepgramPrerecordedResult } from '@/lib/voice/parse-deepgram-prerecorded';
 import { mapSpeakerIndexToCharacterId } from '@/lib/voice/speaker-map';
@@ -44,11 +47,16 @@ export async function POST(request: Request) {
   }
 
   const url = new URL(request.url);
-  const language =
+  const rawLanguage =
     request.headers.get('X-STT-Language')?.trim() ||
     url.searchParams.get('language')?.trim() ||
     process.env.STT_LANGUAGE?.trim() ||
     'en';
+  const langParsed = voiceSttLanguageSchema.safeParse(rawLanguage);
+  if (!langParsed.success) {
+    return validationErrorResponse(langParsed.error, 'api/voice:language');
+  }
+  const language = langParsed.data;
   const model = process.env.DEEPGRAM_MODEL?.trim() || 'nova-3';
 
   let speakerMap: Record<string, string> = {};
@@ -104,7 +112,7 @@ export async function POST(request: Request) {
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error('[api/voice]', msg);
+    reportServerError('api/voice:deepgram', e instanceof Error ? e : new Error(msg));
     return NextResponse.json({ error: msg }, { status: 502 });
   }
 }
