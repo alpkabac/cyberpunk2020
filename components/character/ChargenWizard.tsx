@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   ALL_ROLES,
@@ -26,6 +26,15 @@ import type { RoleType, Stats } from '@/lib/types';
 import { ROLE_SPECIAL_ABILITIES } from '@/lib/types';
 
 const STEPS = ['Profile', 'Stats', 'Career', 'Pickup', 'Funds', 'Review'] as const;
+
+function WizardTip({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <aside className="rounded-md border border-cyan-900/35 bg-cyan-950/15 px-3 py-2.5 space-y-1.5">
+      <p className="text-[10px] uppercase tracking-wide text-cyan-500/95">{title}</p>
+      <div className="text-[11px] text-zinc-400 leading-relaxed space-y-2">{children}</div>
+    </aside>
+  );
+}
 
 type Draft = {
   name: string;
@@ -286,7 +295,7 @@ export function ChargenWizard({
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/75 backdrop-blur-[2px]">
       <div
-        className="w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col rounded-lg border border-violet-800/50 bg-zinc-950 shadow-2xl shadow-violet-950/40"
+        className="w-full max-w-xl max-h-[90vh] overflow-hidden flex flex-col rounded-lg border border-violet-800/50 bg-zinc-950 shadow-2xl shadow-violet-950/40"
         role="dialog"
         aria-modal="true"
         aria-labelledby="chargen-title"
@@ -296,8 +305,10 @@ export function ChargenWizard({
             <h2 id="chargen-title" className="text-sm font-bold uppercase tracking-wider text-violet-300">
               New character
             </h2>
-            <p className="text-[10px] text-zinc-500 mt-0.5">
-              CP2020 · Character Points, career package (40 + special), pickup (REF+INT), starting funds
+            <p className="text-[10px] text-zinc-500 mt-0.5 leading-snug">
+              View from the Edge-style chargen: split Character Points across nine stats, spend 40 points on your
+              role&apos;s fixed career package (special ability included), add pickup skills from the book pool using
+              REF+INT, then set starting eurobucks.
             </p>
           </div>
           <button
@@ -334,6 +345,18 @@ export function ChargenWizard({
 
           {step === 0 && (
             <div className="space-y-3">
+              <WizardTip title="How this wizard maps to CP2020">
+                <p>
+                  Each step mirrors the core book flow: you establish who the character is, turn Character Points into
+                  stats, assign the mandatory career skills for that role, optionally add a few pickup skills, and finish
+                  with money. Totals are validated so the sheet matches what combat, skills, and the database expect.
+                </p>
+                <p>
+                  Your <span className="text-zinc-300">role</span> is important because it locks in the{' '}
+                  <span className="text-zinc-300">exact list</span> of career skills (see the Career step)—you are not
+                  building a free-form skill list at chargen, only distributing points within that list.
+                </p>
+              </WizardTip>
               <label className="block space-y-1">
                 <span className="text-[10px] uppercase text-zinc-500">Name</span>
                 <input
@@ -386,6 +409,20 @@ export function ChargenWizard({
 
           {step === 1 && (
             <div className="space-y-3">
+              <WizardTip title="Character Points and stats">
+                <p>
+                  <span className="text-zinc-300">Random</span> totals nine ten-sided dice.{' '}
+                  <span className="text-zinc-300">Fast</span> rolls nine dice but re-rolls any result of 2 or lower, then
+                  sums them—usually a slightly higher spread. <span className="text-zinc-300">Cinematic</span> uses a
+                  referee-chosen budget from the preset table when you want a stable campaign power level.
+                </p>
+                <p>
+                  Those points are then split across the nine characteristics. Each stat must stay between{' '}
+                  <span className="text-zinc-300">2 and 10</span>, and the nine bases must{' '}
+                  <span className="text-zinc-300">add up exactly</span> to your Character Points total. Use the roll
+                  button for a legal random split, then tweak with the +/- buttons if your table allows adjustments.
+                </p>
+              </WizardTip>
               <div className="flex flex-wrap gap-2 items-end">
                 <label className="space-y-1">
                   <span className="text-[10px] uppercase text-zinc-500">Point method</span>
@@ -492,6 +529,21 @@ export function ChargenWizard({
 
           {step === 2 && (
             <div className="space-y-3">
+              <WizardTip title="Why the career skill list is fixed">
+                <p>
+                  In Cyberpunk 2020, each role ships with a defined <span className="text-zinc-300">career skill package</span>
+                  : ten entries—your special ability plus nine trained skills. At character creation you receive{' '}
+                  <span className="text-zinc-300">40 skill points</span> to divide among those ten lines only. You do not
+                  pick substitute skills for that package during chargen; that is how the rules keep roles readable and
+                  balanced (a Solo&apos;s package differs from a Media&apos;s, and so on).
+                </p>
+                <p>
+                  The <span className="text-zinc-300">special ability</span> line must stay between 1 and 10. The other
+                  career lines can range from 0 to 10. The ten values must total exactly 40. Anything else you want
+                  belongs in <span className="text-zinc-300">pickup skills</span> (next step) or is bought later with
+                  Improvement Points during play.
+                </p>
+              </WizardTip>
               <div className="flex justify-between items-center text-xs">
                 <span className="text-zinc-400">
                   Career total{' '}
@@ -561,6 +613,23 @@ export function ChargenWizard({
 
           {step === 3 && (
             <div className="space-y-3">
+              <WizardTip title="Why pickup skill selection is limited">
+                <p>
+                  <span className="text-zinc-300">Pickup skills</span> represent extra training outside your career
+                  package. The rules give you a number of pickup points equal to{' '}
+                  <span className="text-zinc-300">REF + INT</span> (using the stat bases from the Stats step). You may
+                  only choose skills that are <span className="text-zinc-300">not already in your career list</span>—the
+                  book assumes you are broadening the character, not doubling up on a career skill at chargen.
+                </p>
+                <p>
+                  The dropdown here is limited to the app&apos;s{' '}
+                  <span className="text-zinc-300">canonical pickup pool</span> (the same names and stat links used in
+                  validation, the digital sheet, and GM tools). That keeps skill categories, defaults, and future IP
+                  spends consistent. Skills you do not see are either part of your current role&apos;s career package or
+                  outside that pool; your referee can still add unusual skills after creation using Improvement Points or
+                  house rules.
+                </p>
+              </WizardTip>
               <p className="text-xs text-zinc-400">
                 Pickup pool (REF + INT):{' '}
                 <span className="text-cyan-200 font-mono">{pickupPool}</span>
@@ -669,11 +738,30 @@ export function ChargenWizard({
                   )}
                 </select>
               </label>
+              {CP2020_PICKUP_POOL.every(
+                (n) => careerNames.has(n) || draft.pickup.some((x) => x.name === n),
+              ) && (
+                <p className="text-[10px] text-zinc-500">
+                  Every pickup-pool skill is either already on your sheet or blocked because it appears in your career
+                  package for this role. You can leave pickup empty or ask your ref about adding skills later with IP.
+                </p>
+              )}
             </div>
           )}
 
           {step === 4 && (
             <div className="space-y-3 text-xs">
+              <WizardTip title="Occupation table and starting cash">
+                <p>
+                  Monthly salary comes from the Occupation Table, keyed off your{' '}
+                  <span className="text-zinc-300">special ability level</span> from the Career step. Starting eurobucks
+                  use the book procedure: employed for a fractional number of months, then a check that can cut the
+                  total in half if you are considered unemployed—your ref has the final say.
+                </p>
+                <p>
+                  Roll here to randomize, or type an amount everyone at the table agrees on for a cinematic start.
+                </p>
+              </WizardTip>
               <p>
                 Monthly salary (occupation table, from special level):{' '}
                 <span className="text-emerald-300 font-mono">{salary.toLocaleString()} eb</span>
@@ -705,6 +793,13 @@ export function ChargenWizard({
 
           {step === 5 && (
             <div className="space-y-2 text-[11px] text-zinc-300">
+              <WizardTip title="Before you save">
+                <p>
+                  This summary should match your table&apos;s reading of the rules. If anything failed validation, fix it
+                  on the earlier tabs—common issues are stat totals not matching Character Points, career lines not
+                  summing to 40, or pickup points exceeding REF+INT.
+                </p>
+              </WizardTip>
               <p>
                 <span className="text-zinc-500">Name:</span> {draft.name}
               </p>
