@@ -216,4 +216,11 @@ we also need to edit the stt to wait until we send
 
 
 
-ip tracking in sheet and gm, chat controls(regenerate delete swipe), grid based movement and distance tracking
+ip tracking in sheet and gm, ++
+chat controls(regenerate delete swipe), 
+
+grid based movement and distance tracking++
+
+edit left tab for user names
+
+we need targeting+++

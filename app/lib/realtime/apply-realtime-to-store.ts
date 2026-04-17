@@ -56,9 +56,17 @@ export function createDefaultPostgresHandlersForGameStore(): PostgresChangeHandl
       }
       if (newRecord) useGameStore.getState().applyRemoteTokenUpsert(newRecord);
     },
-    onChatMessageChange: ({ eventType, new: newRow }) => {
-      if (eventType === 'DELETE') return;
-      if (newRow) {
+    onChatMessageChange: ({ eventType, new: newRow, old: oldRow }) => {
+      if (eventType === 'DELETE') {
+        const id = oldRow?.id;
+        if (id) useGameStore.getState().removeChatMessagesByIds([String(id)]);
+        return;
+      }
+      if (eventType === 'UPDATE' && newRow) {
+        useGameStore.getState().mergeRemoteChatMessage(chatRowToMessage(newRow));
+        return;
+      }
+      if (eventType === 'INSERT' && newRow) {
         useGameStore.getState().appendRemoteChatMessage(chatRowToMessage(newRow));
       }
     },

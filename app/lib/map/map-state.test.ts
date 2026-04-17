@@ -9,4 +9,22 @@ describe('map-state', () => {
   it('normalizeCellRect orders corners', () => {
     expect(normalizeCellRect(5, 2, 1, 8)).toEqual({ c0: 1, c1: 5, r0: 2, r1: 8 });
   });
+
+  it('parseMapStateJson preserves spAblation', () => {
+    const parsed = parseMapStateJson({
+      coverRegions: [
+        {
+          id: 'r1',
+          c0: 0,
+          c1: 0,
+          r0: 0,
+          r1: 0,
+          coverTypeId: 'wood_door',
+          spAblation: 2,
+        },
+      ],
+    });
+    expect(parsed.coverRegions).toHaveLength(1);
+    expect(parsed.coverRegions[0].spAblation).toBe(2);
+  });
 });

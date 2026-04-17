@@ -217,8 +217,8 @@ export function validateGmToolParameters(name: string, raw: unknown): { ok: true
         if (typeof formula !== 'string') return { ok: false, error: formula.error };
         return { ok: true, name: 'request_roll', args: raw };
       }
-      if (rollKind !== 'skill' && rollKind !== 'stat' && rollKind !== 'raw_formula') {
-        return { ok: false, error: 'roll_kind must be skill, stat, or raw_formula' };
+      if (rollKind !== 'skill' && rollKind !== 'stat' && rollKind !== 'raw_formula' && rollKind !== 'attack') {
+        return { ok: false, error: 'roll_kind must be skill, stat, raw_formula, or attack' };
       }
       if (rollKind === 'raw_formula') {
         const formula = str(raw.formula, 'formula');
@@ -230,6 +230,19 @@ export function validateGmToolParameters(name: string, raw: unknown): { ok: true
         const skill_id = str(raw.skill_id, 'skill_id');
         if (typeof character_id !== 'string') return { ok: false, error: character_id.error };
         if (typeof skill_id !== 'string') return { ok: false, error: skill_id.error };
+        return { ok: true, name: 'request_roll', args: raw };
+      }
+      if (rollKind === 'attack') {
+        const character_id = str(raw.character_id, 'character_id');
+        const weapon_id = str(raw.weapon_id, 'weapon_id');
+        const dv = num(raw.difficulty_value, 'difficulty_value');
+        if (typeof character_id !== 'string') return { ok: false, error: character_id.error };
+        if (typeof weapon_id !== 'string') return { ok: false, error: weapon_id.error };
+        if (typeof dv !== 'number') return { ok: false, error: dv.error };
+        if (raw.ranged_modifier_total !== undefined && raw.ranged_modifier_total !== null) {
+          const rm = num(raw.ranged_modifier_total, 'ranged_modifier_total');
+          if (typeof rm !== 'number') return { ok: false, error: rm.error };
+        }
         return { ok: true, name: 'request_roll', args: raw };
       }
       const character_id = str(raw.character_id, 'character_id');
@@ -772,6 +785,19 @@ export async function executeGmTool(
       if (rollKind === 'stat' && typeof args.stat === 'string') {
         meta.stat = args.stat.toLowerCase();
       }
+      if (rollKind === 'attack') {
+        meta.weapon_id = String(args.weapon_id);
+        meta.difficulty_value = Number(args.difficulty_value);
+        if (args.ranged_modifier_total !== undefined && args.ranged_modifier_total !== null) {
+          meta.ranged_modifier_total = Number(args.ranged_modifier_total);
+        }
+        const rbl = optStr(args.range_bracket_label);
+        if (rbl) meta.range_bracket_label = rbl;
+        const tc = optStr(args.target_character_id);
+        if (tc) meta.target_character_id = tc;
+        const tn = optStr(args.target_name);
+        if (tn) meta.target_name = tn;
+      }
 
       const c = characterId ? ctx.charactersById.get(characterId) : undefined;
       let formula = typeof args.formula === 'string' ? args.formula.trim() : '';
@@ -786,6 +812,32 @@ export async function executeGmTool(
           formula = r.formula;
         }
       }
+      if (c && rollKind === 'attack') {
+        let rangedMod: number | null = null;
+        if (args.ranged_modifier_total !== undefined && args.ranged_modifier_total !== null) {
+          const n = Number(args.ranged_modifier_total);
+          if (Number.isFinite(n)) rangedMod = n;
+        }
+        const r = resolveGmRequestRollForServer(c, {
+          roll_kind: 'attack',
+          formula,
+          weapon_id: String(args.weapon_id),
+          difficulty_value: Number(args.difficulty_value),
+          ranged_modifier_total: rangedMod,
+          range_bracket_label: optStr(args.range_bracket_label) ?? null,
+          target_character_id: optStr(args.target_character_id) ?? null,
+          target_name: optStr(args.target_name) ?? null,
+        });
+        if (!r.attackDice) {
+          return {
+            ok: false,
+            name,
+            error:
+              'Could not resolve attack roll (check character_id and weapon_id on sheet, and difficulty_value)',
+          };
+        }
+        formula = r.formula;
+      }
       if (!formula.trim()) {
         formula = typeof args.formula === 'string' ? args.formula.trim() : '';
       }
@@ -794,7 +846,11 @@ export async function executeGmTool(
       }
       meta.formula = formula.trim();
 
-      const line = `Roll requested (${rollKind}): ${formula.trim()}${reason ? ` — ${reason}` : ''}`;
+      const dvHint =
+        rollKind === 'attack' && typeof meta.difficulty_value === 'number'
+          ? ` vs DV ${meta.difficulty_value}`
+          : '';
+      const line = `Roll requested (${rollKind}): ${formula.trim()}${dvHint}${reason ? ` — ${reason}` : ''}`;
       const err = await insertChatMessage(ctx.supabase, ctx.sessionId, 'Game Master', line, 'system', meta);
       if (err) return { ok: false, name, error: err.message };
       return {

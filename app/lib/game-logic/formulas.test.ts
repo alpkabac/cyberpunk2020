@@ -15,6 +15,7 @@ import {
   isFlatSaveSuccess,
   getStabilizationMedicBonus,
   calculateDamage,
+  stackOuterToInnerCoverSp,
 } from './formulas';
 import { Character, createStatBlock } from '../types';
 
@@ -431,6 +432,19 @@ describe('calculateDamage (FNFF pipeline)', () => {
     // effective SP = floor(12/2) = 6, − = 4, − BTM 2 = 2.
     expect(r.effectiveSP).toBe(6);
     expect(r.finalDamage).toBe(2);
+  });
+
+  it('cover + armor uses proportional rule (larger + bonus from SP difference)', () => {
+    // Cover 10, armor 18 → larger 18, diff 8 → bonus +4 → barrier 22 (CP2020Gameplay.md L6297).
+    const r = calculateDamage(25, 'Torso', 18, 0, false, 10);
+    expect(r.effectiveSP).toBe(22);
+    expect(r.finalDamage).toBe(3);
+    expect(r.penetrated).toBe(true);
+  });
+
+  it('stacked outer cover: inner-first proportional fold', () => {
+    // Outer 5, inner 10 → combine inner with outer: larger 10, smaller 5, diff 5 → bonus +4 → 14.
+    expect(stackOuterToInnerCoverSp([5, 10])).toBe(14);
   });
 });
 

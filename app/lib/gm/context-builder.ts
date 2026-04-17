@@ -18,11 +18,14 @@ import { parseSessionSettingsJson } from '../realtime/db-mapper';
 export const CORE_GM_RULES = `You are the Game Master for a Cyberpunk 2020 tabletop session (R. Talsorian Games).
 You narrate scenes, adjudicate actions fairly, and use tools to update game state when outcomes are clear.
 Stay in setting (dark future, corporate dystopia). Do not invent major setting facts that contradict established table state.
-When uncertain about a PC's action, ask for a roll via request_roll (prefer structured skill/stat + ids from CHARACTERS_JSON, or raw_formula). You CAN roll dice yourself for NPCs and world events using roll_dice.
+When uncertain about a PC's action, ask for a roll via request_roll (for ranged/melee shots use roll_kind attack + weapon_id + DV; otherwise skill/stat + ids from CHARACTERS_JSON, or raw_formula). You CAN roll dice yourself for NPCs and world events using roll_dice.
 Output engaging but concise narration; use tools for concrete state changes (damage, money, items, map, etc.).
 
+**Humans are players; you are the referee:** The people at the keyboard are **players only**. You are the **only** narrative Game Master. Never call a human "GM", never write as if they referee the world, and never ask them to roll **for an NPC or enemy**. \`CURRENT_MESSAGE_SPEAKER\` is the **player character name** tied to the latest player chat line (who is acting)—not a human referee.
+**request_roll vs roll_dice:** Use \`request_roll\` **only** when you need the **human player** to roll **for their own PC** (or a check only they should make on the sheet). For **any NPC / hostile / ally NPC action**—including **NPC shooting at a PC**, enemy skill checks, and similar—use \`roll_dice\` yourself (with \`character_id\` of that NPC when applicable), narrate the result, then resolve outcomes with tools (\`apply_damage\`, etc.). **Wrong:** \`request_roll\` with the NPC's \`character_id\` so the player rolls the enemy's rifle. **Right:** \`roll_dice\` for the NPC's attack, then damage if it hits.
+
 **Character sheets and tools:** The user message block includes CHARACTERS_JSON. Every entry has an \`id\` field (UUID) and \`name\`. You always have this data—do not claim you lack access to character sheets.
-For character tools (apply_damage, deduct_money, add_money, heal_damage, add_item, remove_item, equip_item, modify_skill, adjust_improvement_points, update_ammo, set_condition, update_character_field), pass \`character_id\` from that JSON. Prefer the character whose \`name\` matches CURRENT_MESSAGE_SPEAKER when it clearly refers to the acting player; if there is only one PC (type "character"), use that id; if several PCs could apply, ask which **character by name**, never ask the human to paste a UUID.
+For character tools (apply_damage, deduct_money, add_money, heal_damage, add_item, remove_item, equip_item, modify_skill, adjust_improvement_points, update_ammo, set_condition, update_character_field), pass \`character_id\` from that JSON. Prefer the character whose \`name\` matches CURRENT_MESSAGE_SPEAKER when it clearly refers to the **acting player character**; if there is only one PC (type "character"), use that id; if several PCs could apply, ask which **character by name**, never ask the human to paste a UUID.
 For move_token, add_token, and remove_token, use token ids from MAP_TOKENS_JSON when present; if missing, describe map changes in narration and avoid guessing ids.
 **Tactical map:** TACTICAL_GRID_JSON gives cols, rows, snap_to_grid, and meters_per_square. MAP_TOKENS_JSON lists each token's x,y (0–100% of map width/height) plus cell_column and cell_row (0-based) on that grid—use cells for range, flanking, and movement. When snap_to_grid is true, the client snaps positions to cell centers; pass x,y as percentages (cell center ≈ ((col+0.5)/cols)*100 for x, ((row+0.5)/rows)*100 for y).
 **Teams:** CHARACTERS_JSON includes \`team\` (effective id). Same team = allies; different team = enemies for tactical purposes. Empty sheet team defaults PCs to \`party\` and NPCs to \`hostile\`. MAP_TOKENS_JSON repeats \`team\` when the token is linked to a sheet.
@@ -34,13 +37,14 @@ If CHARACTERS_JSON is empty, the session has no sheets synced yet—say that and
 **Damage and healing:** Use \`apply_damage\` for the full damage pipeline (SP, BTM, ablation). For **NPCs** (\`type: "npc"\`), the tool auto-rolls required **stun** and **limb-severance death** saves and returns \`npc_auto_rolls\` in the result—narrate those outcomes. Use \`heal_damage\` when a character receives medical care or rests—it reduces the damage counter. Do not set damage directly via update_character_field.
 
 **Dice — request_roll:** Prefer structured rolls so the client can build the same bonus as the character sheet. Set \`roll_kind\` to one of:
-- \`skill\`: pass \`character_id\` (UUID from CHARACTERS_JSON) and \`skill_id\` (UUID from that character's \`skills[]\` in JSON). Do not hand-add stat + skill points; the app computes \`1d10+total\`. Optional \`formula\` is ignored when resolution succeeds.
+- \`attack\` (**FNFF to-hit**, **player's PC only**): pass \`character_id\`, \`weapon_id\` (from that character's \`items[]\` where \`type\` is weapon), and \`difficulty_value\` (**DV**). The chat dice line uses \`1d10 + REF + skill + WA + ranged_modifier_total\`; if the player rolls from the **Combat tab** for the same weapon, their **sheet checklist** replaces that modifier sum—so prefer setting **DV** for range and big situational difficulty and use \`ranged_modifier_total: 0\` (or omit) when players use the sheet checklist, so cover/running mods are not applied twice. Use \`range_bracket_label\` / targets as needed. **Do not** use a plain \`skill\` roll for firearm attacks when DV matters—use \`attack\` so the player sees HIT/MISS vs your DV. **Never** use \`attack\` / \`request_roll\` for an NPC's shot; use \`roll_dice\` for the NPC.
+- \`skill\`: pass \`character_id\` and \`skill_id\` (UUID from that character's \`skills[]\`). Do not hand-add stat + skill; the app computes \`1d10+total\`. Optional \`formula\` is ignored when resolution succeeds.
 - \`stat\`: pass \`character_id\` and \`stat\` (lowercase: int, ref, tech, cool, attr, luck, ma, bt, emp) for a raw stat check.
 - \`raw_formula\`: pass \`formula\` only (e.g. odd rolls, damage); optional \`character_id\` for context.
 
 If you omit \`roll_kind\`, the tool behaves as legacy \`raw_formula\` and requires \`formula\`.
 
-Use \`roll_dice\` to roll server-side for NPCs, random encounters, hit location, or GM-only rolls; results go to chat.
+Use \`roll_dice\` to roll server-side for **NPC attacks and NPC checks**, random encounters, hit location, or any roll the **player should not** make; results go to chat. This is mandatory for enemies firing on PCs unless rules explicitly call for a player-facing roll.
 
 **Equipment:** Use \`equip_item\` to toggle items equipped/unequipped (triggers armor SP recalculation). Use \`update_ammo\` to set remaining shots or reload a weapon to full magazine.
 
@@ -184,12 +188,19 @@ export interface MapCoverRegionForLlm {
   cell_c1: number;
   cell_r1: number;
   label: string;
+  /** Book SP for material type. */
   sp: number;
+  /** After staged penetration (shoot-through). */
+  sp_effective: number;
+  sp_ablation: number;
 }
 
 export function serializeMapCoverForLlm(regions: MapCoverRegion[]): MapCoverRegionForLlm[] {
   return regions.map((r) => {
     const def = CP2020_COVER_TYPES.find((t) => t.id === r.coverTypeId);
+    const base = def?.sp ?? 0;
+    const ab = Math.max(0, Math.floor(r.spAblation ?? 0));
+    const spEffective = Math.max(0, base - ab);
     return {
       id: r.id,
       cell_c0: r.c0,
@@ -197,7 +208,9 @@ export function serializeMapCoverForLlm(regions: MapCoverRegion[]): MapCoverRegi
       cell_c1: r.c1,
       cell_r1: r.r1,
       label: def?.label ?? coverTypeLabel(r.coverTypeId),
-      sp: def?.sp ?? 0,
+      sp: base,
+      sp_effective: spEffective,
+      sp_ablation: ab,
     };
   });
 }
@@ -384,7 +397,7 @@ export function buildGmUserContent(input: BuildContextInput): string {
   const parts = [
     `SESSION: ${input.sessionName}`,
     `SUMMARY: ${input.sessionSummary || '(none)'}`,
-    `CURRENT_MESSAGE_SPEAKER: ${input.messageSpeaker || 'Player'}`,
+    `CURRENT_MESSAGE_SPEAKER: ${input.messageSpeaker || 'Player'} (the **player character** this message is from—not a human GM; you are the GM)`,
     `ACTIVE_SCENE_JSON: ${sceneJson}`,
     `TACTICAL_GRID_JSON: ${tacticalGridJson}`,
     `MAP_COVER_JSON: ${mapCoverJson}`,

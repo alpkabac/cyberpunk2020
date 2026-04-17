@@ -12,7 +12,7 @@ import {
   ChatMessage,
   Scene,
   SessionSettings,
-  Item,
+  CharacterItem,
   Skill,
   DerivedStats,
   Zone,
@@ -22,6 +22,7 @@ import {
   PendingRollForVoice,
   PendingVoiceGmPayload,
   CombatState,
+  PendingGmAttackRequest,
 } from '../types';
 import { BROADCAST_EVENTS } from '../realtime/realtime-events';
 import {
@@ -33,10 +34,16 @@ import {
 } from '../game-logic/formulas';
 import { maxDamageFromDiceFormula } from '../game-logic/dice';
 import { getAmmoConsumed } from '../game-logic/lookups';
-import { severedConditionName } from '../game-logic/conditions';
+import { isSeveredConditionName, severedConditionName } from '../game-logic/conditions';
 import type { LoadedSessionSnapshot } from '../realtime/session-load';
-import { characterRowToCharacter, mergeCharacterRowWithRealtime } from '../realtime/db-mapper';
+import {
+  characterRowToCharacter,
+  mergeCharacterRowWithRealtime,
+  postgresRowUpdatedAtMs,
+} from '../realtime/db-mapper';
 import { parseCombatStateJson } from '../session/combat-state';
+import { coverTypeSp } from '../map/cover-types';
+import { sortChatMessagesByTimestamp } from '../chat/chat-order';
 
 function deathSaveBonusFromMods(m: Character['combatModifiers'] | undefined): number {
   return (m?.stunSave ?? 0) + (m?.deathSave ?? 0);
@@ -56,6 +63,8 @@ interface GameState {
     settings: SessionSettings;
     sessionSummary: string;
     combatState: CombatState | null;
+    /** Signed-in user in session room — used to prompt saves when GM updates this PC via Realtime. */
+    viewerUserId: string | null;
   };
 
   characters: {
@@ -100,11 +109,16 @@ interface GameState {
     diceRollIntent: DiceRollIntent | null;
     /**
      * Set when an incoming hit forces an immediate Mortal-0 death save
-     * (limb severance). Consumed right after the auto-opened stun save is
-     * resolved: the roller is re-armed with a death-save intent so the roll
-     * happens on the attacker's turn without a manual click.
+     * (limb severance). After the player resolves the damage stun save, we set
+     * `scheduleForcedDeathSaveOnDiceClose` and open the forced death save when
+     * they **close** the dice roller (so isStunned is settled first).
      */
     pendingForcedDeathSaveFor: string | null;
+    /**
+     * After damage stun save when `pendingForcedDeathSaveFor` was set: open forced
+     * death save once the dice roller closes (not immediately after the stun roll).
+     */
+    scheduleForcedDeathSaveOnDiceClose: string | null;
     isChatInputFocused: boolean;
     isVoiceRecording: boolean;
     /** Session voice: STT done, not sent to GM yet. */
@@ -129,11 +143,20 @@ interface GameState {
     sessionVoiceStopTurnId: string | null;
     /** Incremented on `SESSION_VOICE_PEER_START` so peers can mirror Session recording. */
     sessionVoicePeerStartTick: number;
+    /**
+     * When set, rolling this weapon from the Combat tab uses sheet checklist bonuses but
+     * the GM’s DV/targets from the latest attack `request_roll` in chat.
+     */
+    pendingGmAttackRequest: PendingGmAttackRequest | null;
+    /** After a successful attack reply to the GM, suppress re-opening pending for the same chat line. */
+    lastAnsweredGmAttackRequestMessageId: string | null;
   };
 
   /** Optimistic edit backups for Supabase writes (rollback on RLS/error). */
   realtime: {
     optimisticBackupByCharacterId: Record<string, Character>;
+    /** Per character: max Postgres `updated_at` applied via Realtime merge (LWW for out-of-order rows). */
+    maxMergedCharacterRowUpdatedAtMs: Record<string, number>;
   };
 }
 
@@ -148,6 +171,7 @@ interface GameActions {
   /** Align chat voice UI with `session.settings` (hydration + Realtime `sessions` row). */
   syncVoiceUiFromSessionSettings: (settings: SessionSettings) => void;
   setActiveScene: (scene: Scene) => void;
+  setSessionViewerUserId: (userId: string | null) => void;
 
   // Character actions
   addCharacter: (character: Character) => void;
@@ -165,10 +189,12 @@ interface GameActions {
     isAP?: boolean,
     pointBlank?: boolean,
     weaponDamageFormula?: string | null,
+    /** Map cover along fire line (stacked SP + region ids); penetrating hits ablate each region by 1. */
+    cover?: { stackedSp: number; regionIds: string[] } | null,
   ) => void;
 
   deductMoney: (characterId: string, amount: number) => void;
-  addItem: (characterId: string, item: Item) => void;
+  addItem: (characterId: string, item: CharacterItem) => void;
   removeItem: (characterId: string, itemId: string) => void;
   /** Sell item for a fraction of list price (default 50%). Adds eurobucks and removes item. */
   sellItem: (characterId: string, itemId: string, sellFraction?: number) => void;
@@ -276,6 +302,9 @@ interface GameActions {
   removePendingRollForVoice: (id: string) => void;
   clearPendingRollsForVoice: () => void;
   clearPendingRollsForSession: (sessionId: string) => void;
+  setPendingGmAttackRequest: (payload: PendingGmAttackRequest | null) => void;
+  /** Call after posting an attack roll reply for a `roll_request` so pending does not immediately resync. */
+  ackGmAttackRollReply: (chatMessageId: string) => void;
   registerSessionBroadcastSend: (
     fn: GameState['sessionBroadcastSend'],
   ) => void;
@@ -293,12 +322,22 @@ interface GameActions {
   applyRemoteTokenUpsert: (token: Token) => void;
   removeRemoteToken: (tokenId: string) => void;
   appendRemoteChatMessage: (message: ChatMessage) => void;
+  mergeRemoteChatMessage: (message: ChatMessage) => void;
+  removeChatMessagesByIds: (ids: string[]) => void;
   beginOptimisticCharacterEdit: (characterId: string) => void;
   rollbackOptimisticCharacterEdit: (characterId: string) => void;
   clearOptimisticCharacterBackup: (characterId: string) => void;
 
   // Utility actions
   reset: () => void;
+}
+
+function hasNewSeveredLimbCondition(before: Character, after: Character): boolean {
+  const prev = new Set((before.conditions ?? []).map((c) => c.name));
+  for (const c of after.conditions ?? []) {
+    if (!prev.has(c.name) && isSeveredConditionName(c.name)) return true;
+  }
+  return false;
 }
 
 // ============================================================================
@@ -389,13 +428,14 @@ const initialState: GameState = {
       voiceInputMode: 'pushToTalk',
       sessionRecordingStartedBy: null,
       mapGridCols: 20,
-      mapGridRows: 12,
+      mapGridRows: 20,
       mapShowGrid: true,
-      mapSnapToGrid: false,
-      mapMetersPerSquare: 0,
+      mapSnapToGrid: true,
+      mapMetersPerSquare: 5,
     },
     sessionSummary: '',
     combatState: null,
+    viewerUserId: null,
   },
 
   characters: {
@@ -429,6 +469,7 @@ const initialState: GameState = {
     includeSpecialAbilityInSkillRolls: false,
     diceRollIntent: null,
     pendingForcedDeathSaveFor: null,
+    scheduleForcedDeathSaveOnDiceClose: null,
     isChatInputFocused: false,
     isVoiceRecording: false,
     pendingVoiceGm: null,
@@ -441,10 +482,13 @@ const initialState: GameState = {
     sessionVoiceStopAllTick: 0,
     sessionVoiceStopTurnId: null,
     sessionVoicePeerStartTick: 0,
+    pendingGmAttackRequest: null,
+    lastAnsweredGmAttackRequestMessageId: null,
   },
 
   realtime: {
     optimisticBackupByCharacterId: {},
+    maxMergedCharacterRowUpdatedAtMs: {},
   },
 };
 
@@ -459,6 +503,11 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
   setSession: (session) =>
     set((state) => ({
       session: { ...state.session, ...session },
+    })),
+
+  setSessionViewerUserId: (userId) =>
+    set((state) => ({
+      session: { ...state.session, viewerUserId: userId },
     })),
 
   updateSessionSettings: (settings) =>
@@ -542,7 +591,15 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
    * Point blank (FNFF): if pointBlank and weaponDamageFormula parse as NdS+M, base damage = max dice total.
    * Otherwise rawDamage is used (already your max if you typed it in manually).
    */
-  applyDamage: (characterId, rawDamage, location, isAP = false, pointBlank = false, weaponDamageFormula = null) => {
+  applyDamage: (
+    characterId,
+    rawDamage,
+    location,
+    isAP = false,
+    pointBlank = false,
+    weaponDamageFormula = null,
+    cover = null,
+  ) => {
     let autoOpenStunFor: string | null = null;
     let queueForcedDeathFor: string | null = null;
     let targetIsNpc = false;
@@ -564,8 +621,10 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
 
       const sp = location ? Math.max(0, character.hitLocations[location].stoppingPower - character.hitLocations[location].ablation) : 0;
       const btm = character.derivedStats?.btm || 0;
+      const coverStacked = Math.max(0, Math.floor(cover?.stackedSp ?? 0));
+      const coverRegionIds = cover?.regionIds?.length ? cover.regionIds : [];
 
-      const result = calculateDamage(effectiveRaw, location, sp, btm, isAP);
+      const result = calculateDamage(effectiveRaw, location, sp, btm, isAP, coverStacked);
 
       // Severance / head auto-kill escalate the final damage before applying.
       // Head: instant kill (damage 41). Limb: force Mortal 0 minimum (13).
@@ -636,12 +695,33 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
           ? { ...state.ui, pendingForcedDeathSaveFor: queueForcedDeathFor }
           : state.ui;
 
+      const ablateCover =
+        result.penetrated &&
+        coverRegionIds.length > 0 &&
+        state.map.coverRegions.length > 0;
+      const coverIdSet = ablateCover ? new Set(coverRegionIds) : null;
+      const nextMap =
+        coverIdSet !== null
+          ? {
+              ...state.map,
+              coverRegions: state.map.coverRegions
+                .map((r) =>
+                  coverIdSet.has(r.id)
+                    ? { ...r, spAblation: (r.spAblation ?? 0) + 1 }
+                    : r,
+                )
+                // FNFF staged SP: at 0 the barrier is gone — drop the region from the tactical map.
+                .filter((r) => (r.spAblation ?? 0) < coverTypeSp(r.coverTypeId)),
+            }
+          : state.map;
+
       if (isNpc) {
         return {
           npcs: {
             ...state.npcs,
             byId: { ...state.npcs.byId, [characterId]: updated },
           },
+          map: nextMap,
           ui: nextUi,
         };
       }
@@ -650,6 +730,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
           ...state.characters,
           byId: { ...state.characters.byId, [characterId]: updated },
         },
+        map: nextMap,
         ui: nextUi,
       };
     });
@@ -930,7 +1011,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     updatedItems[weaponIdx] = {
       ...weapon,
       shotsLeft: weapon.shotsLeft - ammoNeeded,
-    } as unknown as Item;
+    };
 
     const isNpc = character.type === 'npc';
     const updated = recalcCharacter({ ...character, items: updatedItems });
@@ -964,8 +1045,8 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
 
       const updatedItems = character.items.map((item) => {
         if (item.id === weaponId && item.type === 'weapon') {
-          const w = item as unknown as Weapon;
-          return { ...w, shotsLeft: w.shots } as unknown as Item;
+          const w = item;
+          return { ...w, shotsLeft: w.shots };
         }
         return item;
       });
@@ -1077,6 +1158,11 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
   clearChatHistory: () =>
     set((state) => ({
       chat: { ...state.chat, messages: [] },
+      ui: {
+        ...state.ui,
+        pendingGmAttackRequest: null,
+        lastAnsweredGmAttackRequestMessageId: null,
+      },
     })),
 
   // UI actions
@@ -1100,30 +1186,44 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
       },
     })),
 
-  closeDiceRoller: () =>
+  closeDiceRoller: () => {
+    const sched = get().ui.scheduleForcedDeathSaveOnDiceClose;
     set((state) => ({
       ui: {
         ...state.ui,
         isDiceRollerOpen: false,
         diceFormula: null,
         diceRollIntent: null,
-        // If the user dismisses before resolving a chained save, drop the queue
-        // so it can't leak into a later, unrelated stun save.
         pendingForcedDeathSaveFor: null,
+        scheduleForcedDeathSaveOnDiceClose: null,
       },
-    })),
+    }));
+    if (sched) {
+      queueMicrotask(() => {
+        const c = get().characters.byId[sched] ?? get().npcs.byId[sched];
+        if ((c?.derivedStats?.deathSaveTarget ?? -1) >= 0) {
+          get().beginDeathSaveRoll(sched, { ignoreStabilization: true });
+        }
+      });
+    }
+  },
 
   beginStunSaveRoll: (characterId) => {
     const char = get().characters.byId[characterId] ?? get().npcs.byId[characterId];
+    if (!char?.derivedStats) return;
+    const bonus = char.combatModifiers?.stunSave ?? 0;
+    const saveTarget = char.derivedStats.stunSaveTarget + bonus;
     const sessionId = get().session.id;
     set((state) => ({
       ui: {
         ...state.ui,
+        scheduleForcedDeathSaveOnDiceClose: null,
         isDiceRollerOpen: true,
         diceFormula: 'flat:1d10',
         diceRollIntent: {
           characterId,
           kind: 'stun',
+          saveTarget,
           sessionId: sessionId ?? undefined,
           speakerName: char?.name,
           rollSummary: 'Stun save',
@@ -1154,16 +1254,20 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
 
   beginStunRecoveryRoll: (characterId) => {
     const char = get().characters.byId[characterId] ?? get().npcs.byId[characterId];
-    if (!char?.isStunned) return;
+    if (!char?.isStunned || !char.derivedStats) return;
+    const bonus = char.combatModifiers?.stunSave ?? 0;
+    const saveTarget = char.derivedStats.stunSaveTarget + bonus;
     const sessionId = get().session.id;
     set((state) => ({
       ui: {
         ...state.ui,
+        scheduleForcedDeathSaveOnDiceClose: null,
         isDiceRollerOpen: true,
         diceFormula: 'flat:1d10',
         diceRollIntent: {
           characterId,
           kind: 'stun_recovery',
+          saveTarget,
           sessionId: sessionId ?? undefined,
           speakerName: char?.name,
           rollSummary: 'Stun recovery',
@@ -1178,14 +1282,17 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     if (target < 0) return;
     if (!options?.ignoreStabilization && char?.isStabilized) return;
     const sessionId = get().session.id;
+    const saveTarget = target + deathSaveBonusFromMods(char.combatModifiers);
     set((state) => ({
       ui: {
         ...state.ui,
+        scheduleForcedDeathSaveOnDiceClose: null,
         isDiceRollerOpen: true,
         diceFormula: 'flat:1d10',
         diceRollIntent: {
           characterId,
           kind: 'death',
+          saveTarget,
           sessionId: sessionId ?? undefined,
           speakerName: char?.name,
           rollSummary: 'Death save',
@@ -1207,18 +1314,19 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     const success = isFlatSaveSuccess(flatRollTotal, target);
     get().updateCharacterField(characterId, 'isStunned', !success);
 
-    // Chain into the forced Mortal-0 death save queued by applyDamage when a
-    // limb was severed. Consume the queue and re-arm the roller with a death
-    // intent (DiceRoller detects the intent change and auto-rolls once).
+    // Forced Mortal-0 death save (limb sever): open only after the player closes
+    // the stun roller so isStunned is settled first.
     const pending = get().ui.pendingForcedDeathSaveFor;
     if (pending && pending === characterId) {
-      set((s) => ({ ui: { ...s.ui, pendingForcedDeathSaveFor: null } }));
-      // Only chain if the character is still mortally wounded (dead save
-      // target is -1 when Uninjured/Light/Serious/Critical → no-op).
       const updatedChar = get().characters.byId[characterId] ?? get().npcs.byId[characterId];
-      if ((updatedChar?.derivedStats?.deathSaveTarget ?? -1) >= 0) {
-        get().beginDeathSaveRoll(characterId, { ignoreStabilization: true });
-      }
+      const needsForcedDeath = (updatedChar?.derivedStats?.deathSaveTarget ?? -1) >= 0;
+      set((s) => ({
+        ui: {
+          ...s.ui,
+          pendingForcedDeathSaveFor: null,
+          scheduleForcedDeathSaveOnDiceClose: needsForcedDeath ? characterId : null,
+        },
+      }));
     }
   },
 
@@ -1239,7 +1347,11 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
 
     if (needsDeath) {
       set((s) => ({
-        ui: { ...s.ui, startOfTurnDeathSaveAck: { characterId } },
+        ui: {
+          ...s.ui,
+          startOfTurnDeathSaveAck: { characterId },
+          scheduleForcedDeathSaveOnDiceClose: null,
+        },
       }));
       get().closeDiceRoller();
     } else {
@@ -1434,6 +1546,20 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
       },
     })),
 
+  setPendingGmAttackRequest: (payload) =>
+    set((state) => ({
+      ui: { ...state.ui, pendingGmAttackRequest: payload },
+    })),
+
+  ackGmAttackRollReply: (chatMessageId) =>
+    set((state) => ({
+      ui: {
+        ...state.ui,
+        pendingGmAttackRequest: null,
+        lastAnsweredGmAttackRequestMessageId: chatMessageId,
+      },
+    })),
+
   registerSessionBroadcastSend: (fn) => set({ sessionBroadcastSend: fn }),
 
   broadcastSessionRecordingState: async ({ active, actorName }) => {
@@ -1522,6 +1648,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
           settings: snapshot.session.settings,
           sessionSummary: snapshot.session.sessionSummary,
           combatState: snapshot.session.combatState,
+          viewerUserId: state.session.viewerUserId,
         },
         characters: { byId: byIdChar, allIds: allIdsChar },
         npcs: { byId: byIdNpc, allIds: allIdsNpc },
@@ -1538,19 +1665,59 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
           ...state.ui,
           ...voiceUiFieldsFromSessionSettings(snapshot.session.settings),
           startOfTurnDeathSaveAck: null,
+          scheduleForcedDeathSaveOnDiceClose: null,
           sessionVoiceStopAllTick: 0,
           sessionVoicePeerStartTick: 0,
+          pendingGmAttackRequest: null,
+          lastAnsweredGmAttackRequestMessageId: null,
         },
-        realtime: { optimisticBackupByCharacterId: {} },
+        realtime: { optimisticBackupByCharacterId: {}, maxMergedCharacterRowUpdatedAtMs: {} },
       };
     }),
 
-  applyRemoteCharacterUpsert: (row) =>
+  applyRemoteCharacterUpsert: (row) => {
+    let openRemoteDamageStunFor: string | null = null;
+    let remoteForcedDeathFor: string | null = null;
+
     set((state) => {
       const parsed = characterRowToCharacter(row);
       const existing = state.characters.byId[parsed.id] ?? state.npcs.byId[parsed.id];
-      const merged = existing ? mergeCharacterRowWithRealtime(existing, row) : parsed;
+      const maxApplied = state.realtime.maxMergedCharacterRowUpdatedAtMs[parsed.id] ?? null;
+      const merged = existing
+        ? mergeCharacterRowWithRealtime(existing, row, { maxAppliedRowUpdatedAtMs: maxApplied })
+        : parsed;
       const rec = recalcCharacter(merged);
+      const rowTs = postgresRowUpdatedAtMs(row);
+      const prevMax = state.realtime.maxMergedCharacterRowUpdatedAtMs[rec.id] ?? 0;
+      const nextMaxMerged =
+        rowTs != null
+          ? { ...state.realtime.maxMergedCharacterRowUpdatedAtMs, [rec.id]: Math.max(prevMax, rowTs) }
+          : state.realtime.maxMergedCharacterRowUpdatedAtMs;
+      const realtimePatch = {
+        ...state.realtime,
+        maxMergedCharacterRowUpdatedAtMs: nextMaxMerged,
+      };
+
+      const viewerId = state.session.viewerUserId;
+      const ownedPc =
+        rec.type === 'character' && !!viewerId && rec.userId === viewerId;
+      const damageIncreased =
+        !!existing &&
+        'damage' in row &&
+        rec.damage > existing.damage &&
+        rec.damage < 41;
+      if (ownedPc && damageIncreased && existing) {
+        openRemoteDamageStunFor = rec.id;
+        if (hasNewSeveredLimbCondition(existing, rec)) {
+          remoteForcedDeathFor = rec.id;
+        }
+      }
+
+      let uiPatch = state.ui;
+      if (remoteForcedDeathFor) {
+        uiPatch = { ...state.ui, pendingForcedDeathSaveFor: remoteForcedDeathFor };
+      }
+
       if (rec.type === 'npc') {
         const exists = state.npcs.allIds.includes(rec.id);
         return {
@@ -1558,6 +1725,8 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
             byId: { ...state.npcs.byId, [rec.id]: rec },
             allIds: exists ? state.npcs.allIds : [...state.npcs.allIds, rec.id],
           },
+          realtime: realtimePatch,
+          ui: uiPatch,
         };
       }
       const exists = state.characters.allIds.includes(rec.id);
@@ -1566,11 +1735,23 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
           byId: { ...state.characters.byId, [rec.id]: rec },
           allIds: exists ? state.characters.allIds : [...state.characters.allIds, rec.id],
         },
+        realtime: realtimePatch,
+        ui: uiPatch,
       };
-    }),
+    });
+
+    if (openRemoteDamageStunFor) {
+      queueMicrotask(() => {
+        get().beginStunSaveRoll(openRemoteDamageStunFor!);
+      });
+    }
+  },
 
   removeRemoteCharacter: (characterId) =>
     set((state) => {
+      const restMax = { ...state.realtime.maxMergedCharacterRowUpdatedAtMs };
+      delete restMax[characterId];
+      const rt = { ...state.realtime, maxMergedCharacterRowUpdatedAtMs: restMax };
       if (characterId in state.characters.byId) {
         const byId = { ...state.characters.byId };
         delete byId[characterId];
@@ -1579,6 +1760,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
             byId,
             allIds: state.characters.allIds.filter((id) => id !== characterId),
           },
+          realtime: rt,
         };
       }
       if (characterId in state.npcs.byId) {
@@ -1589,6 +1771,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
             byId,
             allIds: state.npcs.allIds.filter((id) => id !== characterId),
           },
+          realtime: rt,
         };
       }
       return state;
@@ -1625,6 +1808,37 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
         chat: { ...state.chat, messages: nextMessages },
         ui: clearGmPending ? { ...state.ui, gmNarrationPending: false } : state.ui,
       };
+    }),
+
+  mergeRemoteChatMessage: (message) =>
+    set((state) => {
+      const idx = state.chat.messages.findIndex((m) => m.id === message.id);
+      const next =
+        idx === -1
+          ? [...state.chat.messages, message]
+          : state.chat.messages.map((m) => (m.id === message.id ? message : m));
+      return {
+        chat: { ...state.chat, messages: sortChatMessagesByTimestamp(next) },
+      };
+    }),
+
+  removeChatMessagesByIds: (ids) =>
+    set((state) => {
+      const idSet = new Set(ids);
+      if (idSet.size === 0) return state;
+      const next = state.chat.messages.filter((m) => !idSet.has(m.id));
+      if (next.length === state.chat.messages.length) return state;
+      let ui = state.ui;
+      if (ui.pendingGmAttackRequest?.chatMessageId && idSet.has(ui.pendingGmAttackRequest.chatMessageId)) {
+        ui = { ...ui, pendingGmAttackRequest: null };
+      }
+      if (
+        ui.lastAnsweredGmAttackRequestMessageId &&
+        idSet.has(ui.lastAnsweredGmAttackRequestMessageId)
+      ) {
+        ui = { ...ui, lastAnsweredGmAttackRequestMessageId: null };
+      }
+      return { chat: { ...state.chat, messages: next }, ui };
     }),
 
   beginOptimisticCharacterEdit: (characterId) =>

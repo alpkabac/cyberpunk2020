@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useGameStore } from '@/lib/store/game-store';
 import { rollDice } from '@/lib/game-logic/dice';
+import { isFlatSaveSuccess } from '@/lib/game-logic/formulas';
 import { resolveAttackFumbleOutcome } from '@/lib/game-logic/fumbles';
 import { fnffAttackTotalMeetsDv } from '@/lib/game-logic/lookups';
 import {
@@ -38,7 +39,8 @@ export function DiceRoller() {
   const addPendingRollForVoice = useGameStore((state) => state.addPendingRollForVoice);
 
   const nonBlockingGm =
-    diceRollIntent?.kind === 'gm_request' && diceRollIntent.nonBlockingUi !== false;
+    (diceRollIntent?.kind === 'gm_request' && diceRollIntent.nonBlockingUi !== false) ||
+    (diceRollIntent?.kind === 'attack' && diceRollIntent.nonBlockingUi === true);
   const isStunOverrideRequest = diceRollIntent?.kind === 'stun_override_request';
 
   const [customFormula, setCustomFormula] = useState('');
@@ -54,6 +56,27 @@ export function DiceRoller() {
   const [sheetSending, setSheetSending] = useState(false);
   const [saveForVoiceHint, setSaveForVoiceHint] = useState(false);
   const [stunOverrideNote, setStunOverrideNote] = useState('');
+
+  const lastRollRef = useRef<DiceRollEntry | null>(null);
+  useEffect(() => {
+    lastRollRef.current = lastRoll;
+  }, [lastRoll]);
+
+  const flatIntentKey =
+    diceRollIntent?.kind === 'stun' ||
+    diceRollIntent?.kind === 'stun_recovery' ||
+    diceRollIntent?.kind === 'death'
+      ? `${diceRollIntent.kind}:${diceRollIntent.characterId}`
+      : '';
+
+  useEffect(() => {
+    if (!isDiceRollerOpen || !flatIntentKey) return;
+    setLastRoll(null);
+    setStabilizationOutcome(null);
+    setFumbleLines(null);
+  }, [isDiceRollerOpen, flatIntentKey]);
+  /** Prevents double POST if "Send now" and close overlap. */
+  const sentGmRollEntryIdsRef = useRef<Set<number>>(new Set());
 
   const doRoll = useCallback((formula: string) => {
     const result = rollDice(formula);
@@ -160,9 +183,17 @@ export function DiceRoller() {
     if (lastAutoRolledKeyRef.current === key) return;
     lastAutoRolledKeyRef.current = key;
 
+    const skipAutoRollPlayerFlatSave =
+      diceRollIntent &&
+      (diceRollIntent.kind === 'stun' ||
+        diceRollIntent.kind === 'stun_recovery' ||
+        diceRollIntent.kind === 'death');
+
     const id = requestAnimationFrame(() => {
       setCustomFormula(diceFormula);
-      doRoll(diceFormula);
+      if (!skipAutoRollPlayerFlatSave) {
+        doRoll(diceFormula);
+      }
     });
     return () => cancelAnimationFrame(id);
   }, [isDiceRollerOpen, diceFormula, doRoll, diceRollIntent]);
@@ -173,15 +204,95 @@ export function DiceRoller() {
     }
   }, [diceRollIntent]);
 
-  const handleClose = useCallback(() => {
-    setFumbleLines(null);
-    setStabilizationOutcome(null);
+  const sendRollEntryToGm = useCallback(async (entry: DiceRollEntry): Promise<boolean> => {
+    const payload = entry.sendToGm;
+    if (!payload) return true;
+    if (sentGmRollEntryIdsRef.current.has(entry.id)) return true;
     setSheetSendError(null);
-    setSheetSending(false);
-    setSaveForVoiceHint(false);
-    setStunOverrideNote('');
-    closeDiceRoller();
-  }, [closeDiceRoller]);
+    setSheetSending(true);
+    try {
+      const accessToken = await getAccessTokenForApi(supabase);
+      if (!accessToken) {
+        setSheetSendError('Not signed in');
+        return false;
+      }
+      const pending = useGameStore.getState().ui.pendingVoiceGm;
+      const merge =
+        pending &&
+        pending.sessionId === payload.sessionId
+          ? mergeVoiceWithSingleRollForGm(pending, payload.playerMessage, entry.timestamp)
+          : null;
+      const res = await fetch('/api/gm', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          sessionId: payload.sessionId,
+          playerMessage: merge ? merge.playerMessage : payload.playerMessage,
+          speakerName: payload.speakerName,
+          ...(merge?.playerMessageMetadata
+            ? { playerMessageMetadata: merge.playerMessageMetadata }
+            : {}),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setSheetSendError((data as { error?: string }).error ?? res.statusText ?? 'Request failed');
+        return false;
+      }
+      applyGmPostSuccessToStore(data);
+      if (merge) {
+        useGameStore.getState().clearPendingVoiceGm();
+      }
+      const store = useGameStore.getState();
+      const intent = entry.intentSnapshot;
+      const closeAfterSend =
+        intent?.kind === 'gm_request' ||
+        (intent?.kind === 'attack' && intent.promptedByGmRequest === true);
+      sentGmRollEntryIdsRef.current.add(entry.id);
+      if (intent?.kind === 'attack' && intent.promptedByGmRequest) {
+        const reqId =
+          store.ui.pendingGmAttackRequest?.chatMessageId ?? intent.gmRequestChatMessageId;
+        if (reqId) store.ackGmAttackRollReply(reqId);
+      }
+      if (closeAfterSend) {
+        store.clearDiceRollIntent();
+        store.closeDiceRoller();
+      }
+      return true;
+    } catch (e) {
+      setSheetSendError(e instanceof Error ? e.message : String(e));
+      return false;
+    } finally {
+      setSheetSending(false);
+    }
+  }, []);
+
+  const handleClose = useCallback(() => {
+    void (async () => {
+      const entry = lastRollRef.current;
+      const intent = entry?.intentSnapshot;
+      const autoSendGmReply =
+        entry?.sendToGm &&
+        intent &&
+        (intent.kind === 'gm_request' ||
+          (intent.kind === 'attack' && intent.promptedByGmRequest === true));
+      if (autoSendGmReply) {
+        const ok = await sendRollEntryToGm(entry);
+        if (!ok) return;
+        if (!useGameStore.getState().ui.isDiceRollerOpen) return;
+      }
+      setFumbleLines(null);
+      setStabilizationOutcome(null);
+      setSheetSendError(null);
+      setSheetSending(false);
+      setSaveForVoiceHint(false);
+      setStunOverrideNote('');
+      closeDiceRoller();
+    })();
+  }, [closeDiceRoller, sendRollEntryToGm]);
 
   const sendStunOverrideToGm = useCallback(async () => {
     const intent = useGameStore.getState().ui.diceRollIntent;
@@ -241,58 +352,9 @@ export function DiceRoller() {
   }, [stunOverrideNote]);
 
   const sendSheetRollToGm = useCallback(async () => {
-    const payload = lastRoll?.sendToGm;
-    if (!payload) return;
-    setSheetSendError(null);
-    setSheetSending(true);
-    try {
-      const accessToken = await getAccessTokenForApi(supabase);
-      if (!accessToken) {
-        setSheetSendError('Not signed in');
-        return;
-      }
-      const pending = useGameStore.getState().ui.pendingVoiceGm;
-      const merge =
-        pending &&
-        pending.sessionId === payload.sessionId &&
-        lastRoll
-          ? mergeVoiceWithSingleRollForGm(pending, payload.playerMessage, lastRoll.timestamp)
-          : null;
-      const res = await fetch('/api/gm', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({
-          sessionId: payload.sessionId,
-          playerMessage: merge ? merge.playerMessage : payload.playerMessage,
-          speakerName: payload.speakerName,
-          ...(merge?.playerMessageMetadata
-            ? { playerMessageMetadata: merge.playerMessageMetadata }
-            : {}),
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setSheetSendError((data as { error?: string }).error ?? res.statusText ?? 'Request failed');
-        return;
-      }
-      applyGmPostSuccessToStore(data);
-      if (merge) {
-        useGameStore.getState().clearPendingVoiceGm();
-      }
-      const store = useGameStore.getState();
-      if (store.ui.diceRollIntent?.kind === 'gm_request') {
-        store.clearDiceRollIntent();
-        store.closeDiceRoller();
-      }
-    } catch (e) {
-      setSheetSendError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSheetSending(false);
-    }
-  }, [lastRoll]);
+    if (!lastRoll) return;
+    await sendRollEntryToGm(lastRoll);
+  }, [lastRoll, sendRollEntryToGm]);
 
   const saveRollForNextVoice = useCallback(() => {
     if (!lastRoll?.sendToGm) {
@@ -405,6 +467,38 @@ export function DiceRoller() {
             </div>
           ) : lastRoll ? (
             <div>
+              {lastRoll.intentSnapshot &&
+                (lastRoll.intentSnapshot.kind === 'stun' ||
+                  lastRoll.intentSnapshot.kind === 'stun_recovery' ||
+                  lastRoll.intentSnapshot.kind === 'death') &&
+                typeof lastRoll.intentSnapshot.saveTarget === 'number' && (
+                  <div className="mb-3 text-left border-2 border-black bg-amber-50 p-2 text-xs text-black space-y-1">
+                    <div className="font-bold uppercase text-amber-950">FNFF flat save</div>
+                    <p>
+                      Need <strong>≤ {lastRoll.intentSnapshot.saveTarget}</strong> on this d10 (low is good). Rolled{' '}
+                      <strong>{lastRoll.result.total}</strong> —{' '}
+                      {lastRoll.intentSnapshot.kind === 'death' ? (
+                        isFlatSaveSuccess(lastRoll.result.total, lastRoll.intentSnapshot.saveTarget) ? (
+                          <span className="text-green-900 font-semibold">survived (damage unchanged)</span>
+                        ) : (
+                          <span className="text-red-900 font-semibold">
+                            failed — marked dead (damage 41)
+                          </span>
+                        )
+                      ) : lastRoll.intentSnapshot.kind === 'stun_recovery' ? (
+                        isFlatSaveSuccess(lastRoll.result.total, lastRoll.intentSnapshot.saveTarget) ? (
+                          <span className="text-green-900 font-semibold">recovered — no longer STUNNED</span>
+                        ) : (
+                          <span className="text-amber-950 font-semibold">still STUNNED</span>
+                        )
+                      ) : isFlatSaveSuccess(lastRoll.result.total, lastRoll.intentSnapshot.saveTarget) ? (
+                        <span className="text-green-900 font-semibold">stayed conscious (not stunned)</span>
+                      ) : (
+                        <span className="text-amber-950 font-semibold">STUNNED</span>
+                      )}
+                    </p>
+                  </div>
+                )}
               <div className="text-xs font-mono text-black uppercase mb-1 break-all">
                 {displayFormula(lastRoll.formula)}
               </div>
@@ -532,6 +626,14 @@ export function DiceRoller() {
               )}
               {lastRoll.sendToGm && (
                 <div className="mt-3 text-left border-2 border-black bg-[#e8e8d0] p-2 space-y-2">
+                  {(lastRoll.intentSnapshot?.kind === 'gm_request' ||
+                    (lastRoll.intentSnapshot?.kind === 'attack' &&
+                      lastRoll.intentSnapshot.promptedByGmRequest)) && (
+                    <p className="text-[10px] text-gray-800 leading-snug">
+                      Replying to the AI-GM: closing this window after you roll also sends the result (same as Send
+                      now).
+                    </p>
+                  )}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <button
                       type="button"
@@ -565,7 +667,40 @@ export function DiceRoller() {
               )}
             </div>
           ) : (
-            <div className="text-black text-sm py-6">Roll or enter a formula</div>
+            <div className="text-black text-sm py-4 space-y-3">
+              {diceRollIntent &&
+                (diceRollIntent.kind === 'stun' ||
+                  diceRollIntent.kind === 'stun_recovery' ||
+                  diceRollIntent.kind === 'death') && (
+                  <div className="text-left border-2 border-black bg-amber-50 p-2 text-xs">
+                    <div className="font-bold uppercase text-amber-950 mb-1">FNFF flat save</div>
+                    {typeof diceRollIntent.saveTarget === 'number' ? (
+                      <p className="text-gray-900 leading-relaxed">
+                        Success if you roll <strong>≤ {diceRollIntent.saveTarget}</strong> on one d10 — low numbers are
+                        good (not a &quot;beat the DC with a high roll&quot; check).
+                      </p>
+                    ) : (
+                      <p className="text-gray-900 leading-relaxed">
+                        Success if you roll <strong>≤ your save target</strong> on one d10 (see Combat tab). This replay
+                        predates target hints in the roller.
+                      </p>
+                    )}
+                    {diceRollIntent.kind === 'stun_recovery' && (
+                      <p className="text-gray-800 mt-1.5">
+                        Start-of-turn <strong>stun recovery</strong>. If you also owe a mortal <strong>death save</strong>
+                        , the app will prompt for it right after this roll.
+                      </p>
+                    )}
+                    {diceRollIntent.kind === 'death' && (
+                      <p className="text-gray-800 mt-1.5">
+                        <strong>Death save:</strong> success only keeps you alive — it does not reduce damage or heal
+                        wounds. Fail → dead (41 damage).
+                      </p>
+                    )}
+                  </div>
+                )}
+              <p>Roll or enter a formula</p>
+            </div>
           )}
         </div>
 

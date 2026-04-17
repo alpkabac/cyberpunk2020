@@ -4,7 +4,7 @@
  */
 
 export const MAP_GRID_DEFAULT_COLS = 20;
-export const MAP_GRID_DEFAULT_ROWS = 12;
+export const MAP_GRID_DEFAULT_ROWS = 20;
 export const MAP_GRID_MIN = 2;
 export const MAP_GRID_MAX = 99;
 

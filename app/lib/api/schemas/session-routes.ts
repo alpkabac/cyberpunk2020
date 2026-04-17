@@ -24,6 +24,32 @@ export const gmPostBodySchema = z.object({
 
 export type GmPostBody = z.infer<typeof gmPostBodySchema>;
 
+/** PATCH /api/session/chat-message */
+export const chatMessagePatchBodySchema = z.object({
+  sessionId: uuid,
+  messageId: uuid,
+  text: z.preprocess(trimString, z.string().min(1).max(120_000)),
+});
+
+export type ChatMessagePatchBody = z.infer<typeof chatMessagePatchBodySchema>;
+
+/** POST /api/session/chat-messages/truncate */
+export const chatMessagesTruncateBodySchema = z.object({
+  sessionId: uuid,
+  fromMessageId: uuid,
+});
+
+export type ChatMessagesTruncateBody = z.infer<typeof chatMessagesTruncateBodySchema>;
+
+/** POST /api/gm/regenerate */
+export const gmRegenerateBodySchema = z.object({
+  sessionId: uuid,
+  narrationMessageId: uuid,
+  loreTokenBudget: z.number().int().positive().max(50_000).optional(),
+});
+
+export type GmRegenerateBody = z.infer<typeof gmRegenerateBodySchema>;
+
 /** POST /api/session/voice-turn/merge */
 export const voiceTurnMergeBodySchema = z.object({
   sessionId: uuid,

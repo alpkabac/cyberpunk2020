@@ -34,9 +34,10 @@ export function StartOfTurnDeathSaveAck() {
           Stun recovery done
         </h2>
         <p className="text-xs text-zinc-300 leading-relaxed">
-          <span className="font-medium text-zinc-100">{charName}</span> — next step is the{' '}
-          <span className="text-amber-200/90">ongoing death save</span> (mortal wound). Roll when
-          ready.
+          <span className="font-medium text-zinc-100">{charName}</span> — next is the{' '}
+          <span className="text-amber-200/90">ongoing death save</span> (mortal wound). On a flat d10 you need{' '}
+          <span className="text-zinc-100 font-medium">≤ your death-save target</span> (Body Type − mortal level, plus
+          any sheet mods) — low rolls succeed; surviving does not heal damage.
         </p>
         <div className="flex flex-col-reverse sm:flex-row gap-2 sm:justify-end">
           <button

@@ -12,7 +12,7 @@ import {
   pctToCell,
 } from './grid';
 
-function cellKey(c: number, r: number): string {
+export function cellKey(c: number, r: number): string {
   return `${c},${r}`;
 }
 
@@ -44,7 +44,7 @@ export function bresenhamLine(c0: number, r0: number, c1: number, r1: number): A
   return out;
 }
 
-function expandCoverCells(regions: MapCoverRegion[]): Set<string> {
+export function expandCoverCells(regions: MapCoverRegion[]): Set<string> {
   const set = new Set<string>();
   for (const reg of regions) {
     const cA = Math.min(reg.c0, reg.c1);

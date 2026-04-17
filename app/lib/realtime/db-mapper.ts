@@ -6,9 +6,10 @@ import type {
   Armor,
   Character,
   CharacterCondition,
+  CharacterItem,
   ChatMessage,
   Cyberware,
-  Item,
+  MiscItem,
   Program,
   RoleType,
   Scene,
@@ -67,7 +68,7 @@ function normalizeZoneSp(raw: unknown): { stoppingPower: number; ablation: numbe
 }
 
 /** Coerce JSONB / legacy rows into app Item shapes so Combat/Gear tabs recognize weapons & armor. */
-export function normalizeCharacterItems(raw: unknown): Item[] {
+export function normalizeCharacterItems(raw: unknown): CharacterItem[] {
   if (raw == null) return [];
   let data: unknown = raw;
   if (typeof raw === 'string') {
@@ -79,7 +80,7 @@ export function normalizeCharacterItems(raw: unknown): Item[] {
   }
   if (!Array.isArray(data)) return [];
 
-  const out: Item[] = [];
+  const out: CharacterItem[] = [];
   for (const el of data) {
     const item = normalizeOneItem(el);
     if (item) out.push(item);
@@ -87,7 +88,7 @@ export function normalizeCharacterItems(raw: unknown): Item[] {
   return out;
 }
 
-export function normalizeOneItem(entry: unknown): Item | null {
+export function normalizeOneItem(entry: unknown): CharacterItem | null {
   if (!entry || typeof entry !== 'object') return null;
   const o = entry as Record<string, unknown>;
 
@@ -217,7 +218,8 @@ export function normalizeOneItem(entry: unknown): Item | null {
     return p;
   }
 
-  return { ...base, type: 'misc' };
+  const m: MiscItem = { ...base, type: 'misc' };
+  return m;
 }
 
 function num(v: unknown, fallback = 0): number {
@@ -300,8 +302,8 @@ const DEFAULT_SETTINGS: SessionSettings = {
   mapGridCols: MAP_GRID_DEFAULT_COLS,
   mapGridRows: MAP_GRID_DEFAULT_ROWS,
   mapShowGrid: true,
-  mapSnapToGrid: false,
-  mapMetersPerSquare: 0,
+  mapSnapToGrid: true,
+  mapMetersPerSquare: 5,
 };
 
 export function parseSceneJson(v: unknown): Scene {
@@ -360,12 +362,37 @@ export function parseSessionSettingsJson(v: unknown): SessionSettings {
   };
 }
 
+/** Parse Postgres `TIMESTAMPTZ` from a Realtime/API row (ISO string or Date). */
+export function postgresRowUpdatedAtMs(row: Record<string, unknown>): number | null {
+  const v = row.updated_at;
+  if (v == null) return null;
+  if (typeof v === 'string') {
+    const t = Date.parse(v);
+    return Number.isNaN(t) ? null : t;
+  }
+  if (v instanceof Date) return v.getTime();
+  return null;
+}
+
+export type MergeCharacterRowOptions = {
+  /**
+   * Largest `updated_at` already merged for this character. When Realtime delivers
+   * an out-of-order row with an older timestamp, ignore a lower `damage` so stale
+   * replicas cannot "heal" the wound track after newer damage was applied.
+   */
+  maxAppliedRowUpdatedAtMs?: number | null;
+};
+
 /**
  * Merge a possibly partial Realtime/Postgres row into an existing character.
  * Without this, UPDATE replicas that omit unchanged JSON columns would map to
  * empty skills/items and wipe the sheet.
  */
-export function mergeCharacterRowWithRealtime(existing: Character, row: Record<string, unknown>): Character {
+export function mergeCharacterRowWithRealtime(
+  existing: Character,
+  row: Record<string, unknown>,
+  options?: MergeCharacterRowOptions,
+): Character {
   const incoming = characterRowToCharacter(row);
   const out: Character = { ...existing, ...incoming };
   if (!('items' in row)) out.items = existing.items;
@@ -379,6 +406,38 @@ export function mergeCharacterRowWithRealtime(existing: Character, row: Record<s
   if (!('lifepath' in row)) out.lifepath = existing.lifepath;
   if (!('combat_modifiers' in row)) out.combatModifiers = existing.combatModifiers;
   if (!('team' in row)) out.team = existing.team;
+  // Partial UPDATE replicas often omit unchanged columns; scalar defaults in
+  // `characterRowToCharacter` must not clobber existing sheet state.
+  if (!('damage' in row)) out.damage = existing.damage;
+  if ('damage' in row) {
+    const incomingDamage = num(row.damage, 0);
+    const rowTs = postgresRowUpdatedAtMs(row);
+    const maxApplied = options?.maxAppliedRowUpdatedAtMs ?? null;
+    if (
+      maxApplied != null &&
+      rowTs != null &&
+      rowTs < maxApplied &&
+      incomingDamage < existing.damage
+    ) {
+      out.damage = existing.damage;
+    }
+  }
+  if (!('is_stunned' in row)) out.isStunned = existing.isStunned;
+  if (!('is_stabilized' in row)) out.isStabilized = existing.isStabilized;
+  if (!('eurobucks' in row)) out.eurobucks = existing.eurobucks;
+  if (!('reputation' in row)) out.reputation = existing.reputation;
+  if (!('improvement_points' in row)) out.improvementPoints = existing.improvementPoints;
+  if (!('age' in row)) out.age = existing.age;
+  if (!('points' in row)) out.points = existing.points;
+  if (!('image_url' in row)) out.imageUrl = existing.imageUrl;
+  if (!('name' in row)) out.name = existing.name;
+  if (!('user_id' in row)) out.userId = existing.userId;
+  if (!('session_id' in row)) out.sessionId = existing.sessionId;
+  if (!('role' in row)) out.role = existing.role;
+  if (!('type' in row)) {
+    out.type = existing.type;
+    out.isNpc = existing.isNpc;
+  }
   return out;
 }
 

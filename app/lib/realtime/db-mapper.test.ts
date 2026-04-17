@@ -202,4 +202,50 @@ describe('mergeCharacterRowWithRealtime', () => {
     expect(merged.items[0].name).toBe('Pistol');
     expect(merged.skills).toHaveLength(1);
   });
+
+  it('preserves damage when row only patches conditions (Realtime partial UPDATE)', () => {
+    const existing = { ...minimalChar('c1'), damage: 15 };
+    const row: Record<string, unknown> = {
+      id: 'c1',
+      session_id: 's',
+      conditions: [{ name: 'blinded', duration: null }],
+    };
+    const merged = mergeCharacterRowWithRealtime(existing, row);
+    expect(merged.damage).toBe(15);
+    expect(merged.conditions).toEqual([{ name: 'blinded', duration: null }]);
+  });
+
+  it('ignores out-of-order lower damage when row updated_at is older than max applied', () => {
+    const existing = { ...minimalChar('c1'), damage: 30 };
+    const row: Record<string, unknown> = {
+      id: 'c1',
+      session_id: 's',
+      user_id: null,
+      name: 'N',
+      type: 'npc',
+      damage: 12,
+      updated_at: '2026-01-01T12:00:00.000Z',
+    };
+    const merged = mergeCharacterRowWithRealtime(existing, row, {
+      maxAppliedRowUpdatedAtMs: Date.parse('2026-01-01T12:00:01.000Z'),
+    });
+    expect(merged.damage).toBe(30);
+  });
+
+  it('applies lower damage when row updated_at is newer (remote heal)', () => {
+    const existing = { ...minimalChar('c1'), damage: 30 };
+    const row: Record<string, unknown> = {
+      id: 'c1',
+      session_id: 's',
+      user_id: null,
+      name: 'N',
+      type: 'npc',
+      damage: 12,
+      updated_at: '2026-01-01T12:00:02.000Z',
+    };
+    const merged = mergeCharacterRowWithRealtime(existing, row, {
+      maxAppliedRowUpdatedAtMs: Date.parse('2026-01-01T12:00:01.000Z'),
+    });
+    expect(merged.damage).toBe(12);
+  });
 });

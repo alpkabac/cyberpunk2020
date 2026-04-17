@@ -412,17 +412,60 @@ export function maxLayeredSP(spValues: number[]): number {
 const LIMB_ZONES: readonly Zone[] = ['rArm', 'lArm', 'rLeg', 'lLeg'];
 
 /**
+ * FNFF proportional armor/cover (CP2020Gameplay.md L6297–6338): difference between larger and smaller SP → bonus added to larger.
+ */
+export function proportionalArmorBonus(spDifference: number): number {
+  const d = Math.max(0, Math.floor(spDifference));
+  if (d <= 4) return 5;
+  if (d <= 8) return 4;
+  if (d <= 14) return 3;
+  if (d <= 20) return 2;
+  if (d <= 26) return 1;
+  return 0;
+}
+
+/**
+ * Combined stopping power for cover + personal armor after AP is applied to each layer separately.
+ * If either layer is 0, returns the other (no proportional step).
+ */
+export function combinedCoverAndArmorSp(coverEffectiveSp: number, armorEffectiveSp: number): number {
+  const c = Math.max(0, Math.floor(coverEffectiveSp));
+  const a = Math.max(0, Math.floor(armorEffectiveSp));
+  if (c <= 0) return a;
+  if (a <= 0) return c;
+  const larger = Math.max(c, a);
+  const smaller = Math.min(c, a);
+  return larger + proportionalArmorBonus(larger - smaller);
+}
+
+/**
+ * Multiple cover regions along the bullet path: combine from innermost (nearest target) outward (L6297).
+ */
+export function stackOuterToInnerCoverSp(outerFirstEffectiveSps: number[]): number {
+  if (outerFirstEffectiveSps.length === 0) return 0;
+  const innerFirst = [...outerFirstEffectiveSps].reverse();
+  let acc = innerFirst[0];
+  for (let i = 1; i < innerFirst.length; i++) {
+    acc = combinedCoverAndArmorSp(innerFirst[i], acc);
+  }
+  return acc;
+}
+
+/**
  * Full damage pipeline: calculates final damage after all reductions.
  * Returns the actual damage to add plus flags for book-mandated side effects.
  *
  * Book refs (CP2020Gameplay.md §7 Friday Night Firefight):
  *  - Head Hits: "A head hit always doubles damage." (L6426)
  *  - AP: halves SP before subtraction (L6346)
+ *  - Cover + armor: proportional combination when both apply (L6297); shoot-through cover (L6428–6434)
  *  - BTM min-1: "A Body Type Modifier may never reduce damage to less than one" (L6407)
  *  - Ablation / Staged Penetration: ablate "each time the armor is struck by a PENETRATING
  *    attack (i.e., an attack that actually exceeds the armor's SP)" (L6350)
  *  - Limb Loss: ">8 damage to a limb area in any one attack → severed, immediate Death
  *    Save at Mortal 0. A head wound of this type will kill automatically." (L6424)
+ *
+ * @param coverStackedSp — pre-stacked effective SP for all map cover along the fire line (after per-region ablation); 0 = none.
  */
 export function calculateDamage(
   rawDamage: number,
@@ -430,6 +473,7 @@ export function calculateDamage(
   sp: number,
   btm: number,
   isAP: boolean,
+  coverStackedSp = 0,
 ): {
   finalDamage: number;
   headMultiplied: boolean;
@@ -453,10 +497,14 @@ export function calculateDamage(
     headMultiplied = true;
   }
 
-  let effectiveSP = Math.max(0, Math.floor(sp || 0));
+  let effArmor = Math.max(0, Math.floor(sp || 0));
+  let effCover = Math.max(0, Math.floor(coverStackedSp || 0));
   if (isAP) {
-    effectiveSP = Math.floor(effectiveSP / 2);
+    effArmor = Math.floor(effArmor / 2);
+    effCover = Math.floor(effCover / 2);
   }
+
+  const effectiveSP = combinedCoverAndArmorSp(effCover, effArmor);
 
   const spReduction = Math.min(damage, effectiveSP);
   damage = Math.max(0, damage - effectiveSP);

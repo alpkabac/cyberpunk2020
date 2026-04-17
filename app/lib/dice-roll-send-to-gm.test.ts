@@ -50,11 +50,13 @@ describe('buildGmDiceRollMessage', () => {
 
   it('uses default labels for stun when rollSummary omitted', () => {
     const m = buildGmDiceRollMessage(
-      { kind: 'stun', characterId: 'c1', sessionId: 's', speakerName: 'Jane' },
+      { kind: 'stun', characterId: 'c1', saveTarget: 6, sessionId: 's', speakerName: 'Jane' },
       'flat:1d10',
       { total: 4, rolls: [4] },
     );
     expect(m!.playerMessage).toContain('Stun save');
+    expect(m!.playerMessage).toContain('≤6');
+    expect(m!.playerMessage).toContain('stayed conscious');
   });
 
   it('formats attack with DV as HIT or MISS and target', () => {

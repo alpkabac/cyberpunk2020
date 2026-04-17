@@ -4,7 +4,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useGameStore, selectAllCharacters, selectCharacterById } from './game-store';
-import { Character, createStatBlock, Item, ChatMessage, Token, Armor } from '../types';
+import { Character, createStatBlock, CharacterItem, ChatMessage, Token, Armor } from '../types';
 
 describe('Game Store', () => {
   beforeEach(() => {
@@ -360,6 +360,79 @@ describe('Game Store', () => {
       expect(after?.hitLocations.Torso.ablation).toBe(0);
     });
 
+    it('increments map cover ablation on penetrating hit and removes region when SP is exhausted', () => {
+      const c: Character = {
+        id: 'char-cov',
+        userId: 'u',
+        sessionId: 's',
+        name: 'Cover Test',
+        type: 'character',
+        isNpc: false,
+        team: '',
+        imageUrl: '',
+        role: 'Solo',
+        age: 25,
+        points: 0,
+        stats: {
+          int: createStatBlock(5, 0),
+          ref: createStatBlock(5, 0),
+          tech: createStatBlock(5, 0),
+          cool: createStatBlock(5, 0),
+          attr: createStatBlock(5, 0),
+          luck: createStatBlock(5, 0),
+          ma: createStatBlock(5, 0),
+          bt: createStatBlock(8, 0),
+          emp: createStatBlock(5, 0),
+        },
+        specialAbility: { name: '', value: 0 },
+        reputation: 0,
+        improvementPoints: 0,
+        skills: [],
+        damage: 0,
+        isStunned: false,
+        isStabilized: false,
+        conditions: [],
+        hitLocations: {
+          Head: { location: [1], stoppingPower: 0, ablation: 0 },
+          Torso: { location: [2, 3, 4], stoppingPower: 0, ablation: 0 },
+          rArm: { location: [5], stoppingPower: 0, ablation: 0 },
+          lArm: { location: [6], stoppingPower: 0, ablation: 0 },
+          lLeg: { location: [7, 8], stoppingPower: 0, ablation: 0 },
+          rLeg: { location: [9, 10], stoppingPower: 0, ablation: 0 },
+        },
+        sdp: {
+          sum: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },
+          current: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },
+        },
+        eurobucks: 0,
+        items: [],
+        netrunDeck: null,
+        lifepath: null,
+      };
+
+      useGameStore.getState().addCharacter(c);
+      useGameStore.getState().setMapCoverRegions([
+        { id: 'cov1', c0: 0, c1: 0, r0: 0, r1: 0, coverTypeId: 'wood_door', spAblation: 0 },
+      ]);
+      useGameStore.getState().applyDamage('char-cov', 8, 'Torso', false, false, null, {
+        stackedSp: 5,
+        regionIds: ['cov1'],
+      });
+      let regions = useGameStore.getState().map.coverRegions;
+      expect(regions).toHaveLength(1);
+      expect(regions[0].spAblation).toBe(1);
+
+      useGameStore.getState().setMapCoverRegions([
+        { id: 'cov1', c0: 0, c1: 0, r0: 0, r1: 0, coverTypeId: 'wood_door', spAblation: 4 },
+      ]);
+      useGameStore.getState().applyDamage('char-cov', 8, 'Torso', false, false, null, {
+        stackedSp: 5,
+        regionIds: ['cov1'],
+      });
+      regions = useGameStore.getState().map.coverRegions;
+      expect(regions).toEqual([]);
+    });
+
     it('head hit with >8 final damage kills instantly (FNFF limb-loss rule)', () => {
       const c: Character = {
         id: 'char-hk',
@@ -711,7 +784,7 @@ describe('Game Store', () => {
         lifepath: null,
       };
 
-      const item: Item = {
+      const item: CharacterItem = {
         id: 'item-1',
         name: 'Test Item',
         type: 'misc',

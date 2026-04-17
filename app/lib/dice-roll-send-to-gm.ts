@@ -1,5 +1,6 @@
 import type { Character, DiceRollIntent, PendingRollForVoice, PendingVoiceGmPayload, RollResult } from '@/lib/types';
 import { fnffAttackTotalMeetsDv } from '@/lib/game-logic/lookups';
+import { isFlatSaveSuccess } from '@/lib/game-logic/formulas';
 
 /** Payload for POST `/api/gm` — stun override referee request (no roll). */
 export function buildStunOverrideGmPayload(params: {
@@ -119,6 +120,31 @@ export function buildGmDiceRollMessage(
       sessionId,
       speakerName: speaker,
       playerMessage: `${speaker} rolled **${result.total}** for ${label}${tgtPart}${bracket} — **${hit ? 'HIT' : 'MISS'}** vs DV **${dv}** (${formula})`,
+    };
+  }
+
+  if (
+    (intent.kind === 'stun' || intent.kind === 'stun_recovery' || intent.kind === 'death') &&
+    typeof intent.saveTarget === 'number'
+  ) {
+    const saveTarget = intent.saveTarget;
+    const success = isFlatSaveSuccess(result.total, saveTarget);
+    const outcome =
+      intent.kind === 'death'
+        ? success
+          ? '**survived**'
+          : '**DIED** (failed death save — damage set to 41)'
+        : intent.kind === 'stun_recovery'
+          ? success
+            ? '**recovered** (no longer STUNNED)'
+            : '**still STUNNED**'
+          : success
+            ? '**stayed conscious** (not stunned)'
+            : '**STUNNED**';
+    return {
+      sessionId,
+      speakerName: speaker,
+      playerMessage: `${speaker} rolled **${result.total}** for ${label} — FNFF: need **≤${saveTarget}** on flat d10 — ${outcome} (${formula})`,
     };
   }
 

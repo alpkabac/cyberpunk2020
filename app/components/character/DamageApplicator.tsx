@@ -28,6 +28,10 @@ export interface DamageApplicatorPreset {
   hitLocationMode?: HitLocationMode;
   /** When set, damage is applied to this character/NPC instead of the open sheet’s character. */
   targetCharacterId?: string;
+  /** Pre-stacked map cover SP along shooter→target line (Combat tab / tactical map). */
+  coverStackedSp?: number;
+  /** Regions on that line (for staged cover penetration on the map). */
+  coverRegionIds?: string[];
 }
 
 function initialDamageAmount(preset: DamageApplicatorPreset | null | undefined): number {
@@ -112,9 +116,12 @@ export function DamageApplicator({
     return damageAmount;
   };
 
+  const coverStacked = Math.max(0, Math.floor(preset?.coverStackedSp ?? 0));
+  const coverRegionIds = preset?.coverRegionIds?.length ? preset.coverRegionIds : [];
+
   const getPreview = (location: Zone | null) => {
     const sp = getSP(location);
-    return calculateDamage(effectiveBaseDamage(), location, sp, btm, isAP);
+    return calculateDamage(effectiveBaseDamage(), location, sp, btm, isAP, coverStacked);
   };
 
   const handleApplyDamage = (location: Zone | null) => {
@@ -127,6 +134,9 @@ export function DamageApplicator({
         isAP,
         pointBlank,
         weaponDamageFormula.trim() || null,
+        coverRegionIds.length > 0 || coverStacked > 0
+          ? { stackedSp: coverStacked, regionIds: coverRegionIds }
+          : null,
       );
       onClose();
     }
@@ -185,6 +195,17 @@ export function DamageApplicator({
           {preset && !preset.pointBlank && preset.weaponDamageFormula && (
             <p className="text-xs font-bold uppercase border-2 border-gray-400 bg-gray-50 px-2 py-1.5 mb-3">
               Pre-filled weapon code — roll damage here or use point blank at muzzle range.
+            </p>
+          )}
+          {(coverStacked > 0 || coverRegionIds.length > 0) && (
+            <p className="text-[11px] border-2 border-amber-700 bg-amber-50 text-amber-950 px-2 py-1.5 mb-3 leading-snug">
+              <strong>Map cover:</strong> stacked SP <strong>{coverStacked}</strong> vs armor (proportional FNFF).
+              {coverRegionIds.length > 0 && (
+                <>
+                  {' '}
+                  Penetrating hits add +1 ablation to regions: <span className="font-mono">{coverRegionIds.join(', ')}</span>.
+                </>
+              )}
             </p>
           )}
 

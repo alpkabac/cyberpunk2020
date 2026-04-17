@@ -41,6 +41,10 @@ export function coverTypeLabel(id: string): string {
   return CP2020_COVER_TYPES.find((t) => t.id === id)?.label ?? id;
 }
 
+export function coverTypeSp(id: string): number {
+  return CP2020_COVER_TYPES.find((t) => t.id === id)?.sp ?? 0;
+}
+
 /** Visual hint: higher SP → warmer / more opaque. */
 export function coverSpStyle(sp: number): { bg: string; border: string } {
   if (sp >= 35) return { bg: 'rgba(220, 38, 38, 0.35)', border: 'rgba(248, 113, 113, 0.65)' };

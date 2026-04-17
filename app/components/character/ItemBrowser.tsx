@@ -13,7 +13,8 @@ import {
   resolveCyberwareHumanityLoss,
 } from '@/lib/data/game-data';
 import {
-  Item,
+  CharacterItem,
+  MiscItem,
   Weapon,
   Armor,
   Cyberware,
@@ -182,7 +183,7 @@ function convertProgram(src: DataProgram): Program {
   };
 }
 
-function convertGear(src: Record<string, unknown>): Item {
+function convertGear(src: Record<string, unknown>): MiscItem {
   return {
     id: `misc-${uid()}`,
     name: String(src.name || 'Unknown'),
@@ -196,19 +197,19 @@ function convertGear(src: Record<string, unknown>): Item {
   };
 }
 
-function convertSearchResult(result: SearchResult): Item {
+function convertSearchResult(result: SearchResult): CharacterItem {
   const raw = result.item;
   switch (result.type) {
     case 'weapon':
-      return convertWeapon(raw as DataWeapon) as unknown as Item;
+      return convertWeapon(raw as DataWeapon);
     case 'armor':
-      return convertArmor(raw as DataArmor) as unknown as Item;
+      return convertArmor(raw as DataArmor);
     case 'cyberware':
-      return convertCyberware(raw as DataCyberware) as unknown as Item;
+      return convertCyberware(raw as DataCyberware);
     case 'vehicle':
-      return convertVehicle(raw as DataVehicle) as unknown as Item;
+      return convertVehicle(raw as DataVehicle);
     case 'program':
-      return convertProgram(raw as DataProgram) as unknown as Item;
+      return convertProgram(raw as DataProgram);
     default:
       return convertGear(raw as unknown as Record<string, unknown>);
   }

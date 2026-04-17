@@ -129,15 +129,15 @@ export const GM_TOOL_DEFINITIONS = [
     function: {
       name: 'request_roll',
       description:
-        'Ask the table to roll dice (guidance only). Prefer roll_kind skill or stat with character_id + skill_id/stat from CHARACTERS_JSON so the app builds the same 1d10+bonus as the sheet. raw_formula + formula for freeform rolls.',
+        'Ask the table to roll dice (guidance only). For FNFF ranged/melee attacks use roll_kind attack with weapon_id + difficulty_value (DV) from range/cover/situation; the app builds 1d10+REF+skill+weapon accuracy + optional ranged_modifier_total. Otherwise use skill/stat ids or raw_formula.',
       parameters: {
         type: 'object',
         properties: {
           roll_kind: {
             type: 'string',
-            enum: ['skill', 'stat', 'raw_formula'],
+            enum: ['skill', 'stat', 'raw_formula', 'attack'],
             description:
-              'skill = character_id + skill_id (sheet math). stat = character_id + stat key. raw_formula = formula string only.',
+              'skill = character_id + skill_id. stat = character_id + stat. attack = character_id + weapon_id + difficulty_value (DV). raw_formula = formula only.',
           },
           formula: {
             type: 'string',
@@ -149,6 +149,33 @@ export const GM_TOOL_DEFINITIONS = [
           stat: {
             type: 'string',
             description: 'For roll_kind stat: int, ref, tech, cool, attr, luck, ma, bt, emp',
+          },
+          weapon_id: {
+            type: 'string',
+            description:
+              'For roll_kind attack: item id from that character’s items[] (type weapon) in CHARACTERS_JSON',
+          },
+          difficulty_value: {
+            type: 'number',
+            description:
+              'For roll_kind attack: FNFF DV to beat (1d10+mods ≥ DV). Set from weapon range bracket at measured distance, cover, visibility, etc.',
+          },
+          ranged_modifier_total: {
+            type: 'number',
+            description:
+              'For roll_kind attack: sum of optional FNFF to-hit modifiers not on the sheet (e.g. target behind cover, shooter running). Default 0.',
+          },
+          range_bracket_label: {
+            type: 'string',
+            description: 'Short human label for chat/dice UI e.g. "Long (80m) · 1/2 cover"',
+          },
+          target_character_id: {
+            type: 'string',
+            description: 'Optional defender sheet id for hit/miss messaging',
+          },
+          target_name: {
+            type: 'string',
+            description: 'Optional defender display name if no id',
           },
         },
         required: [],
@@ -327,7 +354,7 @@ export const GM_TOOL_DEFINITIONS = [
     function: {
       name: 'roll_dice',
       description:
-        'Roll dice server-side (for NPC actions, random events, hit location, etc.). Posts the result as a chat message. Formula examples: 1d10, 3d6, 2d6+3, 1d10x10. Prefix with flat: for non-exploding d10 (saves).',
+        'Roll dice server-side for NPC/enemy actions (including NPCs shooting at PCs), random events, hit location, etc. Do NOT use request_roll for those—the player is not the NPC. Posts the result as a chat message. Formula examples: 1d10, 3d6, 2d6+3. Prefix flat: for non-exploding d10 (saves).',
       parameters: {
         type: 'object',
         properties: {

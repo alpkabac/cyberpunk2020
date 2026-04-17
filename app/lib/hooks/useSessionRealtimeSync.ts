@@ -7,11 +7,15 @@ import {
   attachSessionRealtimeRecovery,
   fetchSessionSnapshot,
 } from '@/lib/realtime';
+import { saveCharacterToSupabase } from '@/lib/db/character-serialize';
 import { createDefaultPostgresHandlersForGameStore } from '@/lib/realtime/apply-realtime-to-store';
 import { reportClientError } from '@/lib/logging/client-report';
 import { BROADCAST_EVENTS } from '@/lib/realtime/realtime-events';
 import { useGameStore } from '@/lib/store/game-store';
-import type { SessionRealtimeHandle } from '@/lib/realtime/session-channel';
+import type {
+  SessionPresencePeer,
+  SessionRealtimeHandle,
+} from '@/lib/realtime/session-channel';
 
 const CONNECT_RETRY_MAX = 4;
 
@@ -28,13 +32,23 @@ export function useSessionRealtimeSync(
   sessionId: string | null,
   userId: string | undefined,
   onSyncComplete?: () => void,
+  presence?: {
+    track: { userId: string; email?: string | null };
+    onPeers: (peers: SessionPresencePeer[]) => void;
+  },
 ): void {
   const handleRef = useRef<SessionRealtimeHandle | null>(null);
   const recoveryRef = useRef<(() => void) | null>(null);
   const onDoneRef = useRef(onSyncComplete);
+  const presenceRef = useRef(presence);
+
   useEffect(() => {
     onDoneRef.current = onSyncComplete;
   });
+
+  useEffect(() => {
+    presenceRef.current = presence;
+  }, [presence]);
 
   useEffect(() => {
     if (!sessionId || !userId) {
@@ -52,6 +66,27 @@ export function useSessionRealtimeSync(
       handleRef.current = null;
 
       const refreshFromDatabase = async () => {
+        try {
+          const uid = (await client.auth.getSession()).data.session?.user?.id;
+          if (uid) {
+            const s = useGameStore.getState();
+            const sid = sessionId.trim();
+            const mine = [
+              ...Object.values(s.characters.byId),
+              ...Object.values(s.npcs.byId),
+            ].filter((c) => c.sessionId === sid && c.type === 'character' && c.userId === uid);
+            for (const c of mine) {
+              const { error } = await saveCharacterToSupabase(client, c);
+              if (error && typeof console !== 'undefined') {
+                console.warn('[session-sync] pre-refresh character save failed', c.id, error.message);
+              }
+            }
+          }
+        } catch (e) {
+          if (typeof console !== 'undefined') {
+            console.warn('[session-sync] pre-refresh flush failed', e);
+          }
+        }
         const snap = await fetchSessionSnapshot(client, sessionId);
         if (snap) {
           useGameStore.getState().hydrateFromLoadedSnapshot(snap);
@@ -59,10 +94,17 @@ export function useSessionRealtimeSync(
       };
 
       try {
+        const p = presenceRef.current;
         const handle = await connectSessionRealtime(client, {
           sessionId,
           refreshFromDatabase,
           postgresHandlers: createDefaultPostgresHandlersForGameStore(),
+          presenceTrack: p?.track ?? null,
+          onPresencePeers: p
+            ? (peers) => {
+                presenceRef.current?.onPeers(peers);
+              }
+            : undefined,
           onBroadcast: (event, payload) => {
             if (event === BROADCAST_EVENTS.SESSION_RECORDING) {
               useGameStore.getState().applySessionRecordingBroadcast(payload);

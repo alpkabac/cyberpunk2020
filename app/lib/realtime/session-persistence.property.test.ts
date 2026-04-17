@@ -122,6 +122,8 @@ const arbCharacter: fc.Arbitrary<Character> = fc.record({
     ...c,
     isNpc: c.type === 'npc',
     skills: [],
+    conditions: [],
+    items: [],
   }),
 );
 

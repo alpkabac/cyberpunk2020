@@ -7,13 +7,16 @@ import type {
   Armor,
   Availability,
   Character,
+  CharacterItem,
   Concealability,
   Cyberware,
-  Item,
+  MiscItem,
+  Program,
   Reliability,
   RoleType,
   Skill,
   Stats,
+  Vehicle,
   Weapon,
   WeaponType,
 } from '@/lib/types';
@@ -57,7 +60,7 @@ function strOr(raw: unknown, fallback: string): string {
 }
 
 /** Map GM tool item blobs into typed items (minimal weapon/armor/cyberware when details omitted). */
-export function itemFromGmSpawnBlob(raw: Record<string, unknown>): Item | null {
+export function itemFromGmSpawnBlob(raw: Record<string, unknown>): CharacterItem | null {
   const id = typeof raw.id === 'string' && raw.id ? raw.id : crypto.randomUUID();
   const name = typeof raw.name === 'string' ? raw.name : 'Item';
   const typeStr = typeof raw.type === 'string' ? raw.type : 'misc';
@@ -153,20 +156,63 @@ export function itemFromGmSpawnBlob(raw: Record<string, unknown>): Item | null {
     return cw;
   }
 
-  const miscTypes = ['vehicle', 'misc', 'program'] as const;
-  if (!miscTypes.includes(typeStr as (typeof miscTypes)[number])) return null;
+  if (typeStr === 'vehicle') {
+    const v: Vehicle = {
+      id,
+      name,
+      type: 'vehicle',
+      flavor,
+      notes,
+      cost,
+      weight,
+      equipped,
+      source,
+      vehicleType: strOr(raw.vehicle_type ?? raw.vehicleType, ''),
+      topSpeed: numOr(raw.top_speed ?? raw.topSpeed, 0),
+      acceleration: numOr(raw.acceleration, 0),
+      handling: numOr(raw.handling, 0),
+      vehicleArmor: numOr(raw.vehicle_armor ?? raw.vehicleArmor, 0),
+      vehicleSdp: numOr(raw.vehicle_sdp ?? raw.vehicleSdp, 0),
+    };
+    return v;
+  }
 
-  return {
-    id,
-    name,
-    type: typeStr as Item['type'],
-    flavor,
-    notes,
-    cost,
-    weight,
-    equipped,
-    source,
-  };
+  if (typeStr === 'program') {
+    const p: Program = {
+      id,
+      name,
+      type: 'program',
+      flavor,
+      notes,
+      cost,
+      weight,
+      equipped,
+      source,
+      programType: strOr(raw.program_type ?? raw.programType, ''),
+      strength: numOr(raw.strength, 0),
+      muCost: numOr(raw.mu_cost ?? raw.muCost, 0),
+      programClass: strOr(raw.program_class ?? raw.programClass, ''),
+      options: Array.isArray(raw.options) ? (raw.options as string[]) : [],
+    };
+    return p;
+  }
+
+  if (typeStr === 'misc') {
+    const m: MiscItem = {
+      id,
+      name,
+      type: 'misc',
+      flavor,
+      notes,
+      cost,
+      weight,
+      equipped,
+      source,
+    };
+    return m;
+  }
+
+  return null;
 }
 
 export interface UniqueGmSkillInput {
@@ -226,7 +272,7 @@ export function buildUniqueGmNpc(input: BuildUniqueGmNpcInput): Character {
     isSpecialAbility: s.isSpecialAbility === true,
   }));
 
-  const items: Item[] = [];
+  const items: CharacterItem[] = [];
   for (const blob of input.items) {
     const it = itemFromGmSpawnBlob(blob);
     if (it) items.push(it);

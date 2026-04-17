@@ -77,7 +77,7 @@ export function MapCanvas({
   const [mapError, setMapError] = useState<string | null>(null);
   const [mapBusy, setMapBusy] = useState(false);
   const [urlDraft, setUrlDraft] = useState('');
-  const [gridOptsVisible, setGridOptsVisible] = useState(true);
+  const [gridOptsVisible, setGridOptsVisible] = useState(false);
   const [rulerActive, setRulerActive] = useState(false);
   const [ruler, setRuler] = useState<{ a: { x: number; y: number }; b: { x: number; y: number } } | null>(null);
   const [coverTool, setCoverTool] = useState(false);

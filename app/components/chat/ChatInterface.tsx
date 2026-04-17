@@ -46,6 +46,57 @@ function bubbleClasses(type: ChatMessage['type'], meta?: Record<string, unknown>
   }
 }
 
+function ChevronTruncateIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden
+    >
+      <path
+        d="M14 6l-6 6 6 6"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function ChevronRegenerateIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden
+    >
+      <path
+        d="M10 6l6 6-6 6"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** Narration, player lines, dice results, and GM roll requests — hides other system/tool audit lines. */
+function isStoryFocusedMessage(m: ChatMessage): boolean {
+  if (m.type === 'player' || m.type === 'narration' || m.type === 'roll') return true;
+  if (m.type === 'system') {
+    return m.metadata?.kind === 'roll_request';
+  }
+  return false;
+}
+
 export interface ChatInterfaceProps {
   sessionId: string;
   /** Shown as chat speaker for player messages and roll replies (e.g. character name). */
@@ -85,10 +136,17 @@ export function ChatInterface({
   const charactersById = useGameStore((s) => s.characters.byId);
   const npcsById = useGameStore((s) => s.npcs.byId);
   const includeSpecialAbilityInSkillRolls = useGameStore((s) => s.ui.includeSpecialAbilityInSkillRolls);
+  const removeChatMessagesByIds = useGameStore((s) => s.removeChatMessagesByIds);
+  const mergeRemoteChatMessage = useGameStore((s) => s.mergeRemoteChatMessage);
+  const setGmNarrationPending = useGameStore((s) => s.setGmNarrationPending);
 
   const [draft, setDraft] = useState('');
   const [sendError, setSendError] = useState<string | null>(null);
   const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [chatActionError, setChatActionError] = useState<string | null>(null);
+  const [showToolLog, setShowToolLog] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingDraft, setEditingDraft] = useState('');
   const {
     isRecording: voiceRecording,
     micReady,
@@ -114,6 +172,11 @@ export function ChatInterface({
   /** Skip mirroring the peer tick that echoes from our own Session Mic press (avoids double `startVoice` + stuck recorder). */
   const ignoreNextPeerStartForLocalMicRef = useRef(false);
   const messages = useMemo(() => sortChatMessagesByTimestamp(rawMessages), [rawMessages]);
+  const displayedMessages = useMemo(
+    () => (showToolLog ? messages : messages.filter(isStoryFocusedMessage)),
+    [messages, showToolLog],
+  );
+  const hiddenMessageCount = messages.length - displayedMessages.length;
   const lastMessageId = useMemo(
     () => (messages.length > 0 ? messages[messages.length - 1]?.id : undefined),
     [messages],
@@ -218,6 +281,53 @@ export function ChatInterface({
     return null;
   }, [messages]);
 
+  useEffect(() => {
+    const setPending = useGameStore.getState().setPendingGmAttackRequest;
+    if (!enabled) {
+      setPending(null);
+      return;
+    }
+    const m = lastRollRequest;
+    const meta = m?.metadata as Record<string, unknown> | undefined;
+    if (!m || !meta || meta.kind !== 'roll_request' || meta.roll_kind !== 'attack') {
+      setPending(null);
+      return;
+    }
+    if (m.id === useGameStore.getState().ui.lastAnsweredGmAttackRequestMessageId) {
+      setPending(null);
+      return;
+    }
+    const input = rollRequestMetadataToInput(meta);
+    const cid =
+      (typeof meta.characterId === 'string' && meta.characterId) || focusCharacterId || null;
+    const char = cid ? charactersById[cid] ?? npcsById[cid] : null;
+    const r = resolveGmRequestRoll(char, input, {
+      includeSpecialAbilityInSkillRolls,
+    });
+    if (!r.attackDice || !char) {
+      setPending(null);
+      return;
+    }
+    setPending({
+      chatMessageId: m.id,
+      characterId: char.id,
+      weaponId: r.attackDice.weaponId,
+      difficultyValue: r.attackDice.difficultyValue,
+      rangeBracketLabel: r.attackDice.rangeBracketLabel,
+      targetCharacterId: r.attackDice.targetCharacterId,
+      targetName: r.attackDice.targetName,
+      rollSummary: r.label,
+      reason: typeof meta.reason === 'string' ? meta.reason : undefined,
+    });
+  }, [
+    enabled,
+    lastRollRequest,
+    focusCharacterId,
+    charactersById,
+    npcsById,
+    includeSpecialAbilityInSkillRolls,
+  ]);
+
   const openGmRollFromMessage = useCallback(
     (m: ChatMessage) => {
       const meta = m.metadata as Record<string, unknown> | undefined;
@@ -233,6 +343,18 @@ export function ChatInterface({
       if (!formula) return;
       const reason = typeof meta.reason === 'string' ? meta.reason : undefined;
       const rollSummary = r.label?.trim() || undefined;
+      if (r.attackDice && char) {
+        openDiceRoller(formula, {
+          kind: 'attack',
+          ...r.attackDice,
+          gmRequestChatMessageId: m.id,
+          rollSummary: rollSummary ?? `${char.name} attack`,
+          sessionId,
+          speakerName,
+          nonBlockingUi: true,
+        });
+        return;
+      }
       openDiceRoller(formula, {
         kind: 'gm_request',
         sessionId,
@@ -554,15 +676,182 @@ export function ChatInterface({
     [pendingRollsForVoice, sessionId],
   );
 
+  const truncateFromMessage = useCallback(
+    async (fromMessageId: string) => {
+      if (!enabled) return;
+      setChatActionError(null);
+      setChatLoading(true);
+      try {
+        const accessToken = await getAccessTokenForApi(supabase);
+        if (!accessToken) {
+          setChatActionError('Not signed in');
+          return;
+        }
+        const res = await fetch('/api/session/chat-messages/truncate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({ sessionId, fromMessageId }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setChatActionError((data as { error?: string }).error ?? res.statusText ?? 'Truncate failed');
+          return;
+        }
+        const ids = (data as { deletedIds?: string[] }).deletedIds;
+        if (Array.isArray(ids)) {
+          removeChatMessagesByIds(ids);
+          setEditingId(null);
+          setEditingDraft('');
+        }
+      } catch (e) {
+        setChatActionError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setChatLoading(false);
+      }
+    },
+    [enabled, sessionId, setChatLoading, removeChatMessagesByIds],
+  );
+
+  const regenerateGmNarration = useCallback(
+    async (narrationMessageId: string) => {
+      if (!enabled) return;
+      setChatActionError(null);
+      setChatLoading(true);
+      try {
+        const accessToken = await getAccessTokenForApi(supabase);
+        if (!accessToken) {
+          setChatActionError('Not signed in');
+          return;
+        }
+        const res = await fetch('/api/gm/regenerate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({ sessionId, narrationMessageId }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setChatActionError((data as { error?: string }).error ?? res.statusText ?? 'Regenerate failed');
+          return;
+        }
+        const ids = (data as { deletedIds?: string[] }).deletedIds;
+        if (Array.isArray(ids)) {
+          removeChatMessagesByIds(ids);
+          setEditingId(null);
+          setEditingDraft('');
+        }
+        setGmNarrationPending(true);
+      } catch (e) {
+        setChatActionError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setChatLoading(false);
+      }
+    },
+    [enabled, sessionId, setChatLoading, removeChatMessagesByIds, setGmNarrationPending],
+  );
+
+  const deleteChatMessage = useCallback(
+    async (messageId: string) => {
+      if (!enabled) return;
+      setChatActionError(null);
+      setChatLoading(true);
+      try {
+        const accessToken = await getAccessTokenForApi(supabase);
+        if (!accessToken) {
+          setChatActionError('Not signed in');
+          return;
+        }
+        const q = new URLSearchParams({ sessionId, messageId });
+        const res = await fetch(`/api/session/chat-message?${q.toString()}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setChatActionError((data as { error?: string }).error ?? res.statusText ?? 'Delete failed');
+          return;
+        }
+        removeChatMessagesByIds([messageId]);
+        if (editingId === messageId) {
+          setEditingId(null);
+          setEditingDraft('');
+        }
+      } catch (e) {
+        setChatActionError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setChatLoading(false);
+      }
+    },
+    [enabled, sessionId, setChatLoading, removeChatMessagesByIds, editingId],
+  );
+
+  const saveEditedPlayerMessage = useCallback(
+    async (messageId: string, text: string) => {
+      if (!enabled || !text) return;
+      setChatActionError(null);
+      setChatLoading(true);
+      try {
+        const accessToken = await getAccessTokenForApi(supabase);
+        if (!accessToken) {
+          setChatActionError('Not signed in');
+          return;
+        }
+        const res = await fetch('/api/session/chat-message', {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({ sessionId, messageId, text }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setChatActionError((data as { error?: string }).error ?? res.statusText ?? 'Save failed');
+          return;
+        }
+        const msg = (data as { message?: ChatMessage }).message;
+        if (msg) mergeRemoteChatMessage(msg);
+        setEditingId(null);
+        setEditingDraft('');
+      } catch (e) {
+        setChatActionError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setChatLoading(false);
+      }
+    },
+    [enabled, sessionId, setChatLoading, mergeRemoteChatMessage],
+  );
+
   return (
     <section className="flex flex-col h-full min-h-0 rounded-lg border border-zinc-700 bg-zinc-900/60">
-      <header className="shrink-0 border-b border-zinc-700 px-3 py-2 flex items-center justify-between gap-2">
+      <header className="shrink-0 border-b border-zinc-700 px-3 py-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
         <h2 className="text-[10px] uppercase tracking-widest text-zinc-400">Session chat</h2>
-        {(isLoading || gmNarrationPending) && (
-          <span className="text-[10px] text-cyan-400/90 font-mono animate-pulse">
-            {isLoading ? 'Working…' : 'AI-GM…'}
-          </span>
-        )}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <label className="inline-flex items-center gap-1.5 cursor-pointer text-[9px] uppercase tracking-wide text-zinc-500 select-none">
+            <input
+              type="checkbox"
+              className="accent-cyan-600 scale-90"
+              checked={showToolLog}
+              onChange={(e) => setShowToolLog(e.target.checked)}
+            />
+            Tool log
+          </label>
+          {!showToolLog && hiddenMessageCount > 0 && (
+            <span className="text-[9px] text-zinc-600 font-mono normal-case">
+              {hiddenMessageCount} hidden
+            </span>
+          )}
+          {(isLoading || gmNarrationPending) && (
+            <span className="text-[10px] text-cyan-400/90 font-mono animate-pulse">
+              {isLoading ? 'Working…' : 'AI-GM…'}
+            </span>
+          )}
+        </div>
       </header>
 
       <div
@@ -572,38 +861,127 @@ export function ChatInterface({
       >
         {messages.length === 0 ? (
           <p className="text-zinc-500 text-xs">No messages yet. Say something to the AI-GM.</p>
+        ) : displayedMessages.length === 0 ? (
+          <p className="text-zinc-500 text-xs">
+            All messages are hidden. Turn on <span className="text-zinc-400">Tool log</span> to see
+            system lines.
+          </p>
         ) : (
-          messages.map((m) => {
+          displayedMessages.map((m) => {
             const sheetHint =
               m.type === 'system' && m.metadata?.kind === 'roll_request' ? rollHint(m) : null;
+            const canRegenerateGm = m.type === 'narration' && m.speaker === 'Game Master';
+            const canEditHere = m.type === 'player' && m.speaker === speakerName;
+            const isEditing = editingId === m.id;
             return (
-            <div
-              key={m.id}
-              className={`border-l-2 pl-2 py-1.5 rounded-r ${bubbleClasses(m.type, m.metadata)}`}
-            >
-              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[10px] uppercase tracking-wide opacity-80">
-                <span className="font-bold text-zinc-300">{m.speaker}</span>
-                <span className="text-zinc-500 font-mono">{typeLabel(m.type, m.metadata)}</span>
-                <span className="text-zinc-600 font-mono">
-                  {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </span>
-              </div>
-              <p className="mt-1 whitespace-pre-wrap break-words leading-snug">{m.text}</p>
-              {sheetHint && (
-                <p className="mt-1 text-[10px] text-amber-200/80 font-mono">
-                  Sheet match: {sheetHint}
-                </p>
-              )}
-              {m.type === 'system' && m.metadata?.kind === 'roll_request' && (
+              <div
+                key={m.id}
+                className={`group flex items-stretch min-h-9 rounded-r border-l-2 ${bubbleClasses(m.type, m.metadata)}`}
+              >
                 <button
                   type="button"
-                  onClick={() => openRollRequestInRoller(m)}
-                  className="mt-2 text-[10px] uppercase font-bold border border-amber-500/60 bg-amber-950/50 text-amber-200 px-2 py-1 rounded hover:bg-amber-900/40"
+                  title="Remove this message and everything after it"
+                  disabled={!enabled || isLoading}
+                  className="shrink-0 w-7 flex items-center justify-center self-stretch rounded-l-sm border-r border-black/15 bg-black/10 text-zinc-500 hover:text-zinc-200 hover:bg-black/25 disabled:opacity-40 transition-colors"
+                  aria-label="Remove this message and all later messages"
+                  onClick={() => void truncateFromMessage(m.id)}
                 >
-                  Open dice roller
+                  <ChevronTruncateIcon />
                 </button>
-              )}
-            </div>
+                <div className="relative flex-1 min-w-0 py-1.5 pl-2 pr-8">
+                  <div className="absolute top-0.5 right-0.5 z-10 flex items-center gap-0 opacity-25 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                    {canEditHere && (
+                      <button
+                        type="button"
+                        title="Edit message"
+                        disabled={!enabled || isLoading}
+                        className="px-0.5 py-0 text-[9px] leading-none text-zinc-500 hover:text-cyan-400 disabled:opacity-40"
+                        onClick={() => {
+                          setEditingId(m.id);
+                          setEditingDraft(m.text);
+                        }}
+                      >
+                        edit
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      title="Delete this message only"
+                      disabled={!enabled || isLoading}
+                      className="px-0.5 py-0 text-[9px] leading-none text-zinc-500 hover:text-red-400/90 disabled:opacity-40"
+                      onClick={() => void deleteChatMessage(m.id)}
+                    >
+                      del
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[10px] uppercase tracking-wide opacity-80 pr-6">
+                    <span className="font-bold text-zinc-300">{m.speaker}</span>
+                    <span className="text-zinc-500 font-mono">{typeLabel(m.type, m.metadata)}</span>
+                    <span className="text-zinc-600 font-mono">
+                      {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                  {isEditing ? (
+                    <div className="mt-1 space-y-1">
+                      <textarea
+                        value={editingDraft}
+                        onChange={(e) => setEditingDraft(e.target.value)}
+                        rows={3}
+                        className="w-full bg-zinc-950/80 border border-zinc-600 rounded px-2 py-1.5 text-sm text-zinc-100"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          disabled={!enabled || isLoading || !editingDraft.trim()}
+                          className="text-[10px] uppercase font-bold px-2 py-0.5 rounded border border-cyan-700/60 text-cyan-200 hover:bg-cyan-950/50 disabled:opacity-40"
+                          onClick={() => void saveEditedPlayerMessage(m.id, editingDraft.trim())}
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isLoading}
+                          className="text-[10px] uppercase text-zinc-500 hover:text-zinc-300"
+                          onClick={() => {
+                            setEditingId(null);
+                            setEditingDraft('');
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="mt-1 whitespace-pre-wrap wrap-break-word leading-snug">{m.text}</p>
+                  )}
+                  {sheetHint && (
+                    <p className="mt-1 text-[10px] text-amber-200/80 font-mono">
+                      Sheet match: {sheetHint}
+                    </p>
+                  )}
+                  {m.type === 'system' && m.metadata?.kind === 'roll_request' && (
+                    <button
+                      type="button"
+                      onClick={() => openRollRequestInRoller(m)}
+                      className="mt-2 text-[10px] uppercase font-bold border border-amber-500/60 bg-amber-950/50 text-amber-200 px-2 py-1 rounded hover:bg-amber-900/40"
+                    >
+                      Open dice roller
+                    </button>
+                  )}
+                </div>
+                {canRegenerateGm ? (
+                  <button
+                    type="button"
+                    title="Regenerate this GM reply (removes it and everything after, then runs the AI again)"
+                    disabled={!enabled || isLoading}
+                    className="shrink-0 w-7 flex items-center justify-center self-stretch rounded-r-sm border-l border-black/15 bg-black/10 text-zinc-500 hover:text-violet-200 hover:bg-violet-950/35 disabled:opacity-40 transition-colors"
+                    aria-label="Regenerate GM reply"
+                    onClick={() => void regenerateGmNarration(m.id)}
+                  >
+                    <ChevronRegenerateIcon />
+                  </button>
+                ) : null}
+              </div>
             );
           })
         )}
@@ -791,6 +1169,7 @@ export function ChatInterface({
           </button>
         </div>
         {sendError && <p className="text-xs text-red-400">{sendError}</p>}
+        {chatActionError && <p className="text-xs text-red-400">{chatActionError}</p>}
         {(voiceError || voiceHookError) && (
           <p className="text-xs text-red-400">{voiceError ?? voiceHookError}</p>
         )}

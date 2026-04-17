@@ -16,7 +16,8 @@ import { useSessionRealtimeSync } from '@/lib/hooks/useSessionRealtimeSync';
 import { useCharacterCloudSync } from '@/lib/hooks/useCharacterCloudSync';
 import { useShallow } from 'zustand/react/shallow';
 import type { Character } from '@/lib/types';
-import { generateCp2020Character, randomRole } from '@/lib/character-gen/cp2020-char-gen';
+import { createCryptoRng, generateCp2020Character } from '@/lib/character-gen/cp2020-char-gen';
+import type { SessionPresencePeer } from '@/lib/realtime';
 import { serializeCharacterForDb } from '@/lib/db/character-serialize';
 import {
   MAP_GRID_DEFAULT_COLS,
@@ -49,7 +50,9 @@ export function SessionRoomClient() {
   // Sheet drawer: collapsed by default
   const [sheetOpen, setSheetOpen] = useState(false);
   const [claimError, setClaimError] = useState<string | null>(null);
-  const [gmGenBusy, setGmGenBusy] = useState(false);
+  const [presencePeers, setPresencePeers] = useState<SessionPresencePeer[]>([]);
+  const [addCharBusyUserId, setAddCharBusyUserId] = useState<string | null>(null);
+  const [tokenPlaceBusyId, setTokenPlaceBusyId] = useState<string | null>(null);
   const [npcRemoveBusy, setNpcRemoveBusy] = useState(false);
 
   // Token context card (left-click)
@@ -87,6 +90,13 @@ export function SessionRoomClient() {
     return () => subscription.unsubscribe();
   }, []);
 
+  useEffect(() => {
+    useGameStore.getState().setSessionViewerUserId(user?.id ?? null);
+    return () => {
+      useGameStore.getState().setSessionViewerUserId(null);
+    };
+  }, [user?.id, sessionId]);
+
   const syncKey = `${sessionId}|${user?.id ?? ''}`;
   const [prevSyncKey, setPrevSyncKey] = useState<string | null>(null);
   if (syncKey !== prevSyncKey) {
@@ -107,7 +117,18 @@ export function SessionRoomClient() {
     }
   }, [sessionId]);
 
-  useSessionRealtimeSync(supabase, sessionId || null, user?.id, onSyncComplete);
+  const sessionPresence = useMemo(
+    () =>
+      user
+        ? {
+            track: { userId: user.id, email: user.email ?? null },
+            onPeers: setPresencePeers,
+          }
+        : undefined,
+    [user],
+  );
+
+  useSessionRealtimeSync(supabase, sessionId || null, user?.id, onSyncComplete, sessionPresence);
 
   const selectCharacter = useCallback(
     (id: string) => {
@@ -147,17 +168,19 @@ export function SessionRoomClient() {
       ? characters.byId[resolvedCharacterId] ?? npcs.byId[resolvedCharacterId]
       : null;
 
-  const isGm = user?.id != null && session.createdBy != null && user.id === session.createdBy;
+  /** Session creator: map/NPC/host tools — not the same as the AI Game Master. */
+  const isSessionHost =
+    user?.id != null && session.createdBy != null && user.id === session.createdBy;
 
   const canEditForChar = useCallback(
     (c: Character): boolean => {
       if (!user) return false;
       if (c.userId === user.id) return true;
-      if (c.type === 'npc' && isGm) return true;
-      if (c.type === 'character' && isGm && (!c.userId || c.userId === '')) return true;
+      if (c.type === 'npc' && isSessionHost) return true;
+      if (c.type === 'character' && isSessionHost && (!c.userId || c.userId === '')) return true;
       return false;
     },
-    [user, isGm],
+    [user, isSessionHost],
   );
 
   const canEditSheet = !!selectedCharacter && canEditForChar(selectedCharacter);
@@ -172,6 +195,56 @@ export function SessionRoomClient() {
         ? characters.allIds.map((id) => characters.byId[id]).find((c) => c.userId === user.id) ?? null
         : null,
     [user, characters.allIds, characters.byId],
+  );
+
+  const sortedPresencePeers = useMemo(() => {
+    const hostId = session.createdBy;
+    return [...presencePeers].sort((a, b) => {
+      const aHost = hostId && a.userId === hostId ? 0 : 1;
+      const bHost = hostId && b.userId === hostId ? 0 : 1;
+      if (aHost !== bHost) return aHost - bHost;
+      return (a.email ?? a.userId).localeCompare(b.email ?? b.userId);
+    });
+  }, [presencePeers, session.createdBy]);
+
+  const presenceIdSet = useMemo(() => new Set(presencePeers.map((p) => p.userId)), [presencePeers]);
+
+  const unclaimedPcs = useMemo(
+    () =>
+      characters.allIds
+        .map((id) => characters.byId[id])
+        .filter((c) => c.type === 'character' && (!c.userId || c.userId === '')),
+    [characters.allIds, characters.byId],
+  );
+
+  const awayOwners = useMemo(() => {
+    const m = new Map<string, Character[]>();
+    for (const id of characters.allIds) {
+      const c = characters.byId[id];
+      if (c.type !== 'character' || !c.userId || c.userId === '') continue;
+      if (presenceIdSet.has(c.userId)) continue;
+      const arr = m.get(c.userId) ?? [];
+      arr.push(c);
+      m.set(c.userId, arr);
+    }
+    return m;
+  }, [characters.allIds, characters.byId, presenceIdSet]);
+
+  const canAddCharacterForUser = useCallback(
+    (targetUserId: string): boolean => {
+      if (!user) return false;
+      return isSessionHost || targetUserId === user.id;
+    },
+    [user, isSessionHost],
+  );
+
+  const canPlaceTokenForCharacter = useCallback(
+    (c: Character): boolean => {
+      if (!user) return false;
+      if (isSessionHost) return true;
+      return c.userId === user.id;
+    },
+    [user, isSessionHost],
   );
 
   // Token context card data
@@ -200,9 +273,11 @@ export function SessionRoomClient() {
     setContextTokenId(null);
   }, []);
 
-  // "Place my token" callback
+  // "Place my token" callback (first owned PC — additional PCs use sidebar)
   const handlePlaceMyToken = useCallback(async () => {
     if (!myCharacter || !sessionId) return;
+    const hasToken = useGameStore.getState().map.tokens.some((t) => t.characterId === myCharacter.id);
+    if (hasToken) return;
     const st = useGameStore.getState().session.settings;
     let x = 50;
     let y = 50;
@@ -225,6 +300,46 @@ export function SessionRoomClient() {
     });
   }, [myCharacter, sessionId]);
 
+  const handlePlaceTokenForCharacter = useCallback(
+    async (c: Character) => {
+      if (!sessionId || !user) return;
+      if (!canPlaceTokenForCharacter(c)) return;
+      const hasToken = useGameStore.getState().map.tokens.some((t) => t.characterId === c.id);
+      if (hasToken) {
+        setClaimError('This character already has a token on the map.');
+        return;
+      }
+      setClaimError(null);
+      setTokenPlaceBusyId(c.id);
+      try {
+        const st = useGameStore.getState().session.settings;
+        let x = 50;
+        let y = 50;
+        if (st.mapSnapToGrid) {
+          const cols = normalizeGridDimension(st.mapGridCols, MAP_GRID_DEFAULT_COLS);
+          const rows = normalizeGridDimension(st.mapGridRows, MAP_GRID_DEFAULT_ROWS);
+          const s = snapPctToGrid(50, 50, cols, rows);
+          x = s.x;
+          y = s.y;
+        }
+        const { error } = await supabase.from('tokens').insert({
+          session_id: sessionId,
+          character_id: c.id,
+          name: c.name,
+          image_url: c.imageUrl ?? '',
+          x,
+          y,
+          size: 50,
+          controlled_by: 'player',
+        });
+        if (error) setClaimError(error.message);
+      } finally {
+        setTokenPlaceBusyId(null);
+      }
+    },
+    [sessionId, user, canPlaceTokenForCharacter],
+  );
+
   const handleClaimCharacter = useCallback(
     async (characterId: string) => {
       if (!user) return;
@@ -235,37 +350,47 @@ export function SessionRoomClient() {
     [user],
   );
 
-  const handleGmAddCp2020Pc = useCallback(async () => {
-    if (!sessionId || !user || !isGm) return;
-    setGmGenBusy(true);
-    setClaimError(null);
-    try {
-      const rng = Math.random;
-      const role = randomRole(rng);
-      const tag = `${Math.floor(rng() * 89 + 10)}`;
-      const c = generateCp2020Character({
-        sessionId,
-        name: `${role.slice(0, 3).toUpperCase()}-${tag}`,
-        role,
-        method: 'random',
-        rng,
-      });
-      const { error } = await supabase.from('characters').insert({
-        session_id: sessionId,
-        user_id: null,
-        type: 'character',
-        ...serializeCharacterForDb(c),
-      });
-      if (error) setClaimError(error.message);
-    } finally {
-      setGmGenBusy(false);
-    }
-  }, [sessionId, user, isGm]);
+  const handleAddCharacterForUser = useCallback(
+    async (targetUserId: string) => {
+      if (!sessionId || !user) return;
+      if (!canAddCharacterForUser(targetUserId)) return;
+      setAddCharBusyUserId(targetUserId);
+      setClaimError(null);
+      try {
+        const ownedCount = characters.allIds.filter((id) => characters.byId[id].userId === targetUserId).length;
+        const peer = presencePeers.find((p) => p.userId === targetUserId);
+        const label =
+          peer?.email?.split('@')[0]?.trim() ||
+          (targetUserId === user.id ? 'You' : `User ${targetUserId.slice(0, 8)}`);
+        // Must use a real RNG: a constant rng (e.g. () => 0.5) can infinite-loop in stat allocation
+        // when one stat hits 10 and the same index is picked forever.
+        const c = generateCp2020Character({
+          sessionId,
+          userId: targetUserId,
+          name: `${label} · ${ownedCount + 1}`,
+          role: 'Solo',
+          method: 'cinematic',
+          cinematicPreset: 'average',
+          rng: createCryptoRng(),
+        });
+        const { error } = await supabase.from('characters').insert({
+          session_id: sessionId,
+          user_id: targetUserId,
+          type: 'character',
+          ...serializeCharacterForDb(c),
+        });
+        if (error) setClaimError(error.message);
+      } finally {
+        setAddCharBusyUserId(null);
+      }
+    },
+    [sessionId, user, canAddCharacterForUser, characters.allIds, characters.byId, presencePeers],
+  );
 
   const patchNpcDamage = useCallback(
     async (delta: number) => {
       const sel = selectedCharacter;
-      if (!isGm || !sel || sel.type !== 'npc' || !sessionId) return;
+      if (!isSessionHost || !sel || sel.type !== 'npc' || !sessionId) return;
       const next = Math.max(0, Math.min(41, sel.damage + delta));
       if (next === sel.damage) return;
       setClaimError(null);
@@ -284,7 +409,7 @@ export function SessionRoomClient() {
         store.clearOptimisticCharacterBackup(sel.id);
       }
     },
-    [isGm, selectedCharacter, sessionId],
+    [isSessionHost, selectedCharacter, sessionId],
   );
 
   const handleRemoveNpc = useCallback(
@@ -338,9 +463,12 @@ export function SessionRoomClient() {
           <h1 className="text-cyan-400 font-bold uppercase tracking-wide truncate text-sm md:text-base">
             {session.name || 'Session'}
           </h1>
-          {isGm && (
-            <span className="text-[10px] uppercase bg-violet-900/50 text-violet-200 px-2 py-0.5 rounded border border-violet-700/40">
-              GM
+          {isSessionHost && (
+            <span
+              className="text-[10px] uppercase bg-violet-900/50 text-violet-200 px-2 py-0.5 rounded border border-violet-700/40"
+              title="You created this room — extra session controls (map, NPCs). The AI is still the Game Master in play."
+            >
+              Host
             </span>
           )}
         </div>
@@ -414,53 +542,226 @@ export function SessionRoomClient() {
               {claimError && (
                 <p className="text-xs text-red-400 border border-red-900/40 rounded p-2 bg-red-950/25">{claimError}</p>
               )}
-              <div>
-                <h2 className="text-[10px] uppercase text-zinc-500 mb-2 tracking-wider">Characters</h2>
-                <ul className="space-y-1">
-                  {characters.allIds.map((id) => {
-                    const c = characters.byId[id];
-                    const unclaimed = c.type === 'character' && (!c.userId || c.userId === '');
-                    const canClaim =
-                      !!user && !isGm && unclaimed && !myCharacter;
-                    return (
-                      <li key={id} className="space-y-1">
-                        <button
-                          type="button"
-                          onClick={() => selectCharacter(id)}
-                          className={`w-full text-left text-sm px-2 py-1.5 rounded border transition-colors ${
-                            resolvedCharacterId === id
-                              ? 'border-cyan-600 bg-cyan-950/50 text-cyan-200'
-                              : 'border-transparent hover:border-zinc-600 text-zinc-300 hover:bg-zinc-900'
-                          }`}
-                        >
-                          {c.name}
-                          <span className="text-zinc-600 text-[10px] ml-1">PC</span>
-                          {unclaimed && (
-                            <span className="text-amber-600/90 text-[10px] ml-1">· open</span>
-                          )}
-                        </button>
-                        {canClaim && (
-                          <button
-                            type="button"
-                            onClick={() => void handleClaimCharacter(id)}
-                            className="w-full text-[11px] uppercase tracking-wide py-1 rounded border border-amber-800/60 text-amber-200 hover:bg-amber-950/40"
+              <div className="space-y-3">
+                <div>
+                  <h2 className="text-[10px] uppercase text-zinc-500 mb-2 tracking-wider">Online</h2>
+                  {sortedPresencePeers.length === 0 ? (
+                    <p className="text-[11px] text-zinc-500">Connecting…</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {sortedPresencePeers.map((peer) => {
+                        const peerChars = characters.allIds
+                          .map((id) => characters.byId[id])
+                          .filter((c) => c.type === 'character' && c.userId === peer.userId);
+                        const isSelf = user?.id === peer.userId;
+                        const isPeerSessionHost = session.createdBy === peer.userId;
+                        const showAdd = canAddCharacterForUser(peer.userId);
+                        return (
+                          <div
+                            key={peer.userId}
+                            className="rounded border border-zinc-800 bg-zinc-900/40 p-2 space-y-2"
                           >
-                            Claim this character
-                          </button>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-                {isGm && (
-                  <button
-                    type="button"
-                    disabled={gmGenBusy}
-                    onClick={() => void handleGmAddCp2020Pc()}
-                    className="mt-2 w-full text-[11px] uppercase tracking-wide py-1.5 rounded border border-violet-700/50 text-violet-200 hover:bg-violet-950/40 disabled:opacity-50"
-                  >
-                    {gmGenBusy ? 'Generating…' : 'Add CP2020 PC (random, unclaimed)'}
-                  </button>
+                            <div className="flex items-center gap-2 text-xs min-w-0">
+                              <span
+                                className="h-2 w-2 rounded-full bg-emerald-500 shrink-0"
+                                title="Connected"
+                              />
+                              <span
+                                className="truncate font-medium text-zinc-200"
+                                title={peer.email ?? peer.userId}
+                              >
+                                {peer.email ?? peer.userId}
+                              </span>
+                              {isSelf && <span className="text-[10px] text-cyan-500 shrink-0">You</span>}
+                              {isPeerSessionHost && (
+                                <span
+                                  className="text-[9px] uppercase bg-violet-900/50 text-violet-200 px-1 rounded border border-violet-700/40 shrink-0"
+                                  title="Session creator — room tools, not the AI GM"
+                                >
+                                  Host
+                                </span>
+                              )}
+                            </div>
+                            {peerChars.length === 0 ? (
+                              <p className="text-[11px] text-zinc-500 pl-1">No characters yet.</p>
+                            ) : (
+                              <ul className="space-y-1">
+                                {peerChars.map((c) => {
+                                  const hasToken = tokens.some((t) => t.characterId === c.id);
+                                  const canPlace = canPlaceTokenForCharacter(c) && !hasToken;
+                                  return (
+                                    <li key={c.id} className="flex gap-1 items-stretch">
+                                      <button
+                                        type="button"
+                                        onClick={() => selectCharacter(c.id)}
+                                        className={`flex-1 min-w-0 text-left text-sm px-2 py-1.5 rounded border transition-colors ${
+                                          resolvedCharacterId === c.id
+                                            ? 'border-cyan-600 bg-cyan-950/50 text-cyan-200'
+                                            : 'border-transparent hover:border-zinc-600 text-zinc-300 hover:bg-zinc-900'
+                                        }`}
+                                      >
+                                        {c.name}
+                                        <span className="text-zinc-600 text-[10px] ml-1">PC</span>
+                                      </button>
+                                      {canPlace ? (
+                                        <button
+                                          type="button"
+                                          title="Place token on map"
+                                          disabled={tokenPlaceBusyId === c.id}
+                                          className="shrink-0 px-2 text-[10px] uppercase font-bold text-emerald-300 border border-emerald-800/60 rounded hover:bg-emerald-950/35 disabled:opacity-50"
+                                          onClick={() => void handlePlaceTokenForCharacter(c)}
+                                        >
+                                          {tokenPlaceBusyId === c.id ? '…' : 'Map'}
+                                        </button>
+                                      ) : hasToken ? (
+                                        <span
+                                          className="shrink-0 self-center text-[9px] text-zinc-600 px-1"
+                                          title="Already on map"
+                                        >
+                                          On map
+                                        </span>
+                                      ) : null}
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            )}
+                            {showAdd && (
+                              <button
+                                type="button"
+                                disabled={addCharBusyUserId === peer.userId}
+                                onClick={() => void handleAddCharacterForUser(peer.userId)}
+                                className="w-full text-[11px] uppercase tracking-wide py-1.5 rounded border border-violet-700/50 text-violet-200 hover:bg-violet-950/40 disabled:opacity-50"
+                              >
+                                {addCharBusyUserId === peer.userId ? 'Adding…' : 'Add character'}
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {unclaimedPcs.length > 0 && (
+                  <div>
+                    <h2 className="text-[10px] uppercase text-zinc-500 mb-2 tracking-wider">
+                      Open characters
+                    </h2>
+                    <ul className="space-y-1">
+                      {unclaimedPcs.map((c) => {
+                        const canClaim = !!user && !isSessionHost && !myCharacter;
+                        const hasToken = tokens.some((t) => t.characterId === c.id);
+                        const canPlace = canPlaceTokenForCharacter(c) && !hasToken;
+                        return (
+                          <li key={c.id} className="space-y-1">
+                            <div className="flex gap-1 items-stretch">
+                              <button
+                                type="button"
+                                onClick={() => selectCharacter(c.id)}
+                                className={`flex-1 min-w-0 text-left text-sm px-2 py-1.5 rounded border transition-colors ${
+                                  resolvedCharacterId === c.id
+                                    ? 'border-cyan-600 bg-cyan-950/50 text-cyan-200'
+                                    : 'border-transparent hover:border-zinc-600 text-zinc-300 hover:bg-zinc-900'
+                                }`}
+                              >
+                                {c.name}
+                                <span className="text-zinc-600 text-[10px] ml-1">PC</span>
+                                <span className="text-amber-600/90 text-[10px] ml-1">· open</span>
+                              </button>
+                              {canPlace ? (
+                                <button
+                                  type="button"
+                                  title="Place token on map"
+                                  disabled={tokenPlaceBusyId === c.id}
+                                  className="shrink-0 px-2 text-[10px] uppercase font-bold text-emerald-300 border border-emerald-800/60 rounded hover:bg-emerald-950/35 disabled:opacity-50"
+                                  onClick={() => void handlePlaceTokenForCharacter(c)}
+                                >
+                                  {tokenPlaceBusyId === c.id ? '…' : 'Map'}
+                                </button>
+                              ) : hasToken ? (
+                                <span
+                                  className="shrink-0 self-center text-[9px] text-zinc-600 px-1"
+                                  title="Already on map"
+                                >
+                                  On map
+                                </span>
+                              ) : null}
+                            </div>
+                            {canClaim && (
+                              <button
+                                type="button"
+                                onClick={() => void handleClaimCharacter(c.id)}
+                                className="w-full text-[11px] uppercase tracking-wide py-1 rounded border border-amber-800/60 text-amber-200 hover:bg-amber-950/40"
+                              >
+                                Claim this character
+                              </button>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                )}
+
+                {awayOwners.size > 0 && (
+                  <div>
+                    <h2 className="text-[10px] uppercase text-zinc-500 mb-2 tracking-wider">
+                      Not connected
+                    </h2>
+                    <div className="space-y-2">
+                      {[...awayOwners.entries()].map(([ownerId, list]) => (
+                        <div
+                          key={ownerId}
+                          className="rounded border border-zinc-800/80 bg-zinc-950/40 p-2 space-y-1"
+                        >
+                          <p className="text-[10px] text-zinc-500 truncate" title={ownerId}>
+                            Owner · {ownerId.slice(0, 8)}…
+                          </p>
+                          <ul className="space-y-1">
+                            {list.map((c) => {
+                              const hasToken = tokens.some((t) => t.characterId === c.id);
+                              const canPlace = canPlaceTokenForCharacter(c) && !hasToken;
+                              return (
+                                <li key={c.id} className="flex gap-1 items-stretch">
+                                  <button
+                                    type="button"
+                                    onClick={() => selectCharacter(c.id)}
+                                    className={`flex-1 min-w-0 text-left text-sm px-2 py-1.5 rounded border transition-colors ${
+                                      resolvedCharacterId === c.id
+                                        ? 'border-cyan-600 bg-cyan-950/50 text-cyan-200'
+                                        : 'border-transparent hover:border-zinc-600 text-zinc-300 hover:bg-zinc-900'
+                                    }`}
+                                  >
+                                    {c.name}
+                                    <span className="text-zinc-600 text-[10px] ml-1">PC</span>
+                                  </button>
+                                  {canPlace ? (
+                                    <button
+                                      type="button"
+                                      title="Place token on map"
+                                      disabled={tokenPlaceBusyId === c.id}
+                                      className="shrink-0 px-2 text-[10px] uppercase font-bold text-emerald-300 border border-emerald-800/60 rounded hover:bg-emerald-950/35 disabled:opacity-50"
+                                      onClick={() => void handlePlaceTokenForCharacter(c)}
+                                    >
+                                      {tokenPlaceBusyId === c.id ? '…' : 'Map'}
+                                    </button>
+                                  ) : hasToken ? (
+                                    <span
+                                      className="shrink-0 self-center text-[9px] text-zinc-600 px-1"
+                                      title="Already on map"
+                                    >
+                                      On map
+                                    </span>
+                                  ) : null}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 )}
               </div>
               {npcs.allIds.length > 0 && (
@@ -501,7 +802,7 @@ export function SessionRoomClient() {
                       );
                     })}
                   </ul>
-                  {isGm && selectedCharacter?.type === 'npc' && (
+                  {isSessionHost && selectedCharacter?.type === 'npc' && (
                     <div className="mt-3 rounded border border-amber-900/40 bg-amber-950/20 p-2 space-y-2">
                       <p className="text-[10px] uppercase text-amber-600/90 tracking-wide">
                         GM · {selectedCharacter.name}
@@ -555,7 +856,7 @@ export function SessionRoomClient() {
               <InitiativeTracker
                 sessionId={sessionId}
                 supabase={supabase}
-                isGm={isGm}
+                isGm={isSessionHost}
                 viewerUserId={user?.id ?? null}
                 gmRequestSpeakerName={selectedCharacter?.name ?? user.email ?? 'Referee'}
               />
@@ -571,7 +872,7 @@ export function SessionRoomClient() {
               sessionId={sessionId}
               supabase={supabase}
               userId={user.id}
-              isGm={isGm}
+              isGm={isSessionHost}
               onTokenClick={handleTokenClick}
               onTokenRightClick={handleTokenRightClick}
               myCharacterId={myCharacter?.id ?? null}

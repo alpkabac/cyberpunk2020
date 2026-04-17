@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { Character } from '@/lib/types';
+import type { Character, Weapon } from '@/lib/types';
 import { createStatBlock } from '@/lib/types';
 import { resolveGmRequestRoll } from './resolve-gm-request-roll';
 
@@ -100,5 +100,50 @@ describe('resolveGmRequestRoll', () => {
     );
     expect(r.resolvedFromCharacter).toBe(false);
     expect(r.formula).toBe('2d6+1');
+  });
+
+  it('resolves attack: REF+Handgun+WA + optional ranged_modifier_total and DV', () => {
+    const w: Weapon = {
+      id: 'w1',
+      name: 'Malorian',
+      type: 'weapon',
+      flavor: '',
+      notes: '',
+      cost: 0,
+      weight: 0,
+      equipped: true,
+      source: '',
+      weaponType: 'Pistol',
+      accuracy: 1,
+      concealability: 'P',
+      availability: 'R',
+      ammoType: '',
+      damage: '4d6',
+      ap: false,
+      shotsLeft: 10,
+      shots: 10,
+      rof: 2,
+      reliability: 'ST',
+      range: 50,
+      attackType: 'SemiAuto',
+      attackSkill: 'Handgun',
+      isAutoCapable: false,
+    };
+    const c = minimalChar({ items: [w] });
+    const r = resolveGmRequestRoll(
+      c,
+      {
+        roll_kind: 'attack',
+        weapon_id: 'w1',
+        difficulty_value: 25,
+        ranged_modifier_total: -3,
+      },
+      { includeSpecialAbilityInSkillRolls: false },
+    );
+    expect(r.resolvedFromCharacter).toBe(true);
+    expect(r.formula).toBe('1d10+8');
+    expect(r.attackDice?.difficultyValue).toBe(25);
+    expect(r.attackDice?.isMelee).toBe(false);
+    expect(r.attackDice?.promptedByGmRequest).toBe(true);
   });
 });

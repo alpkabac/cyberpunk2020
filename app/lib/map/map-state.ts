@@ -25,6 +25,9 @@ export function parseMapStateJson(v: unknown): SessionMapState {
     const r1 = Number(r.r1);
     if (!id || !isValidCoverTypeId(coverTypeId)) continue;
     if (![c0, c1, r0, r1].every((n) => Number.isFinite(n))) continue;
+    const abRaw = r.spAblation;
+    const spAblation =
+      abRaw !== undefined && Number.isFinite(Number(abRaw)) ? Math.max(0, Math.round(Number(abRaw))) : undefined;
     coverRegions.push({
       id,
       c0: Math.round(c0),
@@ -32,6 +35,7 @@ export function parseMapStateJson(v: unknown): SessionMapState {
       r0: Math.round(r0),
       r1: Math.round(r1),
       coverTypeId,
+      ...(spAblation !== undefined && spAblation > 0 ? { spAblation } : {}),
     });
   }
   return { coverRegions };

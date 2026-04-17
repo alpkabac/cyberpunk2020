@@ -2,7 +2,7 @@
  * Pure character updates for server-side GM tools (mirrors client store logic where needed).
  */
 
-import type { Character, CharacterCondition, Item, ItemType, Weapon, Zone } from '../types';
+import type { Character, CharacterCondition, CharacterItem, ItemType, MiscItem, Zone } from '../types';
 import {
   applyStatModifiers,
   calculateDamage,
@@ -40,8 +40,17 @@ export function applyGmDamage(
   isAP = false,
   pointBlank = false,
   weaponDamageFormula: string | null = null,
+  coverStackedSp = 0,
 ): Character {
-  return applyGmDamageDetailed(character, rawDamage, location, isAP, pointBlank, weaponDamageFormula).character;
+  return applyGmDamageDetailed(
+    character,
+    rawDamage,
+    location,
+    isAP,
+    pointBlank,
+    weaponDamageFormula,
+    coverStackedSp,
+  ).character;
 }
 
 /**
@@ -55,6 +64,7 @@ export function applyGmDamageDetailed(
   isAP = false,
   pointBlank = false,
   weaponDamageFormula: string | null = null,
+  coverStackedSp = 0,
 ): { character: Character; info: GmDamageInfo } {
   let effectiveRaw = rawDamage;
   if (pointBlank && weaponDamageFormula) {
@@ -73,7 +83,7 @@ export function applyGmDamageDetailed(
       : 0;
   const btm = character.derivedStats?.btm ?? 0;
 
-  const result = calculateDamage(effectiveRaw, location, sp, btm, isAP);
+  const result = calculateDamage(effectiveRaw, location, sp, btm, isAP, coverStackedSp);
 
   // Severance / head auto-kill escalation (FNFF L6424).
   let forcedDamageTotal: number | null = null;
@@ -150,15 +160,16 @@ function isItemType(t: string): t is ItemType {
   return (ITEM_TYPES as string[]).includes(t);
 }
 
-export function normalizeIncomingItem(raw: Record<string, unknown>, id: string): Item | null {
+/** Legacy helper: only builds plain misc rows; use `normalizeOneItem` for weapons/cyberware. */
+export function normalizeIncomingItem(raw: Record<string, unknown>, id: string): MiscItem | null {
   const name = typeof raw.name === 'string' ? raw.name : 'Item';
   const typeStr = typeof raw.type === 'string' ? raw.type : 'misc';
-  if (!isItemType(typeStr)) return null;
+  if (typeStr !== 'misc' || !isItemType(typeStr)) return null;
 
   return {
     id,
     name,
-    type: typeStr,
+    type: 'misc',
     flavor: typeof raw.flavor === 'string' ? raw.flavor : '',
     notes: typeof raw.notes === 'string' ? raw.notes : '',
     cost: typeof raw.cost === 'number' ? raw.cost : 0,
@@ -168,7 +179,7 @@ export function normalizeIncomingItem(raw: Record<string, unknown>, id: string):
   };
 }
 
-export function applyGmAddItem(character: Character, item: Item): Character {
+export function applyGmAddItem(character: Character, item: CharacterItem): Character {
   return recalcCharacterForGm({
     ...character,
     items: [...character.items, item],
@@ -245,11 +256,12 @@ export function applyGmUpdateAmmo(
   const idx = character.items.findIndex((i) => i.id === weaponId && i.type === 'weapon');
   if (idx === -1) return null;
 
-  const weapon = character.items[idx] as unknown as Weapon;
+  const weapon = character.items[idx];
+  if (weapon.type !== 'weapon') return null;
   const newShots = reload ? weapon.shots : Math.max(0, Math.min(weapon.shots, Math.floor(shotsLeft ?? weapon.shotsLeft)));
 
   const updatedItems = [...character.items];
-  updatedItems[idx] = { ...weapon, shotsLeft: newShots } as unknown as Item;
+  updatedItems[idx] = { ...weapon, shotsLeft: newShots };
 
   return recalcCharacterForGm({ ...character, items: updatedItems });
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { characterRowEditableByUser } from '@/lib/auth/character-edit-policy';
 import { useGameStore } from '@/lib/store/game-store';
@@ -33,6 +33,7 @@ export function InitiativeTracker({
       diceOpen: s.ui.isDiceRollerOpen,
     })),
   );
+  // PCs resolve start-of-turn saves manually (Combat tab or tracker button) — no auto-opening dice roller.
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [narrateBusy, setNarrateBusy] = useState(false);
@@ -75,45 +76,6 @@ export function InitiativeTracker({
   const pendingChar = useGameStore((s) =>
     pending ? s.characters.byId[pending] ?? s.npcs.byId[pending] ?? null : null,
   );
-
-  const didAutoSotRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!pending || !viewerUserId || !pendingChar) {
-      didAutoSotRef.current = null;
-      return;
-    }
-    if (pendingChar.type !== 'character') return;
-    if (
-      !characterRowEditableByUser({
-        viewerUserId,
-        characterUserId: pendingChar.userId,
-        characterType: pendingChar.type,
-        sessionCreatorId: createdBy,
-      })
-    ) {
-      return;
-    }
-    const needs =
-      pendingChar.isStunned ||
-      ((pendingChar.derivedStats?.deathSaveTarget ?? -1) >= 0 && !pendingChar.isStabilized);
-    if (!needs) return;
-
-    const key = `${pending}|${combatState?.round ?? 0}|${combatState?.activeTurnIndex ?? 0}`;
-    if (didAutoSotRef.current === key || diceOpen) return;
-    didAutoSotRef.current = key;
-    const raf = requestAnimationFrame(() => {
-      useGameStore.getState().openStartOfTurnSavesIfNeeded(pending);
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [
-    pending,
-    viewerUserId,
-    pendingChar,
-    createdBy,
-    combatState?.round,
-    combatState?.activeTurnIndex,
-    diceOpen,
-  ]);
 
   const activeCombatant = useGameStore((s) => {
     const cs = s.session.combatState;
@@ -238,16 +200,18 @@ Please narrate the **start of this NPC's turn** in combat (brief, tense, actiona
       {showSotPrompt && pending && (
         <div className="rounded border border-amber-700/50 bg-amber-950/30 px-2 py-1.5 space-y-1">
           <p className="text-[10px] text-amber-100/90 leading-snug">
-            <span className="font-bold uppercase">Your turn — saves</span>
+            <span className="font-bold uppercase">Your turn — saves owed</span>
             <br />
-            Stun recovery and/or ongoing death save (combat tracker).
+            Resolve on your sheet (Combat → Stun recovery if STUNNED, then Death save if Mortal and not
+            stabilized). Or open the dice roller here when you are ready — nothing auto-rolls.
           </p>
           <button
             type="button"
+            disabled={diceOpen}
             onClick={() => useGameStore.getState().openStartOfTurnSavesIfNeeded(pending)}
-            className="w-full text-[10px] uppercase py-1 rounded border border-amber-600/70 text-amber-100 hover:bg-amber-900/40"
+            className="w-full text-[10px] uppercase py-1 rounded border border-amber-600/70 text-amber-100 hover:bg-amber-900/40 disabled:opacity-45 disabled:cursor-not-allowed"
           >
-            {diceOpen ? 'Dice open — finish rolls' : 'Roll start-of-turn saves'}
+            {diceOpen ? 'Close the dice roller first' : 'Open dice roller for saves'}
           </button>
         </div>
       )}

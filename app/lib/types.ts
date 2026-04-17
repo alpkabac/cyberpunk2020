@@ -163,7 +163,7 @@ export interface Character {
 
   // Gear
   eurobucks: number;
-  items: Item[];
+  items: CharacterItem[];
 
   // Combat modifiers (optional; initiative also used for Combat Sense initiative roll)
   combatModifiers?: {
@@ -279,6 +279,17 @@ export interface Program extends Item {
   options: string[];
 }
 
+/** Plain gear row with no weapon/armor/cyberware extensions. */
+export interface MiscItem extends Item {
+  type: 'misc';
+}
+
+/**
+ * Items on a character sheet after normalization (DB / GM tools). Discriminate on `type`
+ * to access weapon/cyberware-specific fields.
+ */
+export type CharacterItem = Weapon | Armor | Cyberware | Vehicle | Program | MiscItem;
+
 // ============================================================================
 // Netrun Deck
 // ============================================================================
@@ -358,6 +369,8 @@ export interface MapCoverRegion {
   c1: number;
   r1: number;
   coverTypeId: string;
+  /** Staged penetration: each penetrating hit through this region adds 1 (effective SP = type SP − ablation). */
+  spAblation?: number;
 }
 
 export interface MapState {
@@ -392,6 +405,22 @@ export interface ChatMessage {
   timestamp: number;
   type: 'narration' | 'player' | 'system' | 'roll';
   metadata?: Record<string, unknown>;
+}
+
+/**
+ * Latest AI-GM `request_roll` (attack) — Combat tab merges sheet modifiers + this DV when
+ * character/weapon match. Synced from the newest `roll_request` system message in chat.
+ */
+export interface PendingGmAttackRequest {
+  chatMessageId: string;
+  characterId: string;
+  weaponId: string;
+  difficultyValue: number;
+  rangeBracketLabel?: string;
+  targetCharacterId?: string;
+  targetName?: string;
+  rollSummary?: string;
+  reason?: string;
 }
 
 export interface SessionSettings {
@@ -516,15 +545,17 @@ export type DiceRollGmContext = {
 
 /** Intent for the dice roller modal (stun/death saves, weapon attack fumbles, stabilization). */
 export type DiceRollIntent =
-  | ({ kind: 'stun'; characterId: string } & DiceRollGmContext)
+  /** After damage: flat d10 ≤ saveTarget stays conscious; over target = STUNNED. */
+  | ({ kind: 'stun'; characterId: string; saveTarget?: number } & DiceRollGmContext)
   /** Start of turn: flat d10 vs stun target; success clears STUNNED. */
-  | ({ kind: 'stun_recovery'; characterId: string } & DiceRollGmContext)
+  | ({ kind: 'stun_recovery'; characterId: string; saveTarget?: number } & DiceRollGmContext)
   /**
    * Ask the AI-GM to rule on stun (fiction / fiat). No dice — posts to `/api/gm`;
    * GM should apply via `set_condition` stunned or equivalent.
    */
   | ({ kind: 'stun_override_request'; characterId: string; note?: string } & DiceRollGmContext)
-  | ({ kind: 'death'; characterId: string } & DiceRollGmContext)
+  /** Mortal ongoing / forced: flat d10 ≤ saveTarget survives; over = dead (damage → 41). */
+  | ({ kind: 'death'; characterId: string; saveTarget?: number } & DiceRollGmContext)
   | ({
       kind: 'attack';
       characterId: string;
@@ -543,6 +574,12 @@ export type DiceRollIntent =
       /** Declared target of the attack (for messaging + Apply Damage routing). */
       targetCharacterId?: string;
       targetName?: string;
+      /** Set when the player opened this roll from a GM `request_roll` (attack) system message. */
+      promptedByGmRequest?: boolean;
+      /** Chat message id of that `roll_request` — used to clear pending after reply without resync loop. */
+      gmRequestChatMessageId?: string;
+      /** When true, session chat dice requests keep the sheet usable (same as gm_request). */
+      nonBlockingUi?: boolean;
     } & DiceRollGmContext)
   /**
    * Medic roll on the medic's sheet: exploding 1d10 + TECH + medical skill ≥ `targetDamage`.

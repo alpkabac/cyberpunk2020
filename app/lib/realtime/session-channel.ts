@@ -25,6 +25,12 @@ export interface PostgresChangeHandlers {
   onChatMessageChange?: (args: { eventType: 'INSERT' | 'UPDATE' | 'DELETE'; new: Record<string, unknown> | null; old: Record<string, unknown> | null }) => void;
 }
 
+/** One row per connected tab/client; `userId` matches Supabase Presence `key` when tracking. */
+export interface SessionPresencePeer {
+  userId: string;
+  email: string | null;
+}
+
 export interface SessionRealtimeSubscribeOptions {
   sessionId: string;
   /** Load authoritative state from Postgres before (re)subscribing. */
@@ -32,6 +38,9 @@ export interface SessionRealtimeSubscribeOptions {
   postgresHandlers?: PostgresChangeHandlers;
   onSubscribeStatus?: (status: 'SUBSCRIBED' | 'TIMED_OUT' | 'CLOSED' | 'CHANNEL_ERROR') => void;
   onBroadcast?: (event: string, payload: unknown) => void;
+  /** When set with `onPresencePeers`, enables Presence on the session channel (keyed by `userId`). */
+  presenceTrack?: { userId: string; email?: string | null } | null;
+  onPresencePeers?: (peers: SessionPresencePeer[]) => void;
   /**
    * After a Realtime `CHANNEL_ERROR` or `TIMED_OUT`, schedule a full recover (refetch + new channel).
    * Set to `0` to disable. Default `2000` ms debounce.
@@ -90,6 +99,18 @@ function mapTokenPayload(payload: {
   handlers.onTokenChange({ eventType, newRecord, oldRecord });
 }
 
+function emitPresencePeersFromChannel(
+  ch: RealtimeChannel,
+  onPresencePeers: NonNullable<SessionRealtimeSubscribeOptions['onPresencePeers']>,
+) {
+  const raw = ch.presenceState() as Record<string, Array<{ email?: string | null }>>;
+  const peers: SessionPresencePeer[] = Object.entries(raw).map(([userId, metas]) => ({
+    userId,
+    email: metas[0]?.email ?? null,
+  }));
+  onPresencePeers(peers);
+}
+
 function buildChannel(
   client: SupabaseClient,
   sessionId: string,
@@ -97,11 +118,17 @@ function buildChannel(
   onSubscribeStatus: SessionRealtimeSubscribeOptions['onSubscribeStatus'],
   onBroadcast: SessionRealtimeSubscribeOptions['onBroadcast'],
   scheduleRecoverFromChannelIssue: (() => void) | null,
+  presenceTrack: SessionRealtimeSubscribeOptions['presenceTrack'],
+  onPresencePeers: SessionRealtimeSubscribeOptions['onPresencePeers'],
 ): RealtimeChannel {
   const filter = `session_id=eq.${sessionId}`;
   const sessionRowFilter = `id=eq.${sessionId}`;
+  const usePresence = Boolean(presenceTrack && onPresencePeers);
   let ch = client.channel(`${CHANNEL_PREFIX}${sessionId}`, {
-    config: { broadcast: { self: true } },
+    config: {
+      broadcast: { self: true },
+      ...(usePresence && presenceTrack ? { presence: { key: presenceTrack.userId } } : {}),
+    },
   });
 
   /**
@@ -148,9 +175,18 @@ function buildChannel(
     });
   }
 
-  ch.subscribe((status, err) => {
+  if (usePresence && presenceTrack && onPresencePeers) {
+    ch = ch.on('presence', { event: 'sync' }, () => emitPresencePeersFromChannel(ch, onPresencePeers));
+    ch = ch.on('presence', { event: 'join' }, () => emitPresencePeersFromChannel(ch, onPresencePeers));
+    ch = ch.on('presence', { event: 'leave' }, () => emitPresencePeersFromChannel(ch, onPresencePeers));
+  }
+
+  ch.subscribe(async (status, err) => {
     switch (status) {
       case 'SUBSCRIBED':
+        if (usePresence && presenceTrack) {
+          await ch.track({ userId: presenceTrack.userId, email: presenceTrack.email ?? null });
+        }
         onSubscribeStatus?.('SUBSCRIBED');
         break;
       case 'CHANNEL_ERROR':
@@ -235,6 +271,8 @@ export function createSessionRealtimeHandle(
       options.onSubscribeStatus,
       options.onBroadcast,
       scheduleRecoverFromChannelIssue,
+      options.presenceTrack,
+      options.onPresencePeers,
     );
   };
 

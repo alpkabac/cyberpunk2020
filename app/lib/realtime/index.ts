@@ -18,6 +18,7 @@ export {
   createSessionRealtimeHandle,
   attachSessionRealtimeRecovery,
   type PostgresChangeHandlers,
+  type SessionPresencePeer,
   type SessionRealtimeHandle,
   type SessionRealtimeSubscribeOptions,
 } from './session-channel';

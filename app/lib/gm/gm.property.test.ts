@@ -295,6 +295,30 @@ describe('Property 6: Tool parameter validation', () => {
     expect(validateGmToolParameters('request_roll', { roll_kind: 'skill', character_id: 'c' }).ok).toBe(
       false,
     );
+    expect(
+      validateGmToolParameters('request_roll', {
+        roll_kind: 'attack',
+        character_id: 'c',
+        weapon_id: 'w',
+        difficulty_value: 20,
+      }).ok,
+    ).toBe(true);
+    expect(
+      validateGmToolParameters('request_roll', {
+        roll_kind: 'attack',
+        character_id: 'c',
+        weapon_id: 'w',
+        difficulty_value: 20,
+        ranged_modifier_total: -2,
+      }).ok,
+    ).toBe(true);
+    expect(
+      validateGmToolParameters('request_roll', {
+        roll_kind: 'attack',
+        character_id: 'c',
+        weapon_id: 'w',
+      }).ok,
+    ).toBe(false);
   });
 
   it('accepts combat tracker tools', () => {

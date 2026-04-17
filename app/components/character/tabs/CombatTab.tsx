@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { Character, Zone, Weapon, Armor, FireMode } from '@/lib/types';
 import { useGameStore } from '@/lib/store/game-store';
 import { DamageApplicator, type DamageApplicatorPreset } from '../DamageApplicator';
@@ -18,9 +18,37 @@ import {
 } from '@/lib/game-logic/lookups';
 import { sheetRollContext } from '@/lib/dice-roll-send-to-gm';
 import { sumEquippedCyberwareInitiativeBonus } from '@/lib/session/combat-state';
+import {
+  MAP_GRID_DEFAULT_COLS,
+  MAP_GRID_DEFAULT_ROWS,
+  normalizeGridDimension,
+  pctToCell,
+  cellDistance,
+} from '@/lib/map/grid';
+import { summarizeMapFireCover } from '@/lib/map/fire-cover';
 
 /** Must match `rangedCombatModifiers` key for aimed shots (attack −4; zone chosen if hit). */
 const AIMED_SHOT_LABEL = 'Aimed shot (specific area)' as const;
+
+const COVER_TO_HIT_KEYS = [
+  'Target behind cover (1/4)',
+  'Target behind cover (1/2)',
+  'Target behind cover (3/4)',
+] as const;
+
+type CoverToHitKey = (typeof COVER_TO_HIT_KEYS)[number];
+
+function getGlobalCoverSelection(
+  weaponsList: Weapon[],
+  toggles: Record<string, Record<string, boolean>>,
+): CoverToHitKey | 'none' | 'mixed' {
+  const ranged = weaponsList.filter((w) => w.weaponType !== 'Melee');
+  if (ranged.length === 0) return 'none';
+  const activePerWeapon = ranged.map((w) => COVER_TO_HIT_KEYS.find((k) => toggles[w.id]?.[k]) ?? null);
+  const first = activePerWeapon[0];
+  if (activePerWeapon.every((a) => a === first)) return first ?? 'none';
+  return 'mixed';
+}
 
 interface CombatTabProps {
   character: Character;
@@ -53,8 +81,13 @@ export function CombatTab({ character, editable }: CombatTabProps) {
   const [combatTargetId, setCombatTargetId] = useState('');
   /** Optional meters to target — updates range bracket for the expanded ranged weapon. */
   const [combatDistanceMInput, setCombatDistanceMInput] = useState('');
+  /** When true, distance field is not overwritten by map token movement / auto sync. */
+  const [distanceManualOverride, setDistanceManualOverride] = useState(false);
+  /** When true, behind-cover to-hit radios are not overwritten by map fire-line sync. */
+  const [coverManualOverride, setCoverManualOverride] = useState(false);
 
   const openDiceRoller = useGameStore((state) => state.openDiceRoller);
+  const pendingGmAttackRequest = useGameStore((state) => state.ui.pendingGmAttackRequest);
   const sessionId = useGameStore((state) => state.session.id);
   const charactersById = useGameStore((state) => state.characters.byId);
   const characterIds = useGameStore((state) => state.characters.allIds);
@@ -102,6 +135,63 @@ export function CombatTab({ character, editable }: CombatTabProps) {
   const stabilizationPatient =
     charactersById[stabilizationPatientId] ?? npcsById[stabilizationPatientId];
 
+  const mapTokens = useGameStore((state) => state.map.tokens);
+  const mapCoverRegions = useGameStore((state) => state.map.coverRegions);
+  const mapGridSettings = useGameStore((state) => state.session.settings);
+
+  const gridColsRows = useMemo(
+    () => ({
+      cols: normalizeGridDimension(mapGridSettings.mapGridCols, MAP_GRID_DEFAULT_COLS),
+      rows: normalizeGridDimension(mapGridSettings.mapGridRows, MAP_GRID_DEFAULT_ROWS),
+    }),
+    [mapGridSettings.mapGridCols, mapGridSettings.mapGridRows],
+  );
+
+  const mapTokensForTarget = useMemo(() => {
+    const tid = combatTargetId.trim();
+    if (!tid) return null;
+    const shooterTok = mapTokens.find((t) => t.characterId === character.id);
+    const targetTok = mapTokens.find((t) => t.characterId === tid);
+    if (!shooterTok || !targetTok) return null;
+    return { shooterTok, targetTok };
+  }, [combatTargetId, character.id, mapTokens]);
+
+  /** Euclidean grid distance × meters/square when session map is calibrated. */
+  const mapAutoDistanceM = useMemo(() => {
+    if (!mapTokensForTarget) return null;
+    const mps = mapGridSettings.mapMetersPerSquare;
+    if (!Number.isFinite(mps) || mps <= 0) return null;
+    const { cols, rows } = gridColsRows;
+    const cells = cellDistance(
+      mapTokensForTarget.shooterTok.x,
+      mapTokensForTarget.shooterTok.y,
+      mapTokensForTarget.targetTok.x,
+      mapTokensForTarget.targetTok.y,
+      cols,
+      rows,
+    );
+    return cells * mps;
+  }, [mapTokensForTarget, mapGridSettings.mapMetersPerSquare, gridColsRows]);
+
+  const mapFireCover = useMemo(() => {
+    if (!mapTokensForTarget || mapCoverRegions.length === 0) return null;
+    const { cols, rows } = gridColsRows;
+    const sc = pctToCell(mapTokensForTarget.shooterTok.x, mapTokensForTarget.shooterTok.y, cols, rows);
+    const tc = pctToCell(mapTokensForTarget.targetTok.x, mapTokensForTarget.targetTok.y, cols, rows);
+    return summarizeMapFireCover(sc.c, sc.r, tc.c, tc.r, mapCoverRegions);
+  }, [mapTokensForTarget, mapCoverRegions, gridColsRows]);
+
+  const combatMapCoverPreset = useMemo((): Pick<
+    DamageApplicatorPreset,
+    'coverStackedSp' | 'coverRegionIds'
+  > | null => {
+    if (!mapFireCover || mapFireCover.coverRegionIds.length === 0) return null;
+    return {
+      coverStackedSp: mapFireCover.stackedCoverSp,
+      coverRegionIds: mapFireCover.coverRegionIds,
+    };
+  }, [mapFireCover]);
+
   const resolveCombatTargetName = (id: string): string | undefined => {
     const t = id.trim();
     if (!t) return undefined;
@@ -111,6 +201,11 @@ export function CombatTab({ character, editable }: CombatTabProps) {
 
   const damagePresetVictim = (): { targetCharacterId?: string } =>
     combatTargetId.trim() ? { targetCharacterId: combatTargetId.trim() } : {};
+
+  const damagePresetWithCover = (): DamageApplicatorPreset => ({
+    ...damagePresetVictim(),
+    ...(combatTargetId.trim() ? (combatMapCoverPreset ?? {}) : {}),
+  });
 
   const setCombatModifier = (key: 'initiative' | 'stunSave' | 'deathSave', value: number) => {
     const next = {
@@ -133,8 +228,70 @@ export function CombatTab({ character, editable }: CombatTabProps) {
   };
 
   const weapons = character.items.filter((i): i is Weapon => i.type === 'weapon');
+
+  const setGlobalCoverToHit = (label: CoverToHitKey | 'none') => {
+    setRangedModToggles((prev) => {
+      const next = { ...prev };
+      for (const w of weapons) {
+        if (w.weaponType === 'Melee') continue;
+        const cur = { ...(next[w.id] || {}) };
+        for (const k of COVER_TO_HIT_KEYS) {
+          if (cur[k]) delete cur[k];
+        }
+        if (label !== 'none') cur[label] = true;
+        next[w.id] = cur;
+      }
+      return next;
+    });
+  };
+
+  const globalCoverSelection = useMemo(() => {
+    return getGlobalCoverSelection(weapons, rangedModToggles);
+  }, [weapons, rangedModToggles]);
+
+  /** When non-null, behind-cover to-hit follows the map fire line (until the user overrides). */
+  const mapAutoCoverLabel = useMemo((): CoverToHitKey | 'none' | null => {
+    if (!mapFireCover) return null;
+    return mapFireCover.suggestedToHitLabel ?? 'none';
+  }, [mapFireCover]);
+
+  const applyMapCoverToHitMods = () => {
+    setCoverManualOverride(false);
+  };
+
   const armorItems = character.items.filter((i): i is Armor => i.type === 'armor');
   const sdb = character.derivedStats?.strengthDamageBonus ?? 0;
+
+  const coverRadioValue: CoverToHitKey | 'none' | null = useMemo(() => {
+    if (!coverManualOverride && mapAutoCoverLabel !== null) return mapAutoCoverLabel;
+    return globalCoverSelection === 'mixed' ? null : globalCoverSelection;
+  }, [coverManualOverride, mapAutoCoverLabel, globalCoverSelection]);
+
+  /** Meters used for bracket preview / semi-auto fire when map or manual distance is set. */
+  const effectiveDistanceMeters = useMemo(() => {
+    if (distanceManualOverride) {
+      const n = parseFloat(combatDistanceMInput);
+      return Number.isFinite(n) && n >= 0 ? n : null;
+    }
+    return mapAutoDistanceM;
+  }, [distanceManualOverride, combatDistanceMInput, mapAutoDistanceM]);
+
+  const displayDistanceInput = distanceManualOverride
+    ? combatDistanceMInput
+    : mapAutoDistanceM != null
+      ? String(Math.round(mapAutoDistanceM * 10) / 10)
+      : '';
+
+  const getResolvedRangeBracket = useCallback(
+    (weapon: Weapon): RangeBracket => {
+      if (weapon.weaponType === 'Melee') return 'PointBlank';
+      if (weapon.range > 0 && effectiveDistanceMeters != null) {
+        return getRangeBracket(effectiveDistanceMeters, weapon.range);
+      }
+      return selectedRangeByWeapon[weapon.id] ?? 'Close';
+    },
+    [effectiveDistanceMeters, selectedRangeByWeapon],
+  );
 
   // Armor encumbrance: direct sum (not halved)
   const totalEncumbrance = armorItems
@@ -170,11 +327,18 @@ export function CombatTab({ character, editable }: CombatTabProps) {
 
   const getRangedModSum = (weaponId: string): number => {
     const toggles = rangedModToggles[weaponId];
-    if (!toggles) return 0;
     let sum = 0;
     for (const [label, value] of Object.entries(rangedCombatModifiers)) {
-      if (toggles[label]) sum += value;
+      if ((COVER_TO_HIT_KEYS as readonly string[]).includes(label)) continue;
+      if (toggles?.[label]) sum += value;
     }
+    let coverLabel: CoverToHitKey | null = null;
+    if (!coverManualOverride && mapFireCover) {
+      coverLabel = mapFireCover.suggestedToHitLabel;
+    } else if (toggles) {
+      coverLabel = COVER_TO_HIT_KEYS.find((k) => toggles[k]) ?? null;
+    }
+    if (coverLabel) sum += rangedCombatModifiers[coverLabel];
     return sum;
   };
 
@@ -188,8 +352,38 @@ export function CombatTab({ character, editable }: CombatTabProps) {
     }));
   };
 
+  const isCoverModChecked = (weaponId: string, label: string): boolean => {
+    if (!coverManualOverride && mapFireCover) {
+      const s = mapFireCover.suggestedToHitLabel;
+      return s != null && s === label;
+    }
+    return !!rangedModToggles[weaponId]?.[label];
+  };
+
+  const toggleCoverModForWeapon = (weaponId: string, label: CoverToHitKey) => {
+    const wasOn = isCoverModChecked(weaponId, label);
+    setCoverManualOverride(true);
+    setRangedModToggles((prev) => {
+      const cur = { ...(prev[weaponId] || {}) };
+      for (const k of COVER_TO_HIT_KEYS) {
+        if (cur[k]) delete cur[k];
+      }
+      if (!wasOn) cur[label] = true;
+      return { ...prev, [weaponId]: cur };
+    });
+  };
+
   const clearRangedMods = (weaponId: string) => {
+    setCoverManualOverride(true);
     setRangedModToggles((prev) => ({ ...prev, [weaponId]: {} }));
+  };
+
+  const onRangedModCheckboxChange = (weaponId: string, label: string) => {
+    if ((COVER_TO_HIT_KEYS as readonly string[]).includes(label)) {
+      toggleCoverModForWeapon(weaponId, label as CoverToHitKey);
+    } else {
+      toggleRangedMod(weaponId, label);
+    }
   };
 
   const attackIntentExtras = (bracket: RangeBracket) => {
@@ -210,6 +404,31 @@ export function CombatTab({ character, editable }: CombatTabProps) {
     const modSum = weapon.weaponType === 'Melee' ? 0 : getRangedModSum(weapon.id);
     setSelectedRangeByWeapon((prev) => ({ ...prev, [weapon.id]: bracket }));
     const isAutoWeapon = weapon.isAutoCapable || weapon.attackType === 'Auto';
+    const gm =
+      pendingGmAttackRequest &&
+      pendingGmAttackRequest.characterId === character.id &&
+      pendingGmAttackRequest.weaponId === weapon.id
+        ? pendingGmAttackRequest
+        : null;
+    if (gm) {
+      openDiceRoller(`1d10+${base + modSum}`, {
+        kind: 'attack',
+        characterId: character.id,
+        weaponId: weapon.id,
+        reliability: weapon.reliability,
+        isMelee: weapon.weaponType === 'Melee',
+        isAutoWeapon,
+        difficultyValue: gm.difficultyValue,
+        rangeBracketLabel: gm.rangeBracketLabel,
+        ...(gm.targetCharacterId ? { targetCharacterId: gm.targetCharacterId } : {}),
+        ...(gm.targetName ? { targetName: gm.targetName } : {}),
+        promptedByGmRequest: true,
+        gmRequestChatMessageId: gm.chatMessageId,
+        nonBlockingUi: true,
+        ...sheetRollContext(character, sessionId, gm.rollSummary ?? `${weapon.name} attack`),
+      });
+      return;
+    }
     openDiceRoller(`1d10+${base + modSum}`, {
       kind: 'attack',
       characterId: character.id,
@@ -230,15 +449,38 @@ export function CombatTab({ character, editable }: CombatTabProps) {
       const modSum = weapon.weaponType === 'Melee' ? 0 : getRangedModSum(weapon.id);
       const isAutoWeapon = weapon.isAutoCapable || weapon.attackType === 'Auto';
       const isMelee = weapon.weaponType === 'Melee';
-      const bracket: RangeBracket = isMelee
-        ? 'PointBlank'
-        : (selectedRangeByWeapon[weapon.id] ?? 'Close');
+      const bracket: RangeBracket = isMelee ? 'PointBlank' : getResolvedRangeBracket(weapon);
       const dv = rangeBrackets[bracket].dc;
       const rangeBracketLabel = isMelee
         ? 'Melee (default DV 10)'
         : rangeBrackets[bracket].label;
       const tid = combatTargetId.trim();
       const name = tid ? resolveCombatTargetName(tid) : undefined;
+      const gm =
+        pendingGmAttackRequest &&
+        pendingGmAttackRequest.characterId === character.id &&
+        pendingGmAttackRequest.weaponId === weapon.id
+          ? pendingGmAttackRequest
+          : null;
+      if (gm) {
+        openDiceRoller(`1d10+${base + modSum}`, {
+          kind: 'attack',
+          characterId: character.id,
+          weaponId: weapon.id,
+          reliability: weapon.reliability,
+          isMelee,
+          isAutoWeapon,
+          difficultyValue: gm.difficultyValue,
+          rangeBracketLabel: gm.rangeBracketLabel,
+          ...(gm.targetCharacterId ? { targetCharacterId: gm.targetCharacterId } : {}),
+          ...(gm.targetName ? { targetName: gm.targetName } : {}),
+          promptedByGmRequest: true,
+          gmRequestChatMessageId: gm.chatMessageId,
+          nonBlockingUi: true,
+          ...sheetRollContext(character, sessionId, gm.rollSummary ?? `${weapon.name} attack`),
+        });
+        return;
+      }
       openDiceRoller(`1d10+${base + modSum}`, {
         kind: 'attack',
         characterId: character.id,
@@ -473,10 +715,10 @@ export function CombatTab({ character, editable }: CombatTabProps) {
           </div>
 
           <p className="text-xs text-gray-600 mt-2">
-            Saves use a <strong>single flat d10</strong> (no crit explosion). Targets follow the wound-state table (BT +
-            row modifiers). <strong>Death</strong>: per FNFF, a failed save while Mortally wounded means death; this app
-            sets the wound track to <strong>Dead</strong> (damage 41+). After the roll, <strong>stun</strong> updates
-            STUNNED when roll &gt; target. You can still toggle STUNNED manually on the wound tracker.
+            Saves use a <strong>single flat d10</strong> (no crit explosion). <strong>Success = roll ≤ target</strong>{' '}
+            (low numbers are good — unlike rolling &quot;to beat a DC&quot;). Over the target fails: stun save →
+            STUNNED; death save while Mortal → dead (damage 41). A successful death save only keeps you alive — it does
+            not lower damage. You can still toggle STUNNED manually on the wound tracker.
           </p>
 
           <div className="border-2 border-teal-900 border-dashed bg-teal-50/70 p-3 mt-3">
@@ -563,9 +805,8 @@ export function CombatTab({ character, editable }: CombatTabProps) {
             <button
               type="button"
               onClick={() => {
-                setDamageApplicatorPreset(
-                  combatTargetId.trim() ? { targetCharacterId: combatTargetId.trim() } : null,
-                );
+                const p = damagePresetWithCover();
+                setDamageApplicatorPreset(Object.keys(p).length > 0 ? p : null);
                 setShowDamageApplicator(true);
               }}
               className="w-full mt-2 bg-red-500 hover:bg-red-600 text-white border-2 border-black p-3 font-bold uppercase"
@@ -698,19 +939,28 @@ export function CombatTab({ character, editable }: CombatTabProps) {
             <div className="border-2 border-slate-700 bg-slate-50/90 p-3 mb-3 text-xs space-y-2">
               <div className="font-bold uppercase text-slate-900 tracking-wide">Targeting</div>
               <p className="text-[10px] text-gray-800 leading-relaxed">
-                Choose who you are engaging. For ranged weapons, enter <strong>distance (m)</strong> while a weapon is
-                expanded to sync the range bracket (DV). Semi/Burst/Full and bracket buttons roll{' '}
-                <strong>1d10 + attack</strong> and show <strong>HIT</strong> or <strong>MISS</strong> vs that DV. Melee
-                “Attack” uses <strong>DV 10</strong> by default (referee may adjust). Use{' '}
-                <strong>Apply Damage</strong> after a hit — it applies to the selected target when one is chosen;
-                otherwise it uses this character&apos;s sheet.
+                Choose a <strong>target</strong>. With both tokens on the map and <strong>meters per grid square</strong>{' '}
+                set in session settings, <strong>distance</strong> fills from the grid (Euclidean cell distance × m/sq).
+                Edit the field anytime to override; use <strong>Use map</strong> to snap back. Expand a ranged weapon to
+                sync its range bracket from the distance value. Semi/Burst/Full and bracket buttons roll{' '}
+                <strong>1d10 + attack</strong> vs DV. With <strong>cover regions</strong> on the map,{' '}
+                <strong>behind cover</strong> (all ranged) follows the fire line like distance; change the radios or
+                per-weapon cover checkboxes to override, or <strong>Use map (cover)</strong> to follow the map again.
+                Melee attack uses DV 10 by default.
+                Use <strong>Apply Damage</strong> after a hit — with a target selected it applies to them; otherwise this
+                sheet.
               </p>
               <div className="flex flex-wrap gap-3 items-end">
                 <label className="flex flex-col gap-0.5 min-w-[12rem]">
                   <span className="font-semibold text-[10px] uppercase tracking-wide text-gray-700">Target</span>
                   <select
                     value={combatTargetId}
-                    onChange={(e) => setCombatTargetId(e.target.value)}
+                    onChange={(e) => {
+                      setCombatTargetId(e.target.value);
+                      setDistanceManualOverride(false);
+                      setCombatDistanceMInput('');
+                      setCoverManualOverride(false);
+                    }}
                     className="border-2 border-black px-2 py-1.5 font-mono bg-white max-w-[18rem] text-xs"
                   >
                     <option value="">— Select target —</option>
@@ -722,33 +972,156 @@ export function CombatTab({ character, editable }: CombatTabProps) {
                     ))}
                   </select>
                 </label>
-                <label className="flex flex-col gap-0.5">
+                <div className="flex flex-col gap-0.5">
                   <span className="font-semibold text-[10px] uppercase tracking-wide text-gray-700">
                     Distance (m)
                   </span>
-                  <input
-                    type="number"
-                    min={0}
-                    step={0.5}
-                    value={combatDistanceMInput}
-                    onChange={(e) => {
-                      const raw = e.target.value;
-                      setCombatDistanceMInput(raw);
-                      const n = parseFloat(raw);
-                      if (!Number.isFinite(n) || n < 0 || !expandedWeaponId) return;
-                      const w = weapons.find((x) => x.id === expandedWeaponId);
-                      if (!w || w.weaponType === 'Melee' || !(w.range > 0)) return;
-                      setSelectedRangeByWeapon((prev) => ({
-                        ...prev,
-                        [w.id]: getRangeBracket(n, w.range),
-                      }));
-                    }}
-                    placeholder="Expand ranged weapon"
-                    className="w-28 border-2 border-black px-2 py-1.5 font-mono bg-white text-xs"
-                    title="Sets range bracket from CP2020 distance bands for the expanded weapon"
-                  />
-                </label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.5}
+                      value={displayDistanceInput}
+                      onChange={(e) => {
+                        setDistanceManualOverride(true);
+                        setCombatDistanceMInput(e.target.value);
+                      }}
+                      placeholder={mapAutoDistanceM != null ? 'map' : '—'}
+                      className="w-28 border-2 border-black px-2 py-1.5 font-mono bg-white text-xs"
+                      title="Manual entry overrides map auto-distance until you change target or click Use map"
+                    />
+                    {mapAutoDistanceM != null && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDistanceManualOverride(false);
+                          setCombatDistanceMInput('');
+                        }}
+                        className="text-[10px] font-bold uppercase border border-slate-600 px-2 py-1 bg-white hover:bg-slate-100 rounded"
+                        title="Replace distance with value from tactical map tokens"
+                      >
+                        Use map
+                      </button>
+                    )}
+                  </div>
+                  {mapAutoDistanceM != null && mapGridSettings.mapMetersPerSquare > 0 ? (
+                    <span className="text-[9px] text-gray-600">
+                      Map: ~{Math.round(mapAutoDistanceM * 10) / 10} m (
+                      {(mapAutoDistanceM / mapGridSettings.mapMetersPerSquare).toFixed(1)} cells ×{' '}
+                      {mapGridSettings.mapMetersPerSquare} m/sq)
+                      {distanceManualOverride && ' — using manual distance for bracket'}
+                    </span>
+                  ) : mapTokensForTarget && (!mapGridSettings.mapMetersPerSquare || mapGridSettings.mapMetersPerSquare <= 0) ? (
+                    <span className="text-[9px] text-amber-800">
+                      Tokens found — set <strong>meters per square</strong> in map/session settings for auto distance.
+                    </span>
+                  ) : combatTargetId.trim() && !mapTokensForTarget ? (
+                    <span className="text-[9px] text-gray-500">
+                      Link both characters to map tokens for auto distance and cover line.
+                    </span>
+                  ) : null}
+                </div>
               </div>
+
+              {weapons.some((w) => w.weaponType !== 'Melee') && (
+                <div className="mt-2 space-y-1.5 border-t border-slate-300 pt-2">
+                  <div className="font-semibold text-[10px] uppercase tracking-wide text-gray-800">
+                    Behind cover (all ranged weapons)
+                  </div>
+                  {coverRadioValue === null && (
+                    <p className="text-[9px] text-amber-900 font-medium">
+                      Ranged weapons use different cover mods — pick one radio to align all, or adjust per weapon below.
+                    </p>
+                  )}
+                  <div className="flex flex-wrap gap-x-3 gap-y-1 items-center text-[10px]">
+                    <label className="inline-flex items-center gap-1 cursor-pointer">
+                      <input
+                        type="radio"
+                        name={`combat-cover-${character.id}`}
+                        checked={coverRadioValue === 'none'}
+                        onChange={() => {
+                          setCoverManualOverride(true);
+                          setGlobalCoverToHit('none');
+                        }}
+                      />
+                      None
+                    </label>
+                    {COVER_TO_HIT_KEYS.map((key) => {
+                      const short =
+                        key === 'Target behind cover (1/4)'
+                          ? '¼'
+                          : key === 'Target behind cover (1/2)'
+                            ? '½'
+                            : '¾';
+                      return (
+                        <label key={key} className="inline-flex items-center gap-1 cursor-pointer">
+                          <input
+                            type="radio"
+                            name={`combat-cover-${character.id}`}
+                            checked={coverRadioValue === key}
+                            onChange={() => {
+                              setCoverManualOverride(true);
+                              setGlobalCoverToHit(key);
+                            }}
+                          />
+                          {short} ({rangedCombatModifiers[key]})
+                        </label>
+                      );
+                    })}
+                    {mapFireCover && (
+                      <button
+                        type="button"
+                        onClick={applyMapCoverToHitMods}
+                        className="text-[10px] font-bold uppercase border border-amber-800 px-2 py-0.5 bg-amber-50 hover:bg-amber-100 rounded"
+                        title="Follow map fire-line cover again (clears manual cover selection)"
+                      >
+                        Use map (cover)
+                      </button>
+                    )}
+                  </div>
+                  {mapFireCover && (
+                    <span className="block text-[9px] text-gray-600">
+                      Map LOS:{' '}
+                      {mapFireCover.suggestedToHitLabel ? (
+                        <>
+                          {mapFireCover.suggestedToHitLabel} (
+                          {rangedCombatModifiers[mapFireCover.suggestedToHitLabel]}) — ~{' '}
+                          {Math.round(mapFireCover.coverCellFraction * 100)}% of fire line on cover
+                        </>
+                      ) : (
+                        <>no cover fraction on line (to-hit: none)</>
+                      )}
+                      {coverManualOverride && ' — using manual cover for to-hit'}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {mapFireCover && mapFireCover.coverRegionIds.length > 0 && (
+                <div className="mt-2 w-full border border-amber-800/60 bg-amber-50/90 px-2 py-2 rounded text-[10px] text-amber-950 space-y-1.5">
+                  <div className="font-bold uppercase tracking-wide">Map cover (fire line)</div>
+                  <p className="leading-snug">
+                    Stacked cover SP vs this target: <strong>{mapFireCover.stackedCoverSp}</strong> (combined with
+                    their armor via the proportional rule in Apply Damage). Through:{' '}
+                    {mapFireCover.regionDescriptions.join(' → ')}.
+                  </p>
+                  {mapFireCover.suggestedToHitLabel && (
+                    <p className="text-[9px]">
+                      LOS cover ~{Math.round(mapFireCover.coverCellFraction * 100)}% — suggested to-hit:{' '}
+                      <strong>
+                        {mapFireCover.suggestedToHitLabel} ({rangedCombatModifiers[mapFireCover.suggestedToHitLabel]})
+                      </strong>
+                      . Cover radios stay in sync with the map until you override them; use{' '}
+                      <strong>Use map (cover)</strong> to resume auto.
+                    </p>
+                  )}
+                  <p className="text-[9px] text-amber-900/90">
+                    A penetrating hit chips map cover: +1 ablation per listed region; when ablation reaches the
+                    material&apos;s SP, that cover is <strong>destroyed</strong> and removed from the map. See{' '}
+                    <em>Use Cover</em> / <em>Do Unto Others</em> (CP2020Gameplay.md, Friday Night Firefight).
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
@@ -817,6 +1190,19 @@ export function CombatTab({ character, editable }: CombatTabProps) {
                     {/* Expanded Weapon Details */}
                     {isExpanded && (
                       <div className="border-t-2 border-black p-3 space-y-3">
+                        {pendingGmAttackRequest &&
+                          pendingGmAttackRequest.characterId === character.id &&
+                          pendingGmAttackRequest.weaponId === weapon.id && (
+                            <div className="border border-cyan-900 bg-cyan-50/95 px-2 py-1.5 text-[10px] text-cyan-950 leading-snug">
+                              <span className="font-bold uppercase">AI-GM attack request</span>
+                              {' — '}Use your checklist below; the roll counts vs{' '}
+                              <strong>DV {pendingGmAttackRequest.difficultyValue}</strong>
+                              {pendingGmAttackRequest.rangeBracketLabel
+                                ? ` (${pendingGmAttackRequest.rangeBracketLabel})`
+                                : ''}
+                              . Send to GM when done (or close the dice window).
+                            </div>
+                          )}
                         {/* Stats Grid */}
                         <div className="grid grid-cols-4 gap-1 text-xs">
                           <div className="border border-black p-1 text-center">
@@ -859,7 +1245,7 @@ export function CombatTab({ character, editable }: CombatTabProps) {
                         {!isMelee && (() => {
                           const modSum = getRangedModSum(weapon.id);
                           const effectiveAttack = attackTotal + modSum;
-                          const selBracket = selectedRangeByWeapon[weapon.id] ?? 'Close';
+                          const selBracket = getResolvedRangeBracket(weapon);
                           const selDc = rangeBrackets[selBracket].dc;
                           const needOnD10 = selDc - effectiveAttack;
                           let previewHint: string;
@@ -898,8 +1284,12 @@ export function CombatTab({ character, editable }: CombatTabProps) {
                                       >
                                         <input
                                           type="checkbox"
-                                          checked={!!rangedModToggles[weapon.id]?.[label]}
-                                          onChange={() => toggleRangedMod(weapon.id, label)}
+                                          checked={
+                                            (COVER_TO_HIT_KEYS as readonly string[]).includes(label)
+                                              ? isCoverModChecked(weapon.id, label)
+                                              : !!rangedModToggles[weapon.id]?.[label]
+                                          }
+                                          onChange={() => onRangedModCheckboxChange(weapon.id, label)}
                                           className="mt-0.5 shrink-0"
                                         />
                                         <span>
@@ -1079,7 +1469,7 @@ export function CombatTab({ character, editable }: CombatTabProps) {
                               const aimed = !!rangedModToggles[weapon.id]?.[AIMED_SHOT_LABEL];
                               const z = aimedZoneByWeapon[weapon.id] as Zone | undefined;
                               setDamageApplicatorPreset({
-                                ...damagePresetVictim(),
+                                ...damagePresetWithCover(),
                                 weaponDamageFormula: weapon.damage || '',
                                 pointBlank: false,
                                 ...(aimed
@@ -1106,7 +1496,7 @@ export function CombatTab({ character, editable }: CombatTabProps) {
                                   ? `${weapon.damage}${sdb >= 0 ? '+' : ''}${sdb}`
                                   : weapon.damage;
                               setDamageApplicatorPreset({
-                                ...damagePresetVictim(),
+                                ...damagePresetWithCover(),
                                 weaponDamageFormula: dmgWithSdb,
                                 hitLocationMode: 'random',
                               });

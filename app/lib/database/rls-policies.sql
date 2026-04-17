@@ -137,7 +137,7 @@ CREATE POLICY "Users can view characters in their sessions"
   USING (is_user_in_session(session_id));
 
 -- Users can create characters in sessions they're part of
--- GM may insert unclaimed PCs (type character, user_id NULL) for player slots.
+-- GM may insert unclaimed PCs (type character, user_id NULL) or PCs pre-assigned to a player.
 CREATE POLICY "Users can create characters in their sessions"
   ON characters FOR INSERT
   WITH CHECK (
@@ -147,6 +147,10 @@ CREATE POLICY "Users can create characters in their sessions"
       (type = 'npc' AND (user_id IS NULL OR user_id = auth.uid())) OR
       (
         type = 'character' AND user_id IS NULL AND
+        EXISTS (SELECT 1 FROM sessions WHERE id = session_id AND created_by = auth.uid())
+      ) OR
+      (
+        type = 'character' AND user_id IS NOT NULL AND
         EXISTS (SELECT 1 FROM sessions WHERE id = session_id AND created_by = auth.uid())
       )
     )
