@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import type { User } from '@supabase/supabase-js';
 import { CharacterSheet, DiceRoller } from '@/components/character';
-import { ChatInterface } from '@/components/chat';
+import { ChatInterface, ResizableChatPanel } from '@/components/chat';
 import { PopoutCharacterSheet } from '@/components/session/PopoutCharacterSheet';
 import { supabase } from '@/lib/supabase';
 import { useGameStore } from '@/lib/store/game-store';
@@ -32,6 +32,15 @@ export function SessionRoomClient() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sheetPopout, setSheetPopout] = useState(false);
+  const [wideChatLayout, setWideChatLayout] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const sync = () => setWideChatLayout(mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
 
   const session = useGameStore((s) => s.session);
   const characters = useGameStore(
@@ -174,7 +183,7 @@ export function SessionRoomClient() {
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto p-4 md:p-6 flex flex-col lg:flex-row gap-6">
+      <div className="mx-4 my-4 md:mx-6 md:my-6 lg:mx-8 lg:my-8 flex flex-col lg:flex-row lg:items-start gap-6">
         <aside className="lg:w-64 shrink-0 space-y-4">
           {!user ? (
             <div className="rounded border border-zinc-700 bg-zinc-900/60 p-4 space-y-3">
@@ -285,7 +294,7 @@ export function SessionRoomClient() {
 
         <main className="flex-1 min-w-0">
           {user && cloudHydrated && !loadError && resolvedCharacterId && selectedCharacter && (
-            <div className="space-y-2">
+            <div className="max-w-[900px] mx-auto w-full space-y-2">
               {!canEditSheet && (
                 <p className="text-xs text-amber-400/90 border border-amber-900/40 rounded px-2 py-1 bg-amber-950/20">
                   View only — you can only edit your own character (or NPCs if you are the session GM).
@@ -324,13 +333,15 @@ export function SessionRoomClient() {
         </main>
 
         {user && cloudHydrated && !loadError && (
-          <aside className="w-full lg:w-[360px] shrink-0 lg:max-w-[420px]">
-            <ChatInterface
-              sessionId={sessionId}
-              speakerName={selectedCharacter?.name ?? user.email ?? 'Player'}
-              focusCharacterId={resolvedCharacterId}
-              enabled
-            />
+          <aside className="w-full min-w-0 lg:w-auto shrink-0">
+            <ResizableChatPanel wideLayout={wideChatLayout}>
+              <ChatInterface
+                sessionId={sessionId}
+                speakerName={selectedCharacter?.name ?? user.email ?? 'Player'}
+                focusCharacterId={resolvedCharacterId}
+                enabled
+              />
+            </ResizableChatPanel>
           </aside>
         )}
       </div>

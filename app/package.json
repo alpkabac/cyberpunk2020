@@ -18,6 +18,7 @@
     "extract:foundry": "npm run build:scripts && node .scripts-out/extract-foundry-data.js"
   },
   "dependencies": {
+    "@deepgram/sdk": "^5.0.0",
     "@supabase/supabase-js": "^2.103.0",
     "dotenv": "^17.4.2",
     "next": "16.2.3",

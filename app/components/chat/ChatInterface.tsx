@@ -8,9 +8,12 @@ import {
   resolveGmRequestRoll,
   rollRequestMetadataToInput,
 } from '@/lib/game-logic/resolve-gm-request-roll';
-
-/** Avoid duplicate auto-opens across React Strict Mode remounts within a page session. */
-const autoOpenedRollRequestIds = new Set<string>();
+import { useVoiceRecorder } from '@/lib/hooks/useVoiceRecorder';
+import {
+  buildGmVoicePlayerMessage,
+  buildGmVoicePlayerMessageFromSegments,
+} from '@/lib/voice/format-transcription-for-gm';
+import type { VoiceSttApiResponse } from '@/lib/voice/voice-api-types';
 
 function typeLabel(type: ChatMessage['type'], meta?: Record<string, unknown>): string {
   if (type === 'system' && meta?.kind === 'roll_request') return 'ROLL';
@@ -69,6 +72,14 @@ export function ChatInterface({
   const messages = useMemo(() => sortChatMessagesByTimestamp(rawMessages), [rawMessages]);
 
   const endRef = useRef<HTMLDivElement>(null);
+  /** After load/refresh, skip auto-opening the dice UI for the latest roll already in history; only open for new roll requests. */
+  const rollAutoOpenPrimedRef = useRef(false);
+  const lastSeenRollRequestIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    rollAutoOpenPrimedRef.current = false;
+    lastSeenRollRequestIdRef.current = null;
+  }, [sessionId]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -119,13 +130,25 @@ export function ChatInterface({
   useEffect(() => {
     if (!lastRollRequest || !enabled) return;
     const id = lastRollRequest.id;
-    if (autoOpenedRollRequestIds.has(id)) return;
-    autoOpenedRollRequestIds.add(id);
+    if (!rollAutoOpenPrimedRef.current) {
+      rollAutoOpenPrimedRef.current = true;
+      lastSeenRollRequestIdRef.current = id;
+      return;
+    }
+    if (lastSeenRollRequestIdRef.current === id) return;
+    lastSeenRollRequestIdRef.current = id;
     openGmRollFromMessage(lastRollRequest);
   }, [lastRollRequest, enabled, openGmRollFromMessage]);
 
   const [draft, setDraft] = useState('');
   const [sendError, setSendError] = useState<string | null>(null);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const {
+    isRecording: voiceRecording,
+    error: voiceHookError,
+    start: startVoice,
+    stop: stopVoice,
+  } = useVoiceRecorder();
 
   const send = useCallback(async () => {
     const text = draft.trim();
@@ -150,6 +173,105 @@ export function ChatInterface({
       setChatLoading(false);
     }
   }, [draft, enabled, sessionId, speakerName, setChatLoading]);
+
+  const toggleVoice = useCallback(async () => {
+    if (!enabled) return;
+    if (!voiceRecording) {
+      setVoiceError(null);
+      await startVoice();
+      return;
+    }
+    const blob = await stopVoice();
+    if (!blob || blob.size < 64) {
+      setVoiceError('Recording too short');
+      return;
+    }
+    setVoiceError(null);
+    setChatLoading(true);
+    try {
+      const headers: Record<string, string> = {
+        'Content-Type': blob.type || 'audio/webm',
+      };
+      if (focusCharacterId) headers['X-Character-Id'] = focusCharacterId;
+      const sttLang = process.env.NEXT_PUBLIC_STT_LANGUAGE?.trim();
+      if (sttLang) headers['X-STT-Language'] = sttLang;
+
+      const res = await fetch('/api/voice', { method: 'POST', body: blob, headers });
+      const data = (await res.json()) as VoiceSttApiResponse & { error?: string };
+      if (!res.ok) {
+        setVoiceError(data.error ?? res.statusText ?? 'Speech-to-text failed');
+        return;
+      }
+      const text = data.transcript?.trim();
+      if (!text) {
+        setVoiceError('No speech detected');
+        return;
+      }
+
+      const segs = data.segments ?? [];
+      let playerMessage: string;
+      let playerMessageMetadata: Record<string, unknown> | undefined;
+
+      if (segs.length <= 1) {
+        const cid = segs[0]?.characterId ?? focusCharacterId ?? '';
+        if (!cid) {
+          setVoiceError('Select a character before using voice input');
+          return;
+        }
+        const p = buildGmVoicePlayerMessage({
+          transcript: text,
+          characterId: cid,
+          characterDisplayName: speakerName,
+        });
+        playerMessage = p.playerMessage;
+        playerMessageMetadata = p.metadata;
+      } else {
+        const p = buildGmVoicePlayerMessageFromSegments(
+          segs.map((s) => ({
+            speaker: s.speaker,
+            text: s.text,
+            characterId: s.characterId,
+          })),
+          (id) => {
+            const c = charactersById[id] ?? npcsById[id];
+            return c?.name ?? id;
+          },
+        );
+        playerMessage = p.playerMessage;
+        playerMessageMetadata = p.metadata;
+      }
+
+      const gmRes = await fetch('/api/gm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId,
+          playerMessage,
+          speakerName,
+          playerMessageMetadata,
+        }),
+      });
+      const gmData = (await gmRes.json().catch(() => ({}))) as { error?: string };
+      if (!gmRes.ok) {
+        setVoiceError(gmData.error ?? gmRes.statusText ?? 'AI-GM request failed');
+      }
+    } catch (e) {
+      setVoiceError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setChatLoading(false);
+    }
+  }, [
+    enabled,
+    voiceRecording,
+    startVoice,
+    stopVoice,
+    focusCharacterId,
+    sessionId,
+    speakerName,
+    charactersById,
+    npcsById,
+    setChatLoading,
+  ]);
 
   const openRollRequestInRoller = useCallback(
     (m: ChatMessage) => {
@@ -176,7 +298,7 @@ export function ChatInterface({
   );
 
   return (
-    <section className="flex flex-col rounded-lg border border-zinc-700 bg-zinc-900/60 min-h-[320px] max-h-[min(70vh,520px)]">
+    <section className="flex flex-col h-full min-h-0 rounded-lg border border-zinc-700 bg-zinc-900/60">
       <header className="shrink-0 border-b border-zinc-700 px-3 py-2 flex items-center justify-between gap-2">
         <h2 className="text-[10px] uppercase tracking-widest text-zinc-400">Session chat</h2>
         {isLoading && (
@@ -247,6 +369,19 @@ export function ChatInterface({
           />
           <button
             type="button"
+            title={voiceRecording ? 'Stop and transcribe' : 'Click to start recording'}
+            onClick={() => void toggleVoice()}
+            disabled={!enabled || isLoading}
+            className={`shrink-0 text-white text-sm font-bold uppercase px-3 py-2 rounded border disabled:opacity-50 ${
+              voiceRecording
+                ? 'bg-red-800 hover:bg-red-700 border-red-500/60 animate-pulse'
+                : 'bg-zinc-800 hover:bg-zinc-700 border-zinc-600'
+            }`}
+          >
+            {voiceRecording ? 'Stop' : 'Mic'}
+          </button>
+          <button
+            type="button"
             onClick={() => void send()}
             disabled={!enabled || isLoading || !draft.trim()}
             className="shrink-0 bg-cyan-800 hover:bg-cyan-700 disabled:bg-zinc-700 disabled:text-zinc-500 text-white text-sm font-bold uppercase px-4 py-2 rounded border border-cyan-600/50"
@@ -255,6 +390,9 @@ export function ChatInterface({
           </button>
         </div>
         {sendError && <p className="text-xs text-red-400">{sendError}</p>}
+        {(voiceError || voiceHookError) && (
+          <p className="text-xs text-red-400">{voiceError ?? voiceHookError}</p>
+        )}
       </footer>
     </section>
   );

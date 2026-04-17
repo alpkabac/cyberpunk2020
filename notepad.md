@@ -211,4 +211,5 @@ okay implement this
 
 Implementing caller-supplied rollSummary plus sessionId/speakerName on dice intent, and a "Send to GM" button in DiceRoller. Searching the codebase for openDiceRoller call sites and DiceRollIntent definitions.
 
-The send shoudl wait until we send the voice file to tts and then the AI so they go with our prompt
+The send should wait until we send the voice file to tts and then the AI so they go with our prompt
+we also need to edit the stt to wait until we send

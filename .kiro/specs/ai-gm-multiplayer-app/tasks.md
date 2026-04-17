@@ -628,26 +628,30 @@ This implementation plan breaks down the design into discrete coding tasks. The 
     - **COMPLETED:** `request_roll` → system `roll_request` opens `DiceRoller`; `DiceRollIntent` `gm_request` POSTs roll to `/api/gm`; single `DiceRoller` mount in session room + character demo
 
 - [ ] 13. Implement voice processing
-  - [ ] 13.1 Add audio capture with WebRTC
+  - [x] 13.1 Add audio capture with WebRTC
     - Request microphone permission
     - Capture audio stream from all participants
     - Stream audio chunks to server
     - _Requirements: 2.1_
+    - **COMPLETED:** `lib/hooks/useVoiceRecorder.ts` (MediaRecorder + `getUserMedia`); timesliced chunks merged to one blob for STT upload. Chat **Mic** / **Stop** in `ChatInterface.tsx`.
 
-  - [ ] 13.2 Create api/voice/route.ts for STT processing
+  - [x] 13.2 Create api/voice/route.ts for STT processing
     - Integrate with Deepgram or Azure Speech Services
     - Perform speaker diarization
     - Map speaker IDs to characters
     - Return transcript with speaker identity
     - _Requirements: 2.2, 2.3, 2.4_
+    - **COMPLETED:** `app/api/voice/route.ts` — Deepgram prerecorded `listen.v1.media.transcribeFile` (`nova-3`, `diarize` + `utterances`). Headers: `X-Character-Id`, optional `X-Speaker-Map` JSON (`"0"→character uuid`). Env: `DEEPGRAM_API_KEY` or `STT_API_KEY`, optional `DEEPGRAM_MODEL`.
 
-  - [ ]* 13.3 Write property test for speaker-to-character mapping
+  - [x]* 13.3 Write property test for speaker-to-character mapping
     - **Property 3: Speaker-to-Character Mapping**
     - **Validates: Requirements 2.3**
+    - **COMPLETED:** `lib/voice/speaker-map.property.test.ts`
 
-  - [ ]* 13.4 Write property test for transcription message format
+  - [x]* 13.4 Write property test for transcription message format
     - **Property 4: Transcription Message Format**
     - **Validates: Requirements 2.4**
+    - **COMPLETED:** `lib/voice/format-transcription-for-gm.property.test.ts`
 
   - [ ] 13.5 Create api/tts/route.ts for narration
     - Integrate with OpenAI TTS or ElevenLabs

@@ -13,6 +13,8 @@ interface GmRequestBody {
   sessionId?: string;
   playerMessage?: string;
   speakerName?: string;
+  /** Optional metadata for the player chat row (e.g. voice STT provenance). */
+  playerMessageMetadata?: Record<string, unknown>;
   /** Override lore token budget (estimated tokens). */
   loreTokenBudget?: number;
 }
@@ -55,6 +57,10 @@ export async function POST(request: Request) {
   const playerMessage = body.playerMessage?.trim();
   const speakerName = body.speakerName?.trim() || 'Player';
   const loreBudget = typeof body.loreTokenBudget === 'number' && body.loreTokenBudget > 0 ? body.loreTokenBudget : 2000;
+  const playerMessageMetadata =
+    body.playerMessageMetadata && typeof body.playerMessageMetadata === 'object'
+      ? body.playerMessageMetadata
+      : {};
 
   if (!sessionId || !playerMessage) {
     return NextResponse.json({ error: 'sessionId and playerMessage are required' }, { status: 400 });
@@ -71,7 +77,7 @@ export async function POST(request: Request) {
     speaker: speakerName,
     text: playerMessage,
     type: 'player',
-    metadata: {},
+    metadata: playerMessageMetadata,
   });
 
   if (playerInsertError) {
