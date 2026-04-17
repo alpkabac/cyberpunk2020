@@ -34,6 +34,8 @@ export type GmToolName =
   | 'remove_item'
   | 'request_roll'
   | 'move_token'
+  | 'add_token'
+  | 'remove_token'
   | 'generate_scenery'
   | 'play_narration'
   | 'lookup_rules'
@@ -168,6 +170,37 @@ export function validateGmToolParameters(name: string, raw: unknown): { ok: true
       if (typeof y !== 'number') return { ok: false, error: y.error };
       if (x < 0 || x > 100 || y < 0 || y > 100) return { ok: false, error: 'x and y must be in 0–100' };
       return { ok: true, name: 'move_token', args: raw };
+    }
+    case 'add_token': {
+      const name = str(raw.name, 'name');
+      if (typeof name !== 'string') return { ok: false, error: name.error };
+      const controlled =
+        raw.controlled_by === 'player' || raw.controlled_by === 'gm' ? raw.controlled_by : 'gm';
+      if (controlled === 'player') {
+        const cid = str(raw.character_id, 'character_id');
+        if (typeof cid !== 'string') return { ok: false, error: cid.error };
+      }
+      if (raw.x !== undefined && raw.x !== null) {
+        const x = num(raw.x, 'x');
+        if (typeof x !== 'number') return { ok: false, error: x.error };
+        if (x < 0 || x > 100) return { ok: false, error: 'x must be in 0–100' };
+      }
+      if (raw.y !== undefined && raw.y !== null) {
+        const y = num(raw.y, 'y');
+        if (typeof y !== 'number') return { ok: false, error: y.error };
+        if (y < 0 || y > 100) return { ok: false, error: 'y must be in 0–100' };
+      }
+      if (raw.size !== undefined && raw.size !== null) {
+        const sz = num(raw.size, 'size');
+        if (typeof sz !== 'number') return { ok: false, error: sz.error };
+        if (sz < 20 || sz > 120) return { ok: false, error: 'size must be 20–120' };
+      }
+      return { ok: true, name: 'add_token', args: { ...raw, controlled_by: controlled } };
+    }
+    case 'remove_token': {
+      const token_id = str(raw.token_id, 'token_id');
+      if (typeof token_id !== 'string') return { ok: false, error: token_id.error };
+      return { ok: true, name: 'remove_token', args: raw };
     }
     case 'generate_scenery': {
       if (raw.description === undefined && raw.situation === undefined && raw.location === undefined) {
@@ -444,6 +477,43 @@ export async function executeGmTool(
         .eq('session_id', ctx.sessionId);
       if (error) return { ok: false, name, error: error.message };
       return { ok: true, name, result: { token_id: tokenId, x, y } };
+    }
+    case 'add_token': {
+      const nm = String(args.name);
+      const x = args.x !== undefined && args.x !== null ? Number(args.x) : 50;
+      const y = args.y !== undefined && args.y !== null ? Number(args.y) : 50;
+      const controlledBy = args.controlled_by === 'player' ? 'player' : 'gm';
+      const characterId =
+        controlledBy === 'player' && typeof args.character_id === 'string' && args.character_id.trim()
+          ? String(args.character_id).trim()
+          : null;
+      const imageUrl = typeof args.image_url === 'string' ? args.image_url : '';
+      const size =
+        typeof args.size === 'number' && Number.isFinite(args.size)
+          ? Math.max(20, Math.min(120, Math.floor(args.size)))
+          : 50;
+      const { data, error } = await ctx.supabase
+        .from('tokens')
+        .insert({
+          session_id: ctx.sessionId,
+          character_id: characterId,
+          name: nm,
+          image_url: imageUrl,
+          x,
+          y,
+          size,
+          controlled_by: controlledBy,
+        })
+        .select('id')
+        .single();
+      if (error) return { ok: false, name, error: error.message };
+      return { ok: true, name, result: { token_id: data?.id, name: nm, x, y, controlled_by: controlledBy } };
+    }
+    case 'remove_token': {
+      const tokenId = String(args.token_id);
+      const { error } = await ctx.supabase.from('tokens').delete().eq('id', tokenId).eq('session_id', ctx.sessionId);
+      if (error) return { ok: false, name, error: error.message };
+      return { ok: true, name, result: { token_id: tokenId, removed: true } };
     }
     case 'generate_scenery': {
       const { data: row, error: fetchErr } = await ctx.supabase

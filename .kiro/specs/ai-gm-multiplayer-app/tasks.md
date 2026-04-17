@@ -518,7 +518,7 @@ This implementation plan breaks down the design into discrete coding tasks. The 
       - **Core:** apply_damage, deduct_money, add_item, remove_item, request_roll, move_token, generate_scenery, play_narration, lookup_rules, update_character_field
       - **Extended:** add_money, heal_damage, roll_dice (server-side for NPCs), equip_item, modify_skill, update_ammo, set_condition (with duration_rounds), update_summary, add_chat_as_npc
     - **Deferred tools** (to be added when their dependencies exist):
-      - `add_token` / `remove_token` — blocked on Task 14 (Map & Token UI); `move_token` already works against the `tokens` table
+      - `add_token` / `remove_token` — implemented (Task 14); `move_token` already works against the `tokens` table
       - `spawn_npc` — see Task 19; requires character creation logic and GM-owned character rows
       - `start_combat` / `advance_round` / `end_combat` — see Task 20; requires turn tracker / initiative system
     - **`request_roll`:** surface to the client as guidance (open dice roller, suggested formula)—does not replace player agency or enforce server-side randomness
@@ -670,33 +670,37 @@ This implementation plan breaks down the design into discrete coding tasks. The 
     - **Property 21: Narration Queueing**
     - **Validates: Requirements 9.4**
 
-- [ ] 14. Build Map and Token component
-  - [ ] 14.1 Create MapCanvas.tsx with background image
+- [x] 14. Build Map and Token component
+  - [x] 14.1 Create MapCanvas.tsx with background image
     - Display map background image
     - Support custom map upload
     - _Requirements: 8.1, 8.5_
+    - **COMPLETED:** `components/map/MapCanvas.tsx` — GM URL + image upload (inline data URL, size-capped); persists `sessions.map_background_url`
 
-  - [ ] 14.2 Add token rendering and dragging
+  - [x] 14.2 Add token rendering and dragging
     - Render tokens at percentage positions
     - Implement drag-and-drop for player tokens
     - Distinguish player vs GM tokens
     - _Requirements: 8.2, 8.3, 8.6_
+    - **COMPLETED:** Percent `left`/`top`, portrait or initials; ring colors (GM / yours / other); drag when allowed by `canDragToken` + `allowPlayerTokenMovement`
 
-  - [ ]* 14.3 Write property test for token ownership
+  - [x]* 14.3 Write property test for token ownership
     - **Property 20: Token Ownership**
     - **Validates: Requirements 8.6**
+    - **COMPLETED:** `lib/map/token-ownership.property.test.ts`
 
-  - [ ] 14.4 Integrate token movement with Realtime
+  - [x] 14.4 Integrate token movement with Realtime
     - Persist token `x,y` (and related fields) to Postgres; other clients receive updates via `postgres_changes`
     - Optional: `broadcast` for smooth drag preview; commit position on drag end
     - AI-GM `move_token` tool updates the same rows
     - _Requirements: 8.3, 8.4_
+    - **COMPLETED:** Drag end → `tokens` update; existing `postgres_changes` + store handlers; broadcast preview not implemented (optional)
 
-  - [ ] 14.5 Add `add_token` and `remove_token` AI tools _(deferred — blocked on 14.1–14.4)_
+  - [x] 14.5 Add `add_token` and `remove_token` AI tools
     - `add_token`: AI places a new token on the map (NPC, object, hazard marker) — inserts row into `tokens` table
     - `remove_token`: AI removes a token from the map (NPC defeated, object destroyed) — deletes row from `tokens` table
     - `move_token` already exists in tool-executor.ts and tool-definitions.ts; these two complete the set
-    - **Current state:** `move_token` tool is implemented and functional against the `tokens` DB table; the Map UI (14.1–14.2) and token rows are not yet in active use
+    - **COMPLETED:** `add_token` / `remove_token` in `tool-definitions.ts` + `tool-executor.ts`; GM context includes `MAP_TOKENS_JSON`
     - _Requirements: 8.2, 8.3_
 
 - [ ] 15. Implement authentication and authorization

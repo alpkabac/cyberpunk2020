@@ -2,7 +2,7 @@
  * Assembles LLM messages for the AI-GM (Requirements 3.6, 4.1).
  */
 
-import type { Character, ChatMessage, Scene } from '../types';
+import type { Character, ChatMessage, Scene, Token } from '../types';
 import { estimateTokens } from './lorebook';
 
 export const CORE_GM_RULES = `You are the Game Master for a Cyberpunk 2020 tabletop session (R. Talsorian Games).
@@ -13,7 +13,7 @@ Output engaging but concise narration; use tools for concrete state changes (dam
 
 **Character sheets and tools:** The user message block includes CHARACTERS_JSON. Every entry has an \`id\` field (UUID) and \`name\`. You always have this data—do not claim you lack access to character sheets.
 For character tools (apply_damage, deduct_money, add_money, heal_damage, add_item, remove_item, equip_item, modify_skill, update_ammo, set_condition, update_character_field), pass \`character_id\` from that JSON. Prefer the character whose \`name\` matches CURRENT_MESSAGE_SPEAKER when it clearly refers to the acting player; if there is only one PC (type "character"), use that id; if several PCs could apply, ask which **character by name**, never ask the human to paste a UUID.
-For move_token, use token ids from the session map state when provided in context; if missing, describe movement and avoid guessing ids.
+For move_token, add_token, and remove_token, use token ids from MAP_TOKENS_JSON when present; if missing, describe map changes in narration and avoid guessing ids.
 If CHARACTERS_JSON is empty, the session has no sheets synced yet—say that and skip character tools.
 
 **Money:** Use \`add_money\` to reward eurobucks (payment, loot, rewards). Use \`deduct_money\` to subtract (purchases, bribes, fees). Never use update_character_field for eurobucks—use the dedicated tools.
@@ -118,11 +118,33 @@ export function sceneToPayload(scene: Scene): SceneContextPayload {
   };
 }
 
+export interface MapTokenForLlm {
+  id: string;
+  name: string;
+  controlled_by: Token['controlledBy'];
+  x: number;
+  y: number;
+  character_id: string | null;
+}
+
+export function serializeTokensForLlm(tokens: Token[]): MapTokenForLlm[] {
+  return tokens.map((t) => ({
+    id: t.id,
+    name: t.name,
+    controlled_by: t.controlledBy,
+    x: t.x,
+    y: t.y,
+    character_id: t.characterId ?? null,
+  }));
+}
+
 export interface BuildContextInput {
   sessionName: string;
   sessionSummary: string;
   activeScene: Scene;
   characters: Character[];
+  /** Map tokens for move_token / add_token / remove_token tool calls. */
+  mapTokens: Token[];
   chatHistory: ChatMessage[];
   /** Latest user line (also usually last in chatHistory). */
   playerMessage: string;
@@ -166,12 +188,14 @@ export function buildGmUserContent(input: BuildContextInput): string {
 
   const charsJson = JSON.stringify(input.characters.map(serializeCharacterForLlm));
   const sceneJson = JSON.stringify(sceneToPayload(input.activeScene));
+  const mapTokensJson = JSON.stringify(serializeTokensForLlm(input.mapTokens));
 
   const parts = [
     `SESSION: ${input.sessionName}`,
     `SUMMARY: ${input.sessionSummary || '(none)'}`,
     `CURRENT_MESSAGE_SPEAKER: ${input.messageSpeaker || 'Player'}`,
     `ACTIVE_SCENE_JSON: ${sceneJson}`,
+    `MAP_TOKENS_JSON: ${mapTokensJson}`,
     `CHARACTERS_JSON: ${charsJson}`,
     `RECENT_CHAT:\n${historyBlock || '(empty)'}`,
     `LORE_RULES:\n${input.loreInjection || '(none)'}`,

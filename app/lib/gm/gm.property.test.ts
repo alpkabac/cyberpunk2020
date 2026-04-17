@@ -110,12 +110,14 @@ describe('Property 7: Conversation continuity', () => {
       sessionSummary: 'sum',
       activeScene: minimalScene,
       characters: chars,
+      mapTokens: [],
       chatHistory: history,
       playerMessage: 'I draw my gun',
       messageSpeaker: 'Player',
       loreInjection: 'RULE: test',
       maxHistoryMessages: 10,
     });
+    expect(out).toContain('MAP_TOKENS_JSON');
     expect(out).toContain('PLAYER_MESSAGE');
     expect(out).toContain('I draw my gun');
     expect(out).toContain('LORE_RULES');
@@ -168,6 +170,21 @@ describe('Property 6: Tool parameter validation', () => {
   it('accepts valid apply_damage', () => {
     const v = validateGmToolParameters('apply_damage', { character_id: 'abc', raw_damage: 5, location: 'Torso' });
     expect(v.ok).toBe(true);
+  });
+
+  it('accepts add_token and remove_token', () => {
+    expect(validateGmToolParameters('add_token', { name: 'Ganger' }).ok).toBe(true);
+    expect(
+      validateGmToolParameters('add_token', {
+        name: 'PC',
+        controlled_by: 'player',
+        character_id: 'c1',
+        x: 10,
+        y: 20,
+      }).ok,
+    ).toBe(true);
+    expect(validateGmToolParameters('add_token', { name: 'X', controlled_by: 'player' }).ok).toBe(false);
+    expect(validateGmToolParameters('remove_token', { token_id: 't1' }).ok).toBe(true);
   });
 
   it('accepts request_roll (legacy formula and structured roll_kind)', () => {

@@ -140,6 +140,45 @@ export const GM_TOOL_DEFINITIONS = [
   {
     type: 'function' as const,
     function: {
+      name: 'add_token',
+      description:
+        'Place a new token on the battle map (NPC, object, hazard, or a PC marker). Use controlled_by gm for neutral or GM-owned markers; use player with character_id to anchor a player character token.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Label on the map' },
+          x: { type: 'number', minimum: 0, maximum: 100, description: 'Horizontal position 0–100 (default 50)' },
+          y: { type: 'number', minimum: 0, maximum: 100, description: 'Vertical position 0–100 (default 50)' },
+          image_url: { type: 'string', description: 'Optional portrait URL' },
+          controlled_by: {
+            type: 'string',
+            enum: ['gm', 'player'],
+            description: 'gm = GM-controlled marker; player = tied to character_id',
+          },
+          character_id: { type: 'string', description: 'Required when controlled_by is player' },
+          size: { type: 'number', minimum: 20, maximum: 120, description: 'Token diameter in pixels (default 50)' },
+        },
+        required: ['name'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'remove_token',
+      description: 'Remove a token from the map (defeated NPC, destroyed object, etc.).',
+      parameters: {
+        type: 'object',
+        properties: {
+          token_id: { type: 'string', description: 'UUID from MAP_TOKENS_JSON' },
+        },
+        required: ['token_id'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
       name: 'generate_scenery',
       description: 'Update the active scene description/situation in the session.',
       parameters: {

@@ -7,6 +7,7 @@ import type { User } from '@supabase/supabase-js';
 import { CharacterSheet, DiceRoller } from '@/components/character';
 import { ChatInterface, ResizableChatPanel } from '@/components/chat';
 import { PopoutCharacterSheet } from '@/components/session/PopoutCharacterSheet';
+import { MapCanvas } from '@/components/map';
 import { supabase } from '@/lib/supabase';
 import { useGameStore } from '@/lib/store/game-store';
 import { useSessionRealtimeSync } from '@/lib/hooks/useSessionRealtimeSync';
@@ -293,6 +294,11 @@ export function SessionRoomClient() {
         </aside>
 
         <main className="flex-1 min-w-0">
+          {user && cloudHydrated && !loadError && (
+            <div className="max-w-[900px] mx-auto w-full mb-6">
+              <MapCanvas sessionId={sessionId} supabase={supabase} userId={user.id} isGm={isGm} />
+            </div>
+          )}
           {user && cloudHydrated && !loadError && resolvedCharacterId && selectedCharacter && (
             <div className="max-w-[900px] mx-auto w-full space-y-2">
               {!canEditSheet && (
