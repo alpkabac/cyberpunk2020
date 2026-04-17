@@ -1,4 +1,7 @@
 import { NextResponse } from 'next/server';
+import { assertPlayerVoiceCharacterAllowed } from '@/lib/auth/player-voice-character';
+import { requireAuthFromRequest } from '@/lib/auth/require-auth';
+import { userHasSessionAccess } from '@/lib/auth/session-access';
 import { fetchSessionSnapshot } from '@/lib/realtime/session-load';
 import { getServiceRoleClient } from '@/lib/supabase';
 
@@ -17,6 +20,9 @@ interface FragmentBody {
 }
 
 export async function POST(request: Request) {
+  const auth = await requireAuthFromRequest(request);
+  if (!auth.ok) return auth.response;
+
   let body: FragmentBody;
   try {
     body = (await request.json()) as FragmentBody;
@@ -56,10 +62,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'anchorMs must be a finite number' }, { status: 400 });
   }
 
+  if (userId !== auth.user.id) {
+    return NextResponse.json({ error: 'userId must match authenticated user' }, { status: 403 });
+  }
+
   const supabase = getServiceRoleClient();
   if (!(await fetchSessionSnapshot(supabase, sessionId))) {
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
   }
+
+  const allowed = await userHasSessionAccess(supabase, sessionId, auth.user.id);
+  if (!allowed) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+
+  const charDeny = await assertPlayerVoiceCharacterAllowed(supabase, sessionId, characterId, auth.user.id);
+  if (charDeny) return charDeny;
 
   const row = {
     session_id: sessionId,

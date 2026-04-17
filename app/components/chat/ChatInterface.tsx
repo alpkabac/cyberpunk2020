@@ -10,6 +10,7 @@ import {
 } from '@/lib/game-logic/resolve-gm-request-roll';
 import { useVoiceRecorder } from '@/lib/hooks/useVoiceRecorder';
 import { applyGmPostSuccessToStore } from '@/lib/gm/apply-gm-client-response';
+import { getAccessTokenForApi } from '@/lib/auth/client-access-token';
 import { voiceBlobToGmPlayerMessage } from '@/lib/voice/voice-blob-to-player-message';
 import { requestSessionVoiceTurnMerge } from '@/lib/voice/request-session-voice-turn-merge';
 import { supabase } from '@/lib/supabase';
@@ -127,7 +128,8 @@ export function ChatInterface({
           data: { session: authSession },
         } = await supabase.auth.getSession();
         const userId = authSession?.user?.id;
-        if (!userId) {
+        const accessToken = authSession?.access_token;
+        if (!userId || !accessToken) {
           setVoiceError('Not signed in');
           return;
         }
@@ -137,6 +139,7 @@ export function ChatInterface({
           speakerName,
           charactersById,
           npcsById,
+          accessToken,
         });
         if (!textResult.ok) {
           setVoiceError(textResult.error);
@@ -146,7 +149,10 @@ export function ChatInterface({
         const pendingRollsForJson = rolls.map((r) => ({ rolledAtMs: r.rolledAtMs, playerMessage: r.playerMessage }));
         const res = await fetch('/api/session/voice-turn/fragment', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
           body: JSON.stringify({
             sessionId,
             turnId,
@@ -165,7 +171,7 @@ export function ChatInterface({
           return;
         }
         useGameStore.getState().clearPendingRollsForSession(sessionId);
-        await requestSessionVoiceTurnMerge(sessionId, turnId);
+        await requestSessionVoiceTurnMerge(sessionId, turnId, accessToken);
       } catch (e) {
         setVoiceError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -376,9 +382,17 @@ export function ChatInterface({
     setSendError(null);
     setChatLoading(true);
     try {
+      const accessToken = await getAccessTokenForApi(supabase);
+      if (!accessToken) {
+        setSendError('Not signed in');
+        return;
+      }
       const res = await fetch('/api/gm', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
         body: JSON.stringify({ sessionId, playerMessage: text, speakerName }),
       });
       const data = await res.json().catch(() => ({}));
@@ -445,12 +459,18 @@ export function ChatInterface({
     }
     setChatLoading(true);
     try {
+      const accessToken = await getAccessTokenForApi(supabase);
+      if (!accessToken) {
+        setVoiceError('Not signed in');
+        return;
+      }
       const textResult = await voiceBlobToGmPlayerMessage({
         blob,
         focusCharacterId,
         speakerName,
         charactersById,
         npcsById,
+        accessToken,
       });
       if (!textResult.ok) {
         setVoiceError(textResult.error);
@@ -458,7 +478,10 @@ export function ChatInterface({
       }
       const gmRes = await fetch('/api/gm', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
         body: JSON.stringify({
           sessionId,
           playerMessage: textResult.playerMessage,

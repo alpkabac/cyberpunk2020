@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import { getAccessTokenForApi } from '@/lib/auth/client-access-token';
 import {
   getDevSessionId,
   getDevSpeakerName,
@@ -10,6 +11,7 @@ import {
   setDevSessionId,
   setDevSpeakerName,
 } from '@/lib/dev/dev-session-storage';
+import { supabase } from '@/lib/supabase';
 
 export interface Scenario {
   id: string;
@@ -274,9 +276,17 @@ export function GmScenariosClient() {
 
     setLoading(true);
     try {
+      const accessToken = await getAccessTokenForApi(supabase);
+      if (!accessToken) {
+        setClientError('Sign in first (use /login or Character demo auth), then retry.');
+        return;
+      }
       const res = await fetch('/api/gm', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
         body: JSON.stringify({
           sessionId: sid,
           playerMessage: effectiveMessage,

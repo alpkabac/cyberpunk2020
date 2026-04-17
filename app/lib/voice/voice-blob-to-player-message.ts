@@ -18,14 +18,16 @@ export async function voiceBlobToGmPlayerMessage(params: {
   speakerName: string;
   charactersById: Record<string, Character>;
   npcsById: Record<string, Character>;
+  accessToken: string;
 }): Promise<VoiceBlobToMessageResult> {
-  const { blob, focusCharacterId, speakerName, charactersById, npcsById } = params;
+  const { blob, focusCharacterId, speakerName, charactersById, npcsById, accessToken } = params;
   if (blob.size < 64) {
     return { ok: false, error: 'Recording too short' };
   }
 
   const headers: Record<string, string> = {
     'Content-Type': blob.type || 'audio/webm',
+    Authorization: `Bearer ${accessToken}`,
   };
   if (focusCharacterId) headers['X-Character-Id'] = focusCharacterId;
   const sttLang = process.env.NEXT_PUBLIC_STT_LANGUAGE?.trim();

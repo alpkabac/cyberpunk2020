@@ -1,5 +1,7 @@
 import { after } from 'next/server';
 import { NextResponse } from 'next/server';
+import { requireAuthFromRequest } from '@/lib/auth/require-auth';
+import { userHasSessionAccess } from '@/lib/auth/session-access';
 import { runGmCompletionAfterPlayerInsert } from '@/lib/gm/run-gm-completion-after-insert';
 import { chatRowToMessage } from '@/lib/realtime/db-mapper';
 import { fetchSessionSnapshot } from '@/lib/realtime/session-load';
@@ -19,6 +21,9 @@ interface GmRequestBody {
 }
 
 export async function POST(request: Request) {
+  const auth = await requireAuthFromRequest(request);
+  if (!auth.ok) return auth.response;
+
   const apiKey = getOpenRouterApiKeyFromEnv();
   if (!apiKey) {
     return NextResponse.json(
@@ -56,6 +61,11 @@ export async function POST(request: Request) {
   const supabase = getServiceRoleClient();
   if (!(await fetchSessionSnapshot(supabase, sessionId))) {
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
+  }
+
+  const allowed = await userHasSessionAccess(supabase, sessionId, auth.user.id);
+  if (!allowed) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
   const { data: inserted, error: playerInsertError } = await supabase

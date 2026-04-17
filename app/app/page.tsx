@@ -28,6 +28,13 @@ export default function Home() {
           </p>
 
           <Link
+            href="/login"
+            className="block w-full max-w-md mx-auto bg-zinc-800 hover:bg-zinc-700 text-zinc-100 border-2 border-zinc-500 px-8 py-4 font-bold uppercase text-lg tracking-wider transition-colors"
+          >
+            Sign in / sign up
+          </Link>
+
+          <Link
             href="/character-demo"
             className="block w-full max-w-md mx-auto bg-cyan-600 hover:bg-cyan-500 text-white border-2 border-cyan-400 px-8 py-4 font-bold uppercase text-lg tracking-wider transition-colors"
           >

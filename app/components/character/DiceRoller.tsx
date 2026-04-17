@@ -8,7 +8,9 @@ import {
   buildGmDiceRollMessage,
   mergeVoiceWithSingleRollForGm,
 } from '@/lib/dice-roll-send-to-gm';
+import { getAccessTokenForApi } from '@/lib/auth/client-access-token';
 import { applyGmPostSuccessToStore } from '@/lib/gm/apply-gm-client-response';
+import { supabase } from '@/lib/supabase';
 import type { DiceRollIntent, RollResult } from '@/lib/types';
 
 interface DiceRollEntry {
@@ -142,6 +144,11 @@ export function DiceRoller() {
     setSheetSendError(null);
     setSheetSending(true);
     try {
+      const accessToken = await getAccessTokenForApi(supabase);
+      if (!accessToken) {
+        setSheetSendError('Not signed in');
+        return;
+      }
       const pending = useGameStore.getState().ui.pendingVoiceGm;
       const merge =
         pending &&
@@ -151,7 +158,10 @@ export function DiceRoller() {
           : null;
       const res = await fetch('/api/gm', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
         body: JSON.stringify({
           sessionId: payload.sessionId,
           playerMessage: merge ? merge.playerMessage : payload.playerMessage,

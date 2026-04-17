@@ -2,11 +2,18 @@
  * Calls merge after all clients have had time to POST STT fragments; retries when the server
  * is still waiting for stragglers (HTTP 202) or merge lock contention.
  */
-export async function requestSessionVoiceTurnMerge(sessionId: string, turnId: string): Promise<void> {
+export async function requestSessionVoiceTurnMerge(
+  sessionId: string,
+  turnId: string,
+  accessToken: string,
+): Promise<void> {
   for (let attempt = 0; attempt < 15; attempt++) {
     const res = await fetch('/api/session/voice-turn/merge', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
       body: JSON.stringify({ sessionId, turnId }),
     });
 

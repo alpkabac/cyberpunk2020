@@ -280,6 +280,12 @@ export function SessionRoomClient() {
               >
                 Sign in
               </button>
+              <Link
+                href={`/login?next=${encodeURIComponent(`/session/${sessionId}`)}`}
+                className="block text-center text-cyan-500 hover:text-cyan-400 text-xs underline"
+              >
+                Open full sign-up page
+              </Link>
             </div>
           ) : (
             <p className="text-xs text-emerald-500/90 truncate" title={user.email ?? user.id}>

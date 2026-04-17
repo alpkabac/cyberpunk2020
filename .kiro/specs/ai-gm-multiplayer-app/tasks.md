@@ -703,29 +703,34 @@ This implementation plan breaks down the design into discrete coding tasks. The 
     - **COMPLETED:** `add_token` / `remove_token` in `tool-definitions.ts` + `tool-executor.ts`; GM context includes `MAP_TOKENS_JSON`
     - _Requirements: 8.2, 8.3_
 
-- [ ] 15. Implement authentication and authorization
-  - [ ] 15.1 Set up Supabase Auth
+- [x] 15. Implement authentication and authorization
+  - [x] 15.1 Set up Supabase Auth
     - Configure email/password authentication
     - Add sign up, sign in, sign out flows
     - _Requirements: 15.1_
+    - **COMPLETED:** `/login` (`LoginClient.tsx`) — sign in / sign up / sign out; existing `signInWithPassword` in session room; enable Email provider in Supabase dashboard if not already on
 
-  - [ ]* 15.2 Write property test for authentication enforcement
+  - [x]* 15.2 Write property test for authentication enforcement
     - **Property 28: Authentication Enforcement**
     - **Validates: Requirements 15.1**
+    - **COMPLETED:** `lib/auth/bearer.property.test.ts` (Bearer parsing invariants)
 
-  - [ ] 15.3 Add authorization checks to API routes
+  - [x] 15.3 Add authorization checks to API routes
     - Validate JWT on all requests
     - Check character ownership before modifications
     - Check session creator permissions
     - _Requirements: 15.2, 15.3, 15.4_
+    - **COMPLETED:** `Authorization: Bearer` + `getUser` in `/api/gm`, `/api/voice`, `/api/session/voice-turn/fragment`, `/api/session/voice-turn/merge`; session participation via `userHasSessionAccess`; voice fragment `userId` must match JWT; `characterId` validated with `assertPlayerVoiceCharacterAllowed` (PC owner or GM + NPC)
 
-  - [ ]* 15.4 Write property test for character ownership
+  - [x]* 15.4 Write property test for character ownership
     - **Property 29: Character Ownership**
     - **Validates: Requirements 15.2, 15.3**
+    - **COMPLETED:** `lib/auth/character-edit-policy.property.test.ts`
 
-  - [ ]* 15.5 Write property test for session creator permissions
+  - [x]* 15.5 Write property test for session creator permissions
     - **Property 30: Session Creator Permissions**
     - **Validates: Requirements 15.4**
+    - **COMPLETED:** `lib/auth/session-creator-policy.property.test.ts`
 
 - [ ] 16. Implement session persistence
   - [ ] 16.1 Add session save functionality

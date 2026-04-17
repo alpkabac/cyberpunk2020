@@ -1,5 +1,6 @@
 import { DeepgramClient } from '@deepgram/sdk';
 import { NextResponse } from 'next/server';
+import { requireAuthFromRequest } from '@/lib/auth/require-auth';
 import { parseDeepgramPrerecordedResult } from '@/lib/voice/parse-deepgram-prerecorded';
 import { mapSpeakerIndexToCharacterId } from '@/lib/voice/speaker-map';
 import { getDeepgramApiKeyFromEnv } from '@/lib/voice/stt-env';
@@ -23,6 +24,9 @@ export interface VoiceSttSegmentResponse {
  *   Wrong language vs. your speech produces gibberish (e.g. Turkish audio + `en`).
  */
 export async function POST(request: Request) {
+  const auth = await requireAuthFromRequest(request);
+  if (!auth.ok) return auth.response;
+
   const apiKey = getDeepgramApiKeyFromEnv();
   if (!apiKey) {
     return NextResponse.json(
