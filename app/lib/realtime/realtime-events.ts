@@ -19,6 +19,12 @@ export const BROADCAST_EVENTS = {
   ROLL_REQUEST: 'roll_request',
   TYPING: 'typing',
   TOKEN_DRAG_PREVIEW: 'token_drag_preview',
+  /** Sync group “session” voice mode across all clients in the room (ephemeral). */
+  SESSION_RECORDING: 'session_recording',
+  /** Someone stopped their mic in Session mode — peers finalize STT and POST fragments for the same `turnId`. */
+  SESSION_VOICE_STOP_ALL: 'session_voice_stop_all',
+  /** Someone pressed Mic in Session mode — peers with mic pre-authorized can start together. */
+  SESSION_VOICE_PEER_START: 'session_voice_peer_start',
 } as const;
 
 export type BroadcastEventName = (typeof BROADCAST_EVENTS)[keyof typeof BROADCAST_EVENTS];

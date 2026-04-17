@@ -80,6 +80,8 @@ const DEFAULT_SETTINGS: SessionSettings = {
   ttsVoice: 'default',
   autoRollDamage: true,
   allowPlayerTokenMovement: true,
+  voiceInputMode: 'pushToTalk',
+  sessionRecordingStartedBy: null,
 };
 
 export function parseSceneJson(v: unknown): Scene {
@@ -96,6 +98,17 @@ export function parseSceneJson(v: unknown): Scene {
 export function parseSessionSettingsJson(v: unknown): SessionSettings {
   if (!v || typeof v !== 'object') return { ...DEFAULT_SETTINGS };
   const o = v as Record<string, unknown>;
+  const voiceInputMode =
+    o.voiceInputMode === 'session' || o.voiceInputMode === 'pushToTalk'
+      ? o.voiceInputMode
+      : DEFAULT_SETTINGS.voiceInputMode;
+  const sessionRecordingStartedBy =
+    o.sessionRecordingStartedBy === null || o.sessionRecordingStartedBy === undefined
+      ? null
+      : typeof o.sessionRecordingStartedBy === 'string'
+        ? o.sessionRecordingStartedBy
+        : DEFAULT_SETTINGS.sessionRecordingStartedBy;
+
   return {
     ttsEnabled: typeof o.ttsEnabled === 'boolean' ? o.ttsEnabled : DEFAULT_SETTINGS.ttsEnabled,
     ttsVoice: str(o.ttsVoice, DEFAULT_SETTINGS.ttsVoice),
@@ -105,6 +118,8 @@ export function parseSessionSettingsJson(v: unknown): SessionSettings {
       typeof o.allowPlayerTokenMovement === 'boolean'
         ? o.allowPlayerTokenMovement
         : DEFAULT_SETTINGS.allowPlayerTokenMovement,
+    voiceInputMode,
+    sessionRecordingStartedBy,
   };
 }
 

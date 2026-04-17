@@ -8,6 +8,7 @@ import {
   fetchSessionSnapshot,
 } from '@/lib/realtime';
 import { createDefaultPostgresHandlersForGameStore } from '@/lib/realtime/apply-realtime-to-store';
+import { BROADCAST_EVENTS } from '@/lib/realtime/realtime-events';
 import { useGameStore } from '@/lib/store/game-store';
 import type { SessionRealtimeHandle } from '@/lib/realtime/session-channel';
 
@@ -53,12 +54,22 @@ export function useSessionRealtimeSync(
           sessionId,
           refreshFromDatabase,
           postgresHandlers: createDefaultPostgresHandlersForGameStore(),
+          onBroadcast: (event, payload) => {
+            if (event === BROADCAST_EVENTS.SESSION_RECORDING) {
+              useGameStore.getState().applySessionRecordingBroadcast(payload);
+            } else if (event === BROADCAST_EVENTS.SESSION_VOICE_STOP_ALL) {
+              useGameStore.getState().bumpSessionVoiceStopAllFromBroadcast(payload);
+            } else if (event === BROADCAST_EVENTS.SESSION_VOICE_PEER_START) {
+              useGameStore.getState().bumpSessionVoicePeerStartFromBroadcast();
+            }
+          },
         });
         if (cancelled) {
           await handle.dispose();
           return;
         }
         handleRef.current = handle;
+        useGameStore.getState().registerSessionBroadcastSend(handle.sendBroadcast.bind(handle));
         recoveryRef.current = attachSessionRealtimeRecovery(handle);
         onDoneRef.current?.();
       } catch {
@@ -71,6 +82,7 @@ export function useSessionRealtimeSync(
 
     return () => {
       cancelled = true;
+      useGameStore.getState().registerSessionBroadcastSend(null);
       recoveryRef.current?.();
       recoveryRef.current = null;
       void handleRef.current?.dispose();

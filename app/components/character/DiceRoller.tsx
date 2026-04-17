@@ -4,14 +4,20 @@ import { useState, useCallback, useEffect } from 'react';
 import { useGameStore } from '@/lib/store/game-store';
 import { rollDice } from '@/lib/game-logic/dice';
 import { resolveAttackFumbleOutcome } from '@/lib/game-logic/fumbles';
-import { buildGmDiceRollMessage } from '@/lib/dice-roll-send-to-gm';
-import { RollResult } from '@/lib/types';
+import {
+  buildGmDiceRollMessage,
+  mergeVoiceWithSingleRollForGm,
+} from '@/lib/dice-roll-send-to-gm';
+import { applyGmPostSuccessToStore } from '@/lib/gm/apply-gm-client-response';
+import type { DiceRollIntent, RollResult } from '@/lib/types';
 
 interface DiceRollEntry {
   id: number;
   formula: string;
   result: RollResult;
   timestamp: number;
+  /** Intent at roll time (before flat saves clear the store) — used for Save for voice / reroll. */
+  intentSnapshot: DiceRollIntent | null;
   /** Captured when the roll completes so "Send to GM" still works after stun/death clears intent. */
   sendToGm?: {
     sessionId: string;
@@ -25,6 +31,7 @@ export function DiceRoller() {
   const diceFormula = useGameStore((state) => state.ui.diceFormula);
   const diceRollIntent = useGameStore((state) => state.ui.diceRollIntent);
   const closeDiceRoller = useGameStore((state) => state.closeDiceRoller);
+  const addPendingRollForVoice = useGameStore((state) => state.addPendingRollForVoice);
 
   const nonBlockingGm =
     diceRollIntent?.kind === 'gm_request' && diceRollIntent.nonBlockingUi !== false;
@@ -38,10 +45,9 @@ export function DiceRoller() {
     target: number;
     success: boolean;
   } | null>(null);
-  const [gmSubmitError, setGmSubmitError] = useState<string | null>(null);
-  const [gmSubmitting, setGmSubmitting] = useState(false);
   const [sheetSendError, setSheetSendError] = useState<string | null>(null);
   const [sheetSending, setSheetSending] = useState(false);
+  const [saveForVoiceHint, setSaveForVoiceHint] = useState(false);
 
   const doRoll = useCallback((formula: string) => {
     const result = rollDice(formula);
@@ -50,14 +56,28 @@ export function DiceRoller() {
     setIsAnimating(true);
     setTimeout(() => setIsAnimating(false), 300);
 
-    const intentSnapshot = useGameStore.getState().ui.diceRollIntent;
-    const sendPayload = buildGmDiceRollMessage(intentSnapshot, formula, result.total);
+    const storeSnap = useGameStore.getState();
+    const intentSnapshot = storeSnap.ui.diceRollIntent;
+    let sendPayload = buildGmDiceRollMessage(intentSnapshot, formula, result);
+    if (!sendPayload) {
+      const sid = storeSnap.session.id?.trim();
+      if (sid) {
+        const cid = storeSnap.ui.selectedCharacterId;
+        const char = cid ? storeSnap.characters.byId[cid] ?? storeSnap.npcs.byId[cid] : null;
+        sendPayload = {
+          sessionId: sid,
+          speakerName: char?.name ?? 'Player',
+          playerMessage: `Rolled ${formula} = ${result.total} (dice: ${result.rolls.join(', ')})`,
+        };
+      }
+    }
 
     const entry: DiceRollEntry = {
       id: Date.now(),
       formula,
       result,
       timestamp: Date.now(),
+      intentSnapshot,
       ...(sendPayload ? { sendToGm: sendPayload } : {}),
     };
 
@@ -80,35 +100,6 @@ export function DiceRoller() {
       });
     } else {
       setStabilizationOutcome(null);
-    }
-
-    if (intent?.kind === 'gm_request') {
-      const { sessionId, reason, speakerName } = intent;
-      const playerMessage = `[Roll] ${formula} = ${result.total} (dice: ${result.rolls.join(', ')})${reason ? ` — ${reason}` : ''}`;
-      void (async () => {
-        setGmSubmitError(null);
-        setGmSubmitting(true);
-        try {
-          const res = await fetch('/api/gm', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sessionId, playerMessage, speakerName }),
-          });
-          const data = (await res.json().catch(() => ({}))) as { error?: string };
-          if (!res.ok) {
-            setGmSubmitError(data.error ?? res.statusText ?? 'Request failed');
-            return;
-          }
-          const store = useGameStore.getState();
-          store.clearDiceRollIntent();
-          store.closeDiceRoller();
-        } catch (e) {
-          setGmSubmitError(e instanceof Error ? e.message : String(e));
-        } finally {
-          setGmSubmitting(false);
-        }
-      })();
-      return;
     }
 
     if (intent && isFlat) {
@@ -139,10 +130,9 @@ export function DiceRoller() {
   const handleClose = useCallback(() => {
     setFumbleLines(null);
     setStabilizationOutcome(null);
-    setGmSubmitError(null);
-    setGmSubmitting(false);
     setSheetSendError(null);
     setSheetSending(false);
+    setSaveForVoiceHint(false);
     closeDiceRoller();
   }, [closeDiceRoller]);
 
@@ -152,26 +142,65 @@ export function DiceRoller() {
     setSheetSendError(null);
     setSheetSending(true);
     try {
+      const pending = useGameStore.getState().ui.pendingVoiceGm;
+      const merge =
+        pending &&
+        pending.sessionId === payload.sessionId &&
+        lastRoll
+          ? mergeVoiceWithSingleRollForGm(pending, payload.playerMessage, lastRoll.timestamp)
+          : null;
       const res = await fetch('/api/gm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sessionId: payload.sessionId,
-          playerMessage: payload.playerMessage,
+          playerMessage: merge ? merge.playerMessage : payload.playerMessage,
           speakerName: payload.speakerName,
+          ...(merge?.playerMessageMetadata
+            ? { playerMessageMetadata: merge.playerMessageMetadata }
+            : {}),
         }),
       });
-      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setSheetSendError(data.error ?? res.statusText ?? 'Request failed');
+        setSheetSendError((data as { error?: string }).error ?? res.statusText ?? 'Request failed');
         return;
+      }
+      applyGmPostSuccessToStore(data);
+      if (merge) {
+        useGameStore.getState().clearPendingVoiceGm();
+      }
+      const store = useGameStore.getState();
+      if (store.ui.diceRollIntent?.kind === 'gm_request') {
+        store.clearDiceRollIntent();
+        store.closeDiceRoller();
       }
     } catch (e) {
       setSheetSendError(e instanceof Error ? e.message : String(e));
     } finally {
       setSheetSending(false);
     }
-  }, [lastRoll?.sendToGm]);
+  }, [lastRoll]);
+
+  const saveRollForNextVoice = useCallback(() => {
+    if (!lastRoll?.sendToGm) {
+      setSheetSendError('Join a session (or select a character with a session) to save rolls for voice.');
+      return;
+    }
+    setSheetSendError(null);
+    const payload = lastRoll.sendToGm;
+    addPendingRollForVoice({
+      id: crypto.randomUUID(),
+      sessionId: payload.sessionId,
+      speakerName: payload.speakerName,
+      playerMessage: payload.playerMessage,
+      rolledAtMs: lastRoll.timestamp,
+      formula: lastRoll.formula,
+      diceRollIntent: lastRoll.intentSnapshot,
+    });
+    setSaveForVoiceHint(true);
+    window.setTimeout(() => setSaveForVoiceHint(false), 2500);
+  }, [lastRoll, addPendingRollForVoice]);
 
   const handleQuickRoll = (formula: string) => {
     setCustomFormula(formula);
@@ -313,27 +342,34 @@ export function DiceRoller() {
                   Single d10 — no explosion (compare to save target)
                 </div>
               )}
-              {gmSubmitting && (
-                <div className="mt-3 text-xs text-black font-mono">Sending result to AI-GM…</div>
-              )}
-              {gmSubmitError && (
-                <div className="mt-3 text-left border-2 border-red-800 bg-red-50 text-red-900 text-xs p-2">
-                  {gmSubmitError}
-                </div>
-              )}
               {lastRoll.sendToGm && (
-                <div className="mt-3 text-left border-2 border-black bg-[#e8e8d0] p-2 space-y-1">
-                  <button
-                    type="button"
-                    onClick={() => void sendSheetRollToGm()}
-                    disabled={sheetSending}
-                    className="w-full border-2 border-black bg-white text-black py-2 font-bold uppercase text-sm hover:bg-amber-50 disabled:opacity-50"
-                  >
-                    {sheetSending ? 'Sending…' : 'Send roll to AI-GM'}
-                  </button>
-                  <p className="text-[10px] text-black font-mono break-words">
+                <div className="mt-3 text-left border-2 border-black bg-[#e8e8d0] p-2 space-y-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void sendSheetRollToGm()}
+                      disabled={sheetSending}
+                      className="border-2 border-black bg-white text-black py-2 font-bold uppercase text-xs hover:bg-amber-50 disabled:opacity-50"
+                    >
+                      {sheetSending ? 'Sending…' : 'Send now'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={saveRollForNextVoice}
+                      disabled={sheetSending}
+                      className="border-2 border-black bg-[#d4d4b8] text-black py-2 font-bold uppercase text-xs hover:bg-[#c8c8a8] disabled:opacity-50"
+                    >
+                      Save for voice
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-black font-mono wrap-break-word">
                     {lastRoll.sendToGm.playerMessage}
                   </p>
+                  {saveForVoiceHint && (
+                    <p className="text-xs text-green-900 border border-green-800 bg-green-100 p-1 font-bold">
+                      Saved — appears under Session chat → Saved for voice.
+                    </p>
+                  )}
                   {sheetSendError && (
                     <p className="text-xs text-red-800 border border-red-800 bg-red-50 p-1">{sheetSendError}</p>
                   )}

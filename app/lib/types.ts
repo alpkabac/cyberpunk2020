@@ -360,6 +360,10 @@ export interface SessionSettings {
   ttsVoice: string;
   autoRollDamage: boolean;
   allowPlayerTokenMovement: boolean;
+  /** Persisted room-wide voice UX; synced via Postgres + Realtime for late joiners. */
+  voiceInputMode: 'pushToTalk' | 'session';
+  /** Display name of who last turned on group Session mode (best-effort). */
+  sessionRecordingStartedBy: string | null;
 }
 
 // ============================================================================
@@ -459,11 +463,37 @@ export type DiceRollIntent =
       kind: 'gm_request';
       sessionId: string;
       formula: string;
+      /** Short label for the GM message (e.g. skill name); falls back to `reason` or formula. */
+      rollSummary?: string;
       reason?: string;
       speakerName: string;
       /** When true (default), backdrop does not capture pointer events so the character sheet stays usable. */
       nonBlockingUi?: boolean;
     };
+
+/**
+ * Roll saved from the dice roller ("Save for voice") to merge when sending session voice.
+ * `rolledAtMs` orders the block with voice (`recordingStartedAtMs` on pending voice).
+ */
+export interface PendingRollForVoice {
+  id: string;
+  sessionId: string;
+  speakerName: string;
+  playerMessage: string;
+  rolledAtMs: number;
+  formula: string;
+  diceRollIntent: DiceRollIntent | null;
+}
+
+/** Session voice queued before "Send voice to GM". */
+export interface PendingVoiceGmPayload {
+  sessionId: string;
+  speakerName: string;
+  playerMessage: string;
+  playerMessageMetadata?: Record<string, unknown>;
+  recordingStartedAtMs?: number;
+  sttCompletedAtMs?: number;
+}
 
 // ============================================================================
 // Helper to create a default StatBlock

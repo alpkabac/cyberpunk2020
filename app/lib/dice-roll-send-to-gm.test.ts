@@ -1,24 +1,32 @@
 import { describe, it, expect } from 'vitest';
-import { buildGmDiceRollMessage, sheetRollContext } from './dice-roll-send-to-gm';
+import {
+  buildGmDiceRollMessage,
+  mergeVoiceAndQueuedRollsChronologically,
+  sheetRollContext,
+} from './dice-roll-send-to-gm';
 import type { Character } from './types';
 import { createStatBlock } from './types';
 
 const tinyChar = { id: 'c1', name: 'Johnny' } as Character;
 
 describe('buildGmDiceRollMessage', () => {
-  it('returns null for gm_request', () => {
-    expect(
-      buildGmDiceRollMessage(
-        {
-          kind: 'gm_request',
-          sessionId: 's',
-          formula: '1d10',
-          speakerName: 'P',
-        },
-        '1d10+5',
-        12,
-      ),
-    ).toBeNull();
+  it('formats gm_request with rollSummary and dice detail', () => {
+    const m = buildGmDiceRollMessage(
+      {
+        kind: 'gm_request',
+        sessionId: 's',
+        formula: '1d10+5',
+        speakerName: 'P',
+        rollSummary: 'Rifle (Aimed)',
+      },
+      '1d10+5',
+      { total: 12, rolls: [7, 5] },
+    );
+    expect(m).not.toBeNull();
+    expect(m!.sessionId).toBe('s');
+    expect(m!.playerMessage).toBe(
+      '[Roll] 1d10+5 = 12 (dice: 7, 5) — Rifle (Aimed)',
+    );
   });
 
   it('formats custom sheet roll with session', () => {
@@ -31,7 +39,7 @@ describe('buildGmDiceRollMessage', () => {
         speakerName: 'Johnny',
       },
       '4d6+2',
-      18,
+      { total: 18, rolls: [4, 5, 5, 4] },
     );
     expect(m).not.toBeNull();
     expect(m!.playerMessage).toBe(
@@ -44,9 +52,27 @@ describe('buildGmDiceRollMessage', () => {
     const m = buildGmDiceRollMessage(
       { kind: 'stun', characterId: 'c1', sessionId: 's', speakerName: 'Jane' },
       'flat:1d10',
-      4,
+      { total: 4, rolls: [4] },
     );
     expect(m!.playerMessage).toContain('Stun save');
+  });
+});
+
+describe('mergeVoiceAndQueuedRollsChronologically', () => {
+  it('orders voice vs rolls by timestamps and labels segments', () => {
+    const t0 = new Date('2026-01-01T12:00:00Z').getTime();
+    const t1 = t0 + 5000;
+    const m = mergeVoiceAndQueuedRollsChronologically({
+      voice: {
+        playerMessage: 'I agree.',
+        recordingStartedAtMs: t1,
+        sttCompletedAtMs: t1,
+      },
+      rolls: [{ rolledAtMs: t0, playerMessage: '[Roll] 1d10 = 5 — test' }],
+    });
+    expect(m.playerMessage).toContain('Roll');
+    expect(m.playerMessage).toContain('Voice');
+    expect(m.playerMessage.indexOf('1d10')).toBeLessThan(m.playerMessage.indexOf('I agree'));
   });
 });
 

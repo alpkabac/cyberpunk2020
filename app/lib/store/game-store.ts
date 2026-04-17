@@ -18,7 +18,10 @@ import {
   Weapon,
   FireMode,
   DiceRollIntent,
+  PendingRollForVoice,
+  PendingVoiceGmPayload,
 } from '../types';
+import { BROADCAST_EVENTS } from '../realtime/realtime-events';
 import {
   calculateDerivedStats,
   applyStatModifiers,
@@ -65,6 +68,13 @@ interface GameState {
     isLoading: boolean;
   };
 
+  /**
+   * Ephemeral: send Supabase Realtime `broadcast` on the session channel (null when not subscribed).
+   */
+  sessionBroadcastSend:
+    | ((event: string, payload: Record<string, unknown>) => Promise<void>)
+    | null;
+
   ui: {
     selectedCharacterId: string | null;
     selectedTokenId: string | null;
@@ -79,6 +89,23 @@ interface GameState {
     diceRollIntent: DiceRollIntent | null;
     isChatInputFocused: boolean;
     isVoiceRecording: boolean;
+    /** Session voice: STT done, not sent to GM yet. */
+    pendingVoiceGm: PendingVoiceGmPayload | null;
+    /** `pushToTalk` — stop+STT sends to GM immediately. `session` — review then "Send voice to GM". */
+    voiceInputMode: 'pushToTalk' | 'session';
+    /** Multiplayer: someone broadcast “session” mode — everyone matches for group recording UX. */
+    sessionRecordingGroupActive: boolean;
+    sessionRecordingStartedBy: string | null;
+    /** True after `/api/gm` returned while GM reply is still generating (narration not in chat yet). */
+    gmNarrationPending: boolean;
+    /** Rolls saved for merge with session voice ("Save for voice"); ordered by `rolledAtMs` when sending. */
+    pendingRollsForVoice: PendingRollForVoice[];
+    /** Incremented on `SESSION_VOICE_STOP_ALL` broadcast so chat can stop remote session takes. */
+    sessionVoiceStopAllTick: number;
+    /** `turnId` from the latest stop-all broadcast (each client STTs and POSTs a fragment for this id). */
+    sessionVoiceStopTurnId: string | null;
+    /** Incremented on `SESSION_VOICE_PEER_START` so peers can mirror Session recording. */
+    sessionVoicePeerStartTick: number;
   };
 
   /** Optimistic edit backups for Supabase writes (rollback on RLS/error). */
@@ -95,6 +122,8 @@ interface GameActions {
   // Session actions
   setSession: (session: Partial<Session>) => void;
   updateSessionSettings: (settings: Partial<SessionSettings>) => void;
+  /** Align chat voice UI with `session.settings` (hydration + Realtime `sessions` row). */
+  syncVoiceUiFromSessionSettings: (settings: SessionSettings) => void;
   setActiveScene: (scene: Scene) => void;
 
   // Character actions
@@ -167,6 +196,23 @@ interface GameActions {
    */
   applyDeathSaveRollResult: (characterId: string, flatRollTotal: number) => void;
   setVoiceRecording: (isRecording: boolean) => void;
+  setPendingVoiceGm: (payload: PendingVoiceGmPayload | null) => void;
+  clearPendingVoiceGm: () => void;
+  setVoiceInputMode: (mode: GameState['ui']['voiceInputMode']) => void;
+  setGmNarrationPending: (pending: boolean) => void;
+  addPendingRollForVoice: (entry: PendingRollForVoice) => void;
+  removePendingRollForVoice: (id: string) => void;
+  clearPendingRollsForVoice: () => void;
+  clearPendingRollsForSession: (sessionId: string) => void;
+  registerSessionBroadcastSend: (
+    fn: GameState['sessionBroadcastSend'],
+  ) => void;
+  broadcastSessionRecordingState: (payload: { active: boolean; actorName: string }) => Promise<void>;
+  applySessionRecordingBroadcast: (payload: unknown) => void;
+  broadcastSessionVoiceStopAll: (turnId: string) => Promise<void>;
+  bumpSessionVoiceStopAllFromBroadcast: (payload: unknown) => void;
+  broadcastSessionVoicePeerStart: () => Promise<void>;
+  bumpSessionVoicePeerStartFromBroadcast: () => void;
 
   // Supabase Realtime / session sync
   hydrateFromLoadedSnapshot: (snapshot: LoadedSessionSnapshot) => void;
@@ -195,6 +241,29 @@ function recalcCharacter(character: Character): Character {
   return updated;
 }
 
+function isSessionRecordingBroadcastPayload(
+  payload: unknown,
+): payload is { active: boolean; actorName?: string } {
+  if (!payload || typeof payload !== 'object') return false;
+  const o = payload as Record<string, unknown>;
+  if (typeof o.active !== 'boolean') return false;
+  if (o.actorName !== undefined && typeof o.actorName !== 'string') return false;
+  return true;
+}
+
+function voiceUiFieldsFromSessionSettings(
+  settings: SessionSettings,
+): Pick<
+  GameState['ui'],
+  'voiceInputMode' | 'sessionRecordingGroupActive' | 'sessionRecordingStartedBy'
+> {
+  return {
+    voiceInputMode: settings.voiceInputMode,
+    sessionRecordingGroupActive: settings.voiceInputMode === 'session',
+    sessionRecordingStartedBy: settings.sessionRecordingStartedBy ?? null,
+  };
+}
+
 // ============================================================================
 // Initial State
 // ============================================================================
@@ -211,6 +280,8 @@ const initialState: GameState = {
       ttsVoice: 'default',
       autoRollDamage: true,
       allowPlayerTokenMovement: true,
+      voiceInputMode: 'pushToTalk',
+      sessionRecordingStartedBy: null,
     },
     sessionSummary: '',
   },
@@ -235,6 +306,8 @@ const initialState: GameState = {
     isLoading: false,
   },
 
+  sessionBroadcastSend: null,
+
   ui: {
     selectedCharacterId: null,
     selectedTokenId: null,
@@ -244,6 +317,15 @@ const initialState: GameState = {
     diceRollIntent: null,
     isChatInputFocused: false,
     isVoiceRecording: false,
+    pendingVoiceGm: null,
+    voiceInputMode: 'pushToTalk',
+    sessionRecordingGroupActive: false,
+    sessionRecordingStartedBy: null,
+    gmNarrationPending: false,
+    pendingRollsForVoice: [],
+    sessionVoiceStopAllTick: 0,
+    sessionVoiceStopTurnId: null,
+    sessionVoicePeerStartTick: 0,
   },
 
   realtime: {
@@ -269,6 +351,14 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
       session: {
         ...state.session,
         settings: { ...state.session.settings, ...settings },
+      },
+    })),
+
+  syncVoiceUiFromSessionSettings: (settings) =>
+    set((state) => ({
+      ui: {
+        ...state.ui,
+        ...voiceUiFieldsFromSessionSettings(settings),
       },
     })),
 
@@ -674,9 +764,12 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
 
   // Chat actions
   addChatMessage: (message) =>
-    set((state) => ({
-      chat: { ...state.chat, messages: [...state.chat.messages, message] },
-    })),
+    set((state) => {
+      if (state.chat.messages.some((m) => m.id === message.id)) return state;
+      return {
+        chat: { ...state.chat, messages: [...state.chat.messages, message] },
+      };
+    }),
 
   setChatLoading: (isLoading) =>
     set((state) => ({
@@ -794,6 +887,112 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
       ui: { ...state.ui, isVoiceRecording: isRecording },
     })),
 
+  setPendingVoiceGm: (payload) =>
+    set((state) => ({
+      ui: { ...state.ui, pendingVoiceGm: payload },
+    })),
+
+  clearPendingVoiceGm: () =>
+    set((state) => ({
+      ui: { ...state.ui, pendingVoiceGm: null },
+    })),
+
+  setVoiceInputMode: (mode) =>
+    set((state) => ({
+      ui: { ...state.ui, voiceInputMode: mode },
+    })),
+
+  setGmNarrationPending: (pending) =>
+    set((state) => ({
+      ui: { ...state.ui, gmNarrationPending: pending },
+    })),
+
+  addPendingRollForVoice: (entry) =>
+    set((state) => ({
+      ui: { ...state.ui, pendingRollsForVoice: [...state.ui.pendingRollsForVoice, entry] },
+    })),
+
+  removePendingRollForVoice: (id) =>
+    set((state) => ({
+      ui: {
+        ...state.ui,
+        pendingRollsForVoice: state.ui.pendingRollsForVoice.filter((r) => r.id !== id),
+      },
+    })),
+
+  clearPendingRollsForVoice: () =>
+    set((state) => ({
+      ui: { ...state.ui, pendingRollsForVoice: [] },
+    })),
+
+  clearPendingRollsForSession: (sessionId) =>
+    set((state) => ({
+      ui: {
+        ...state.ui,
+        pendingRollsForVoice: state.ui.pendingRollsForVoice.filter((r) => r.sessionId !== sessionId),
+      },
+    })),
+
+  registerSessionBroadcastSend: (fn) => set({ sessionBroadcastSend: fn }),
+
+  broadcastSessionRecordingState: async ({ active, actorName }) => {
+    const send = get().sessionBroadcastSend;
+    if (!send) return;
+    await send(BROADCAST_EVENTS.SESSION_RECORDING, {
+      active,
+      actorName,
+      ts: Date.now(),
+    });
+  },
+
+  applySessionRecordingBroadcast: (payload) => {
+    if (!isSessionRecordingBroadcastPayload(payload)) return;
+    const { active, actorName } = payload;
+    set((state) => ({
+      ui: {
+        ...state.ui,
+        voiceInputMode: active ? 'session' : 'pushToTalk',
+        sessionRecordingGroupActive: active,
+        sessionRecordingStartedBy: active ? (actorName ?? 'Someone') : null,
+      },
+    }));
+  },
+
+  broadcastSessionVoiceStopAll: async (turnId) => {
+    const send = get().sessionBroadcastSend;
+    if (!send) return;
+    await send(BROADCAST_EVENTS.SESSION_VOICE_STOP_ALL, { ts: Date.now(), turnId });
+  },
+
+  bumpSessionVoiceStopAllFromBroadcast: (payload) => {
+    let turnId: string | null = null;
+    if (payload && typeof payload === 'object' && 'turnId' in payload) {
+      const t = (payload as Record<string, unknown>).turnId;
+      if (typeof t === 'string' && t.length > 0) turnId = t;
+    }
+    set((state) => ({
+      ui: {
+        ...state.ui,
+        sessionVoiceStopAllTick: state.ui.sessionVoiceStopAllTick + 1,
+        sessionVoiceStopTurnId: turnId,
+      },
+    }));
+  },
+
+  broadcastSessionVoicePeerStart: async () => {
+    const send = get().sessionBroadcastSend;
+    if (!send) return;
+    await send(BROADCAST_EVENTS.SESSION_VOICE_PEER_START, { ts: Date.now() });
+  },
+
+  bumpSessionVoicePeerStartFromBroadcast: () =>
+    set((state) => ({
+      ui: {
+        ...state.ui,
+        sessionVoicePeerStartTick: state.ui.sessionVoicePeerStartTick + 1,
+      },
+    })),
+
   hydrateFromLoadedSnapshot: (snapshot) =>
     set((state) => {
       const byIdChar: Record<string, Character> = {};
@@ -832,7 +1031,12 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
           messages: snapshot.chatMessages,
           isLoading: false,
         },
-        ui: state.ui,
+        ui: {
+          ...state.ui,
+          ...voiceUiFieldsFromSessionSettings(snapshot.session.settings),
+          sessionVoiceStopAllTick: 0,
+          sessionVoicePeerStartTick: 0,
+        },
         realtime: { optimisticBackupByCharacterId: {} },
       };
     }),
@@ -905,8 +1109,14 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
   appendRemoteChatMessage: (message) =>
     set((state) => {
       if (state.chat.messages.some((m) => m.id === message.id)) return state;
+      const nextMessages = [...state.chat.messages, message];
+      const clearGmPending =
+        message.type === 'narration' &&
+        message.speaker === 'Game Master' &&
+        state.ui.gmNarrationPending;
       return {
-        chat: { ...state.chat, messages: [...state.chat.messages, message] },
+        chat: { ...state.chat, messages: nextMessages },
+        ui: clearGmPending ? { ...state.ui, gmNarrationPending: false } : state.ui,
       };
     }),
 

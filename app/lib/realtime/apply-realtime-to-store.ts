@@ -9,14 +9,16 @@ import type { PostgresChangeHandlers } from './session-channel';
 export function createDefaultPostgresHandlersForGameStore(): PostgresChangeHandlers {
   return {
     onSessionChange: (row) => {
+      const settings = parseSessionSettingsJson(row.settings);
       useGameStore.getState().setSession({
         id: String(row.id ?? ''),
         name: String(row.name ?? ''),
         activeScene: parseSceneJson(row.active_scene),
         sessionSummary: String(row.session_summary ?? ''),
-        settings: parseSessionSettingsJson(row.settings),
+        settings,
       });
       useGameStore.getState().setMapBackground(String(row.map_background_url ?? ''));
+      useGameStore.getState().syncVoiceUiFromSessionSettings(settings);
     },
     onCharacterChange: ({ eventType, newRecord, oldRecord }) => {
       if (eventType === 'DELETE') {

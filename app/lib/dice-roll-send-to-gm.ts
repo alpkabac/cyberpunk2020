@@ -1,4 +1,4 @@
-import type { Character, DiceRollIntent } from '@/lib/types';
+import type { Character, DiceRollIntent, PendingRollForVoice, PendingVoiceGmPayload, RollResult } from '@/lib/types';
 
 /**
  * Caller-supplied fields for posting a sheet roll to the AI-GM (session play).
@@ -17,7 +17,6 @@ export function sheetRollContext(
 }
 
 function describeRollForGm(intent: DiceRollIntent, formula: string): string | null {
-  if (intent.kind === 'gm_request') return null;
   if (intent.kind === 'custom') return intent.rollSummary;
   if ('rollSummary' in intent && intent.rollSummary) return intent.rollSummary;
   switch (intent.kind) {
@@ -35,14 +34,31 @@ function describeRollForGm(intent: DiceRollIntent, formula: string): string | nu
 }
 
 /**
- * If the roll can be sent to `/api/gm`, returns payload; otherwise null (e.g. no session, or gm_request auto-flow).
+ * If the roll can be sent to `/api/gm`, returns payload; otherwise null (e.g. no session).
  */
 export function buildGmDiceRollMessage(
   intent: DiceRollIntent | null,
   formula: string,
-  total: number,
+  result: Pick<RollResult, 'total' | 'rolls'>,
 ): { sessionId: string; speakerName: string; playerMessage: string } | null {
-  if (!intent || intent.kind === 'gm_request') return null;
+  if (!intent) return null;
+
+  if (intent.kind === 'gm_request') {
+    const sessionId = intent.sessionId?.trim();
+    if (!sessionId) return null;
+    const speaker = intent.speakerName?.trim() || 'Player';
+    const label =
+      intent.rollSummary?.trim() ||
+      intent.reason?.trim() ||
+      intent.formula.trim() ||
+      'requested roll';
+    return {
+      sessionId,
+      speakerName: speaker,
+      playerMessage: `[Roll] ${formula} = ${result.total} (dice: ${result.rolls.join(', ')}) — ${label}`,
+    };
+  }
+
   const sessionId = intent.sessionId?.trim();
   if (!sessionId) return null;
   const speaker = intent.speakerName?.trim() || 'Player';
@@ -51,6 +67,73 @@ export function buildGmDiceRollMessage(
   return {
     sessionId,
     speakerName: speaker,
-    playerMessage: `${speaker} rolled ${total} for ${label} (${formula})`,
+    playerMessage: `${speaker} rolled ${result.total} for ${label} (${formula})`,
   };
+}
+
+function segmentTimeLabel(ms: number): string {
+  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+/**
+ * Interleaves voice and rolls by wall-clock (`rolledAtMs` vs voice recording start / STT time).
+ * Each block is prefixed with `[local time] Voice|Roll` so the GM sees order of events.
+ */
+export function mergeVoiceAndQueuedRollsChronologically(params: {
+  voice: Pick<
+    PendingVoiceGmPayload,
+    'playerMessage' | 'playerMessageMetadata' | 'recordingStartedAtMs' | 'sttCompletedAtMs'
+  >;
+  rolls: Array<{ rolledAtMs: number; playerMessage: string }>;
+}): { playerMessage: string; playerMessageMetadata?: Record<string, unknown> } {
+  const { voice, rolls } = params;
+  const voiceAnchor = voice.recordingStartedAtMs ?? voice.sttCompletedAtMs ?? Date.now();
+  const voiceText = voice.playerMessage.trim();
+  type Seg = { t: number; kind: 'voice' | 'roll'; body: string };
+  const segments: Seg[] = [
+    { t: voiceAnchor, kind: 'voice', body: voiceText },
+    ...rolls.map((r) => ({
+      t: r.rolledAtMs,
+      kind: 'roll' as const,
+      body: r.playerMessage.trim(),
+    })),
+  ];
+  segments.sort((a, b) => a.t - b.t);
+  const lines = segments.map((s) => {
+    const time = segmentTimeLabel(s.t);
+    const kind = s.kind === 'voice' ? 'Voice' : 'Roll';
+    return `[${time}] ${kind}\n${s.body}`;
+  });
+  return {
+    playerMessage: lines.join('\n\n'),
+    playerMessageMetadata: {
+      mergedVoiceAndRolls: true as const,
+      chronological: true as const,
+      voice: voice.playerMessageMetadata,
+    },
+  };
+}
+
+/** Session voice + all rolls saved for voice (same session). */
+export function mergePendingVoiceWithQueuedRolls(
+  voice: PendingVoiceGmPayload,
+  rolls: PendingRollForVoice[],
+): { playerMessage: string; playerMessageMetadata?: Record<string, unknown> } {
+  const forSession = rolls.filter((r) => r.sessionId === voice.sessionId);
+  return mergeVoiceAndQueuedRollsChronologically({
+    voice,
+    rolls: forSession.map((r) => ({ rolledAtMs: r.rolledAtMs, playerMessage: r.playerMessage })),
+  });
+}
+
+/** Pending voice + one roll ("Send now" from dice while voice is queued). */
+export function mergeVoiceWithSingleRollForGm(
+  voice: PendingVoiceGmPayload,
+  rollPlayerMessage: string,
+  rolledAtMs: number,
+): { playerMessage: string; playerMessageMetadata?: Record<string, unknown> } {
+  return mergeVoiceAndQueuedRollsChronologically({
+    voice,
+    rolls: [{ rolledAtMs, playerMessage: rollPlayerMessage }],
+  });
 }

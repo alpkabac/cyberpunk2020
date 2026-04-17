@@ -41,7 +41,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     "ttsEnabled": true,
     "ttsVoice": "alloy",
     "autoRollDamage": true,
-    "allowPlayerTokenMovement": true
+    "allowPlayerTokenMovement": true,
+    "voiceInputMode": "pushToTalk",
+    "sessionRecordingStartedBy": null
   }'::jsonb
 );
 

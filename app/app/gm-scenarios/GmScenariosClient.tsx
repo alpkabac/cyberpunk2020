@@ -207,6 +207,9 @@ export const GM_SCENARIOS: Scenario[] = [
 type ApiToolResult = { ok: true; name: string; result: unknown } | { ok: false; name: string; error: string };
 
 interface ApiResponse {
+  ok?: boolean;
+  narrationPending?: boolean;
+  playerMessage?: { id: string; speaker: string; text: string; timestamp: number; type: string };
   narration?: string;
   model?: string;
   toolResults?: ApiToolResult[];
