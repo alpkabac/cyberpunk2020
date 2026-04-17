@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useMemo, useRef, useState, type ReactNode, type PointerEvent as ReactPointerEvent } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { useGameStore } from '@/lib/store/game-store';
 import { useShallow } from 'zustand/react/shallow';
@@ -18,11 +18,32 @@ export interface MapCanvasProps {
   supabase: SupabaseClient;
   userId: string | undefined;
   isGm: boolean;
+  /** Called on left-click (after drag threshold guard). */
+  onTokenClick?: (tokenId: string) => void;
+  /** Called on right-click / context menu. */
+  onTokenRightClick?: (tokenId: string) => void;
+  /** When set and no token already exists for the character, show "Place my token". */
+  myCharacterId?: string | null;
+  /** Callback for the "Place my token" button. */
+  onPlaceMyToken?: () => void;
+  /** Overlay content rendered inside the board div (e.g. TokenContextCard). */
+  boardOverlay?: ReactNode;
 }
 
-export function MapCanvas({ sessionId, supabase, userId, isGm }: MapCanvasProps) {
+export function MapCanvas({
+  sessionId,
+  supabase,
+  userId,
+  isGm,
+  onTokenClick,
+  onTokenRightClick,
+  myCharacterId,
+  onPlaceMyToken,
+  boardOverlay,
+}: MapCanvasProps) {
   const boardRef = useRef<HTMLDivElement | null>(null);
-  const dragRef = useRef<{ tokenId: string; startX: number; startY: number } | null>(null);
+  // Track drag distance so a click doesn't fire after a drag
+  const dragRef = useRef<{ tokenId: string; startX: number; startY: number; moved: boolean } | null>(null);
 
   const [mapError, setMapError] = useState<string | null>(null);
   const [mapBusy, setMapBusy] = useState(false);
@@ -53,6 +74,12 @@ export function MapCanvas({ sessionId, supabase, userId, isGm }: MapCanvasProps)
     }),
     [userId, isGm, allowPlayerTokenMovement, characterOwnerById],
   );
+
+  // Show "Place my token" when the prop is set and no token exists for that character
+  const showPlaceMyToken =
+    Boolean(myCharacterId) &&
+    Boolean(onPlaceMyToken) &&
+    !tokens.some((t) => t.characterId === myCharacterId);
 
   const applyBackgroundUrl = useCallback(
     async (url: string) => {
@@ -128,6 +155,7 @@ export function MapCanvas({ sessionId, supabase, userId, isGm }: MapCanvasProps)
   }, []);
 
   const onBoardPointerDown = useCallback(() => {
+    // Deselect token when clicking empty board space
     useGameStore.getState().selectToken(null);
   }, []);
 
@@ -138,12 +166,22 @@ export function MapCanvas({ sessionId, supabase, userId, isGm }: MapCanvasProps)
       onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => {
         e.stopPropagation();
         useGameStore.getState().selectToken(token.id);
-        if (!draggable) return;
+        if (!draggable) {
+          // Not draggable — just mark no drag started so click fires normally
+          dragRef.current = { tokenId: token.id, startX: e.clientX, startY: e.clientY, moved: false };
+          return;
+        }
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-        dragRef.current = { tokenId: token.id, startX: token.x, startY: token.y };
+        dragRef.current = { tokenId: token.id, startX: e.clientX, startY: e.clientY, moved: false };
       },
       onPointerMove: (e: ReactPointerEvent<HTMLDivElement>) => {
         if (!dragRef.current || dragRef.current.tokenId !== token.id) return;
+        const dx = e.clientX - dragRef.current.startX;
+        const dy = e.clientY - dragRef.current.startY;
+        if (!dragRef.current.moved && Math.sqrt(dx * dx + dy * dy) > 4) {
+          dragRef.current.moved = true;
+        }
+        if (!draggable || !dragRef.current.moved) return;
         const { x, y } = pointerToPct(e.clientX, e.clientY);
         useGameStore.getState().moveToken(token.id, x, y);
       },
@@ -154,10 +192,19 @@ export function MapCanvas({ sessionId, supabase, userId, isGm }: MapCanvasProps)
         } catch {
           /* already released */
         }
+        const wasDrag = dragRef.current.moved;
         const start = { x: dragRef.current.startX, y: dragRef.current.startY };
         dragRef.current = null;
-        const t = useGameStore.getState().map.tokens.find((x) => x.id === token.id);
-        if (t) void commitTokenPosition(token.id, t.x, t.y, start);
+
+        if (draggable && wasDrag) {
+          // Commit drag
+          const t = useGameStore.getState().map.tokens.find((x) => x.id === token.id);
+          const startPct = pointerToPct(start.x, start.y);
+          if (t) void commitTokenPosition(token.id, t.x, t.y, startPct);
+        } else if (!wasDrag) {
+          // It was a click, not a drag
+          onTokenClick?.(token.id);
+        }
       },
       onPointerCancel: (e: ReactPointerEvent<HTMLDivElement>) => {
         if (!dragRef.current || dragRef.current.tokenId !== token.id) return;
@@ -166,9 +213,18 @@ export function MapCanvas({ sessionId, supabase, userId, isGm }: MapCanvasProps)
         } catch {
           /* */
         }
-        const start = { x: dragRef.current.startX, y: dragRef.current.startY };
+        const wasMoving = dragRef.current.moved;
+        const startClient = { x: dragRef.current.startX, y: dragRef.current.startY };
         dragRef.current = null;
-        useGameStore.getState().moveToken(token.id, start.x, start.y);
+        if (draggable && wasMoving) {
+          const startPct = pointerToPct(startClient.x, startClient.y);
+          useGameStore.getState().moveToken(token.id, startPct.x, startPct.y);
+        }
+      },
+      onContextMenu: (e: React.MouseEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onTokenRightClick?.(token.id);
       },
     };
   };
@@ -177,34 +233,46 @@ export function MapCanvas({ sessionId, supabase, userId, isGm }: MapCanvasProps)
     <section className="rounded border border-zinc-800 bg-zinc-900/40 overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b border-zinc-800/80">
         <h2 className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">Map</h2>
-        {isGm && (
-          <div className="flex flex-wrap items-center gap-2 text-[11px]">
-            <input
-              type="text"
-              placeholder="Background image URL"
-              className="bg-zinc-950 border border-zinc-700 rounded px-2 py-1 w-48 sm:w-64 text-zinc-200"
-              value={urlDraft}
-              onChange={(e) => setUrlDraft(e.target.value)}
-            />
+        <div className="flex flex-wrap items-center gap-2 text-[11px]">
+          {/* Place my token — shown to players when they have a character but no token */}
+          {showPlaceMyToken && (
             <button
               type="button"
-              disabled={mapBusy || !urlDraft.trim()}
-              onClick={() => void applyBackgroundUrl(urlDraft.trim())}
-              className="px-2 py-1 rounded bg-cyan-900/60 text-cyan-200 border border-cyan-800/50 hover:bg-cyan-800/60 disabled:opacity-40"
+              onClick={onPlaceMyToken}
+              className="px-2 py-1 rounded bg-emerald-900/50 text-emerald-200 border border-emerald-700/50 hover:bg-emerald-800/50"
             >
-              Set URL
+              + Place my token
             </button>
-            <label className="px-2 py-1 rounded bg-violet-900/40 text-violet-200 border border-violet-800/40 cursor-pointer hover:bg-violet-900/60">
-              Upload
+          )}
+          {isGm && (
+            <>
               <input
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => onPickMapFile(e.target.files?.[0] ?? null)}
+                type="text"
+                placeholder="Background image URL"
+                className="bg-zinc-950 border border-zinc-700 rounded px-2 py-1 w-48 sm:w-64 text-zinc-200"
+                value={urlDraft}
+                onChange={(e) => setUrlDraft(e.target.value)}
               />
-            </label>
-          </div>
-        )}
+              <button
+                type="button"
+                disabled={mapBusy || !urlDraft.trim()}
+                onClick={() => void applyBackgroundUrl(urlDraft.trim())}
+                className="px-2 py-1 rounded bg-cyan-900/60 text-cyan-200 border border-cyan-800/50 hover:bg-cyan-800/60 disabled:opacity-40"
+              >
+                Set URL
+              </button>
+              <label className="px-2 py-1 rounded bg-violet-900/40 text-violet-200 border border-violet-800/40 cursor-pointer hover:bg-violet-900/60">
+                Upload
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => onPickMapFile(e.target.files?.[0] ?? null)}
+                />
+              </label>
+            </>
+          )}
+        </div>
       </div>
 
       {mapError && <p className="text-xs text-red-400 px-3 py-1 bg-red-950/30">{mapError}</p>}
@@ -226,6 +294,9 @@ export function MapCanvas({ sessionId, supabase, userId, isGm }: MapCanvasProps)
           </div>
         )}
 
+        {/* Board overlay slot (e.g. TokenContextCard) */}
+        {boardOverlay}
+
         {tokens.map((t) => {
           const role = tokenRoleLabel(t, dragCtx);
           const ring =
@@ -240,9 +311,9 @@ export function MapCanvas({ sessionId, supabase, userId, isGm }: MapCanvasProps)
           return (
             <div
               key={t.id}
-              title={`${t.name}${canDragToken(t, dragCtx) ? ' — drag to move' : ''}`}
+              title={`${t.name}${canDragToken(t, dragCtx) ? ' — drag to move' : ' — right-click for sheet'}`}
               className={`absolute flex items-center justify-center rounded-full bg-zinc-900/90 text-[10px] font-bold text-zinc-100 shadow-lg ${
-                canDragToken(t, dragCtx) ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'
+                canDragToken(t, dragCtx) ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
               } ${ring} overflow-hidden`}
               style={{
                 left: `${t.x}%`,
@@ -256,6 +327,7 @@ export function MapCanvas({ sessionId, supabase, userId, isGm }: MapCanvasProps)
               onPointerMove={h.onPointerMove}
               onPointerUp={h.onPointerUp}
               onPointerCancel={h.onPointerCancel}
+              onContextMenu={h.onContextMenu}
             >
               {showPortrait ? (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -269,8 +341,8 @@ export function MapCanvas({ sessionId, supabase, userId, isGm }: MapCanvasProps)
       </div>
 
       <p className="text-[10px] text-zinc-600 px-3 py-1.5 border-t border-zinc-800/60">
-        Positions are synced to the session (0–100%). GM markers: amber ring. Your PC: cyan.
-        {!allowPlayerTokenMovement && ' Player token moves are disabled in session settings.'}
+        Click token for details · Right-click for full sheet · GM markers: amber ring · Your PC: cyan
+        {!allowPlayerTokenMovement && ' · Player moves disabled in session settings'}
       </p>
     </section>
   );

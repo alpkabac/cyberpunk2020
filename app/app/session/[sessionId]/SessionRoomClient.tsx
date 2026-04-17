@@ -7,12 +7,13 @@ import type { User } from '@supabase/supabase-js';
 import { CharacterSheet, DiceRoller } from '@/components/character';
 import { ChatInterface, ResizableChatPanel } from '@/components/chat';
 import { PopoutCharacterSheet } from '@/components/session/PopoutCharacterSheet';
-import { MapCanvas } from '@/components/map';
+import { MapCanvas, TokenContextCard } from '@/components/map';
 import { supabase } from '@/lib/supabase';
 import { useGameStore } from '@/lib/store/game-store';
 import { useSessionRealtimeSync } from '@/lib/hooks/useSessionRealtimeSync';
 import { useCharacterCloudSync } from '@/lib/hooks/useCharacterCloudSync';
 import { useShallow } from 'zustand/react/shallow';
+import type { Character } from '@/lib/types';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -35,6 +36,15 @@ export function SessionRoomClient() {
   const [sheetPopout, setSheetPopout] = useState(false);
   const [wideChatLayout, setWideChatLayout] = useState(false);
 
+  // Sheet drawer: collapsed by default
+  const [sheetOpen, setSheetOpen] = useState(false);
+
+  // Token context card (left-click)
+  const [contextTokenId, setContextTokenId] = useState<string | null>(null);
+
+  // Token sheet popout (right-click)
+  const [tokenSheetPopoutId, setTokenSheetPopoutId] = useState<string | null>(null);
+
   useEffect(() => {
     const mq = window.matchMedia('(min-width: 1024px)');
     const sync = () => setWideChatLayout(mq.matches);
@@ -50,6 +60,7 @@ export function SessionRoomClient() {
   const npcs = useGameStore(
     useShallow((s) => ({ byId: s.npcs.byId, allIds: s.npcs.allIds })),
   );
+  const tokens = useGameStore((s) => s.map.tokens);
 
   useEffect(() => {
     useGameStore.getState().reset();
@@ -124,14 +135,71 @@ export function SessionRoomClient() {
       : null;
 
   const isGm = user?.id != null && session.createdBy != null && user.id === session.createdBy;
-  const canEditSheet =
-    !!selectedCharacter &&
-    !!user &&
-    (selectedCharacter.userId === user.id || (selectedCharacter.type === 'npc' && isGm));
+
+  const canEditForChar = useCallback(
+    (c: Character): boolean => {
+      if (!user) return false;
+      if (c.userId === user.id) return true;
+      if (c.type === 'npc' && isGm) return true;
+      return false;
+    },
+    [user, isGm],
+  );
+
+  const canEditSheet = !!selectedCharacter && canEditForChar(selectedCharacter);
 
   const cloudSync = Boolean(sessionId && user?.id && resolvedCharacterId && canEditSheet);
-
   useCharacterCloudSync(supabase, resolvedCharacterId, cloudSync);
+
+  // My own character (for "Place my token")
+  const myCharacter = useMemo(
+    () =>
+      user
+        ? characters.allIds.map((id) => characters.byId[id]).find((c) => c.userId === user.id) ?? null
+        : null,
+    [user, characters.allIds, characters.byId],
+  );
+
+  // Token context card data
+  const contextToken = contextTokenId ? tokens.find((t) => t.id === contextTokenId) ?? null : null;
+  const contextCharacter = contextToken?.characterId
+    ? (characters.byId[contextToken.characterId] ?? npcs.byId[contextToken.characterId] ?? null)
+    : null;
+  const canEditContextChar = contextCharacter ? canEditForChar(contextCharacter) : false;
+
+  // Token sheet popout data (right-click)
+  const tokenSheetCharacter = tokenSheetPopoutId
+    ? (characters.byId[tokenSheetPopoutId] ?? npcs.byId[tokenSheetPopoutId] ?? null)
+    : null;
+
+  // Token handlers for MapCanvas
+  const handleTokenClick = useCallback((id: string) => {
+    setContextTokenId((prev) => (prev === id ? null : id));
+    setTokenSheetPopoutId(null);
+  }, []);
+
+  const handleTokenRightClick = useCallback((id: string) => {
+    // Right-click opens the character linked to the token (not the token id itself)
+    const tok = useGameStore.getState().map.tokens.find((t) => t.id === id);
+    const charId = tok?.characterId ?? null;
+    setTokenSheetPopoutId(charId);
+    setContextTokenId(null);
+  }, []);
+
+  // "Place my token" callback
+  const handlePlaceMyToken = useCallback(async () => {
+    if (!myCharacter || !sessionId) return;
+    await supabase.from('tokens').insert({
+      session_id: sessionId,
+      character_id: myCharacter.id,
+      name: myCharacter.name,
+      image_url: myCharacter.imageUrl ?? '',
+      x: 50,
+      y: 50,
+      size: 50,
+      controlled_by: 'player',
+    });
+  }, [myCharacter, sessionId]);
 
   const signIn = async () => {
     setAuthError(null);
@@ -185,6 +253,7 @@ export function SessionRoomClient() {
       </header>
 
       <div className="mx-4 my-4 md:mx-6 md:my-6 lg:mx-8 lg:my-8 flex flex-col lg:flex-row lg:items-start gap-6">
+        {/* Left sidebar */}
         <aside className="lg:w-64 shrink-0 space-y-4">
           {!user ? (
             <div className="rounded border border-zinc-700 bg-zinc-900/60 p-4 space-y-3">
@@ -293,33 +362,95 @@ export function SessionRoomClient() {
           )}
         </aside>
 
-        <main className="flex-1 min-w-0">
+        {/* Main column */}
+        <main className="flex-1 min-w-0 space-y-4">
+          {/* Map — TokenContextCard is rendered inside the board as boardOverlay */}
           {user && cloudHydrated && !loadError && (
-            <div className="max-w-[900px] mx-auto w-full mb-6">
-              <MapCanvas sessionId={sessionId} supabase={supabase} userId={user.id} isGm={isGm} />
-            </div>
+            <MapCanvas
+              sessionId={sessionId}
+              supabase={supabase}
+              userId={user.id}
+              isGm={isGm}
+              onTokenClick={handleTokenClick}
+              onTokenRightClick={handleTokenRightClick}
+              myCharacterId={myCharacter?.id ?? null}
+              onPlaceMyToken={() => void handlePlaceMyToken()}
+              boardOverlay={
+                contextToken ? (
+                  <TokenContextCard
+                    token={contextToken}
+                    character={contextCharacter}
+                    canEdit={canEditContextChar}
+                    supabase={supabase}
+                    sessionId={sessionId}
+                    onViewSheet={() => {
+                      const charId = contextToken.characterId;
+                      if (charId) setTokenSheetPopoutId(charId);
+                    }}
+                    onClose={() => setContextTokenId(null)}
+                  />
+                ) : undefined
+              }
+            />
           )}
+
+          {/* ── Sheet toggle bar ── */}
           {user && cloudHydrated && !loadError && resolvedCharacterId && selectedCharacter && (
-            <div className="max-w-[900px] mx-auto w-full space-y-2">
-              {!canEditSheet && (
-                <p className="text-xs text-amber-400/90 border border-amber-900/40 rounded px-2 py-1 bg-amber-950/20">
-                  View only — you can only edit your own character (or NPCs if you are the session GM).
-                </p>
-              )}
-              {!sheetPopout && (
-                <div className="flex justify-end">
-                  <button
-                    type="button"
-                    onClick={() => setSheetPopout(true)}
-                    className="text-[10px] uppercase font-bold px-2 py-1 rounded border border-cyan-700/50 text-cyan-300 hover:bg-cyan-950/40"
-                  >
-                    Pop out sheet
-                  </button>
+            <div className="rounded border border-zinc-800 bg-zinc-900/40 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setSheetOpen((v) => !v)}
+                className="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-left hover:bg-zinc-800/40 transition-colors"
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-sm font-semibold text-zinc-100 truncate">{selectedCharacter.name}</span>
+                  <span className="text-[10px] text-zinc-500 hidden sm:block">
+                    · Stats · Skills · Combat · Gear
+                  </span>
+                  {!canEditSheet && (
+                    <span className="text-[9px] uppercase bg-amber-900/40 text-amber-300 border border-amber-700/40 px-1 py-0.5 rounded">
+                      View only
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {sheetOpen && !sheetPopout && (
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      className="text-[10px] uppercase font-bold px-2 py-1 rounded border border-cyan-700/50 text-cyan-300 hover:bg-cyan-950/40"
+                      onClick={(e) => { e.stopPropagation(); setSheetPopout(true); setSheetOpen(false); }}
+                      onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); setSheetPopout(true); setSheetOpen(false); } }}
+                    >
+                      Pop out
+                    </span>
+                  )}
+                  {sheetPopout ? (
+                    <span className="text-[10px] text-violet-400">Floating ↗</span>
+                  ) : (
+                    <svg
+                      className={`w-4 h-4 text-zinc-400 transition-transform duration-150 ${sheetOpen ? 'rotate-180' : ''}`}
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  )}
+                </div>
+              </button>
+
+              {/* Collapsible sheet body */}
+              {sheetOpen && !sheetPopout && (
+                <div className="border-t border-zinc-800">
+                  <CharacterSheet characterId={resolvedCharacterId} editable={canEditSheet} />
                 </div>
               )}
-              {sheetPopout ? (
-                <p className="text-sm text-zinc-500">
-                  Character sheet is in a floating window.{' '}
+
+              {sheetPopout && (
+                <p className="text-xs text-zinc-500 px-3 py-2 border-t border-zinc-800">
+                  Sheet is in a floating window.{' '}
                   <button
                     type="button"
                     onClick={() => setSheetPopout(false)}
@@ -328,16 +459,16 @@ export function SessionRoomClient() {
                     Dock here
                   </button>
                 </p>
-              ) : (
-                <CharacterSheet characterId={resolvedCharacterId} editable={canEditSheet} />
               )}
             </div>
           )}
+
           {user && cloudHydrated && !loadError && allPlayableIds.length > 0 && !resolvedCharacterId && (
             <p className="text-zinc-500 text-sm">Select a character from the list.</p>
           )}
         </main>
 
+        {/* Right aside: chat */}
         {user && cloudHydrated && !loadError && (
           <aside className="w-full min-w-0 lg:w-auto shrink-0">
             <ResizableChatPanel wideLayout={wideChatLayout}>
@@ -352,8 +483,10 @@ export function SessionRoomClient() {
         )}
       </div>
 
+      {/* Floating dice roller */}
       {user && cloudHydrated && !loadError && <DiceRoller />}
 
+      {/* Own character sheet popout (from toggle bar) */}
       {user &&
         cloudHydrated &&
         !loadError &&
@@ -367,6 +500,20 @@ export function SessionRoomClient() {
             <CharacterSheet characterId={resolvedCharacterId} editable={canEditSheet} />
           </PopoutCharacterSheet>
         )}
+
+      {/* Token right-click sheet popout */}
+      {tokenSheetCharacter && (
+        <PopoutCharacterSheet
+          title={tokenSheetCharacter.name}
+          onDock={() => setTokenSheetPopoutId(null)}
+        >
+          <CharacterSheet
+            characterId={tokenSheetCharacter.id}
+            editable={canEditForChar(tokenSheetCharacter)}
+          />
+        </PopoutCharacterSheet>
+      )}
+
     </div>
   );
 }
