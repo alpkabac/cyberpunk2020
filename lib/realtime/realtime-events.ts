@@ -8,7 +8,8 @@
  * - roll_request (suggested formula / UX hints)
  * - typing (chat composition)
  * - token_drag_preview (optional smooth drag before commit)
- * - session_narration_tts (Cartesia playback cue: message id + `playAfterMs` from receipt; legacy `playAtMs`)
+ * - session_narration_tts (Cartesia cue: `messageId`, `playAfterMs`; optional `skipNarrationTtsForUserId`,
+ *   `respectTtsSetting` for auto-stream TTS; legacy `playAtMs`)
  * - presence_ping (optional heartbeat; use Presence API if you need member lists)
  *
  * Never duplicate the same semantic update on both postgres_changes and broadcast for the same

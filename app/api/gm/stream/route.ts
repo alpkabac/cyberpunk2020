@@ -12,6 +12,8 @@ import { getOpenRouterApiKeyFromEnv } from '@/lib/gm/openrouter-env';
 import { defaultGmOpenRouterEnvModel, resolveGmOpenRouterCall } from '@/lib/gm/gm-openrouter-models';
 
 export const maxDuration = 120;
+/** Avoid static optimization / response coalescing that can buffer SSE until the stream closes. */
+export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   const auth = await requireAuthFromRequest(request);

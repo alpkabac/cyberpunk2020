@@ -375,6 +375,10 @@ interface GameActions {
     messageId: string;
     /** Delay from when each peer applies the broadcast (default 500). */
     playAfterMs?: number;
+    /** Stream originator skips playback (they already hear chunk TTS during SSE). */
+    skipNarrationTtsForUserId?: string;
+    /** When true, clients with session `ttsEnabled` off ignore the cue (manual “read aloud” stays forced). */
+    respectTtsSetting?: boolean;
   }) => Promise<void>;
   applySessionNarrationTtsFromBroadcast: (payload: unknown) => void;
 
@@ -1837,14 +1841,26 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     set((state) => ({ ui: { ...state.ui, audioNarrationVolume: v } }));
   },
 
-  broadcastSessionNarrationTtsPlay: async ({ messageId, playAfterMs }) => {
+  broadcastSessionNarrationTtsPlay: async ({
+    messageId,
+    playAfterMs,
+    skipNarrationTtsForUserId,
+    respectTtsSetting,
+  }) => {
     const send = get().sessionBroadcastSend;
     if (!send) return;
     const ms =
       typeof playAfterMs === 'number' && Number.isFinite(playAfterMs)
         ? Math.min(Math.max(playAfterMs, 0), 120_000)
         : 500;
-    await send(BROADCAST_EVENTS.SESSION_NARRATION_TTS, { messageId, playAfterMs: ms });
+    const payload: Record<string, unknown> = { messageId, playAfterMs: ms };
+    if (typeof skipNarrationTtsForUserId === 'string' && skipNarrationTtsForUserId.length > 0) {
+      payload.skipNarrationTtsForUserId = skipNarrationTtsForUserId;
+    }
+    if (respectTtsSetting === true) {
+      payload.respectTtsSetting = true;
+    }
+    await send(BROADCAST_EVENTS.SESSION_NARRATION_TTS, payload);
   },
 
   applySessionNarrationTtsFromBroadcast: (payload) => {
@@ -1852,6 +1868,20 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     const o = payload as Record<string, unknown>;
     const messageId = o.messageId;
     if (typeof messageId !== 'string' || messageId.length === 0) return;
+
+    const state = get();
+    const skipFor = o.skipNarrationTtsForUserId;
+    if (
+      typeof skipFor === 'string' &&
+      skipFor.length > 0 &&
+      state.session.viewerUserId != null &&
+      skipFor === state.session.viewerUserId
+    ) {
+      return;
+    }
+    if (o.respectTtsSetting === true && !state.session.settings.ttsEnabled) {
+      return;
+    }
 
     const playAfterRaw = o.playAfterMs;
     const playAtRaw = o.playAtMs;

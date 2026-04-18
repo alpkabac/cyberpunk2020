@@ -338,6 +338,17 @@ export function ChatInterface({
           if (useGameStore.getState().session.settings.ttsEnabled) {
             const tail = sentenceCarry.trim();
             if (tail.length >= 2) ttsQueueRef.current?.enqueue(tail);
+            const messageId = typeof data.messageId === 'string' ? data.messageId : null;
+            if (messageId && useGameStore.getState().sessionBroadcastSend) {
+              const { data: authData } = await supabase.auth.getSession();
+              const uid = authData.session?.user?.id;
+              await useGameStore.getState().broadcastSessionNarrationTtsPlay({
+                messageId,
+                playAfterMs: 900,
+                ...(uid ? { skipNarrationTtsForUserId: uid } : {}),
+                respectTtsSetting: true,
+              });
+            }
           }
           sentenceCarry = '';
           setStreamingGmText(null);

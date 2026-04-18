@@ -64,6 +64,24 @@ function accToOpenRouterToolCalls(acc: Map<number, ToolCallAcc>): OpenRouterTool
   }));
 }
 
+/**
+ * OpenAI-compatible streams usually send `delta.content` as a string; some providers / model
+ * variants send an array of `{ type: 'text', text: string }` chunks instead. If we only handle
+ * strings, the client sees no deltas until the final buffered message.
+ */
+function textChunksFromDeltaContent(content: unknown): string[] {
+  if (typeof content === 'string' && content.length > 0) return [content];
+  if (!Array.isArray(content)) return [];
+  const out: string[] = [];
+  for (const part of content) {
+    if (!part || typeof part !== 'object') continue;
+    const o = part as Record<string, unknown>;
+    const t = o.text;
+    if (typeof t === 'string' && t.length > 0) out.push(t);
+  }
+  return out;
+}
+
 function buildSyntheticRaw(content: string | null, toolCalls: OpenRouterToolCall[] | null): unknown {
   const message: Record<string, unknown> = {};
   if (content != null && content.length > 0) message.content = content;
@@ -167,8 +185,15 @@ export async function callOpenRouterChatStreamOnce(params: {
         const choices = (json as { choices?: unknown }).choices;
         if (!Array.isArray(choices) || choices.length === 0) continue;
         const choice = choices[0] as Record<string, unknown>;
-        const delta = choice.delta as Record<string, unknown> | undefined;
-        if (!delta) continue;
+        let delta = choice.delta as Record<string, unknown> | undefined;
+        if (!delta) {
+          const legacyText = choice.text;
+          if (typeof legacyText === 'string' && legacyText.length > 0) {
+            fullContent += legacyText;
+            params.onContentDelta?.(legacyText);
+          }
+          continue;
+        }
 
         const tcList = delta.tool_calls as Array<Record<string, unknown>> | undefined;
         if (tcList) {
@@ -177,8 +202,7 @@ export async function callOpenRouterChatStreamOnce(params: {
           }
         }
 
-        const piece = delta.content;
-        if (typeof piece === 'string' && piece.length > 0) {
+        for (const piece of textChunksFromDeltaContent(delta.content)) {
           fullContent += piece;
           params.onContentDelta?.(piece);
         }
