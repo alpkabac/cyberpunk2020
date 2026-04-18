@@ -25,6 +25,7 @@ import {
   normalizeGridDimension,
   snapPctToGrid,
 } from '@/lib/map/grid';
+import { playSessionUi } from '@/lib/audio/session-sfx';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -143,12 +144,18 @@ export function SessionRoomClient() {
 
   const selectCharacter = useCallback(
     (id: string) => {
+      playSessionUi('select');
       setSelectedId(id);
       setSheetPopout(false);
       router.replace(`/session/${sessionId}?character=${encodeURIComponent(id)}`, { scroll: false });
     },
     [router, sessionId],
   );
+
+  const toggleDockedSheet = useCallback(() => {
+    playSessionUi('panel');
+    setSheetOpen((v) => !v);
+  }, []);
 
   const allPlayableIds = useMemo(() => {
     const ids = [...characters.allIds, ...npcs.allIds];
@@ -965,7 +972,7 @@ export function SessionRoomClient() {
                 {/* Left: name + labels — clicking here toggles the sheet */}
                 <button
                   type="button"
-                  onClick={() => setSheetOpen((v) => !v)}
+                  onClick={toggleDockedSheet}
                   className="flex items-center gap-2 min-w-0 flex-1 text-left hover:opacity-80 transition-opacity"
                 >
                   <span className="text-sm font-semibold text-zinc-100 truncate">{selectedCharacter.name}</span>
@@ -995,7 +1002,11 @@ export function SessionRoomClient() {
                     <button
                       type="button"
                       className="text-[10px] uppercase font-bold px-2 py-1 rounded border border-cyan-700/50 text-cyan-300 hover:bg-cyan-950/40"
-                      onClick={() => { setSheetPopout(true); setSheetOpen(false); }}
+                      onClick={() => {
+                        playSessionUi('commit', 0.85);
+                        setSheetPopout(true);
+                        setSheetOpen(false);
+                      }}
                     >
                       Pop out
                     </button>
@@ -1003,7 +1014,7 @@ export function SessionRoomClient() {
                   {/* Chevron — clicking also toggles */}
                   <button
                     type="button"
-                    onClick={() => setSheetOpen((v) => !v)}
+                    onClick={toggleDockedSheet}
                     className="hover:opacity-80 transition-opacity"
                     aria-label={sheetOpen ? 'Collapse sheet' : 'Expand sheet'}
                   >

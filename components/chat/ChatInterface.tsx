@@ -15,7 +15,9 @@ import { voiceBlobToGmPlayerMessage } from '@/lib/voice/voice-blob-to-player-mes
 import { requestSessionVoiceTurnMerge } from '@/lib/voice/request-session-voice-turn-merge';
 import { supabase } from '@/lib/supabase';
 import { persistSessionLanguageSettings } from '@/lib/session/persist-session-language-settings';
+import { persistSessionScenarioSettings } from '@/lib/session/persist-session-scenario-settings';
 import { persistSessionVoiceSettings } from '@/lib/session/persist-session-voice-settings';
+import { SCENARIO_CATALOG } from '@/lib/scenarios/catalog';
 
 function typeLabel(type: ChatMessage['type'], meta?: Record<string, unknown>): string {
   if (type === 'system' && meta?.kind === 'roll_request') return 'ROLL';
@@ -120,6 +122,7 @@ export function ChatInterface({
   const openDiceRoller = useGameStore((s) => s.openDiceRoller);
   const sttLanguage = useGameStore((s) => s.session.settings.sttLanguage);
   const aiLanguage = useGameStore((s) => s.session.settings.aiLanguage);
+  const activeScenarioId = useGameStore((s) => s.session.settings.activeScenarioId);
   const voiceInputMode = useGameStore((s) => s.ui.voiceInputMode);
   const sessionRecordingGroupActive = useGameStore((s) => s.ui.sessionRecordingGroupActive);
   const sessionRecordingStartedBy = useGameStore((s) => s.ui.sessionRecordingStartedBy);
@@ -836,6 +839,38 @@ export function ChatInterface({
 
   return (
     <section className="flex flex-col h-full min-h-0 rounded-lg border border-zinc-700 bg-zinc-900/60">
+      <div className="shrink-0 border-b border-zinc-700 px-3 py-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+        <label
+          htmlFor="session-scenario"
+          className="text-[10px] uppercase tracking-widest text-zinc-400 shrink-0"
+        >
+          Scenario
+        </label>
+        <select
+          id="session-scenario"
+          className="flex-1 min-w-40 max-w-full rounded border border-zinc-600 bg-zinc-950 px-2 py-1 text-[11px] text-zinc-200"
+          value={activeScenarioId ?? ''}
+          disabled={!enabled || isLoading}
+          onChange={(e) => {
+            const v = e.target.value;
+            const next = v === '' ? null : v;
+            void persistSessionScenarioSettings(supabase, sessionId, { activeScenarioId: next }).then(
+              (r) => {
+                if (r.error && typeof console !== 'undefined') {
+                  console.warn('[session] scenario settings persist failed', r.error);
+                }
+              },
+            );
+          }}
+        >
+          <option value="">None</option>
+          {SCENARIO_CATALOG.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.title}
+            </option>
+          ))}
+        </select>
+      </div>
       <header className="shrink-0 border-b border-zinc-700 px-3 py-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
         <h2 className="text-[10px] uppercase tracking-widest text-zinc-400">Session chat</h2>
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">

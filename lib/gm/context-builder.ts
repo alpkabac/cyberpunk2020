@@ -99,6 +99,7 @@ You narrate scenes, adjudicate actions fairly, and use tools to update game stat
 Stay in setting (dark future, corporate dystopia). Do not invent major setting facts that contradict established table state.
 When uncertain about a PC's action, ask for a roll via request_roll (for ranged/melee shots use roll_kind attack + weapon_id + DV; otherwise skill/stat + ids from CHARACTERS_JSON, or raw_formula). You CAN roll dice yourself for NPCs and world events using roll_dice.
 Output engaging narration; use tools for concrete state changes (damage, money, items, map, etc.). **Scene handouts:** The user block includes \`SCENARIO_SCENE_HANDOUTS_JSON\` (array of \`{ id, caption, url }\`). When it is **non-empty**, use those **exact** \`url\` values with \`show_scene_image\` when a visual fits; use \`clear: true\` to dismiss. When it is \`[]\`, you may still use any **https** public image URL the players gave you in chat or that you already know is table-approved.
+**Scenario module:** When \`SCENARIO_DOCUMENT:\` in the user block is not literally \`(none)\`, treat it as the table's active published adventure text—use it for beats, locations, and NPCs where it fits. **Do not** contradict CHARACTERS_JSON, MAP_TOKENS_JSON, or COMBAT_TRACKER_JSON. When it is \`(none)\`, improvise from chat and LORE_RULES only.
 **Narration prose only:** Never include XML tags (\`<function_calls>\`, \`<invoke>\`), JSON tool payloads, or any pseudo markup for dice/tools in the text players read—tools are invoked by the API separately.
 
 **Narration quality:** Narrate with an immersive voice (second person toward the acting PC when natural, or clear scene-wide description). The world **reacts**: people, places, and objects change because of events; relationships and reputations **accumulate**; introduce new faces and complications when they fit the fiction.
@@ -494,6 +495,8 @@ export interface BuildContextInput {
   messageSpeaker: string;
   /** Injected rules text from lorebook. */
   loreInjection: string;
+  /** Adventure markdown from \`lib/scenarios\` (server-loaded); omit or null when none. */
+  scenarioDocumentText?: string | null;
   /** Max messages from history (oldest dropped first). */
   maxHistoryMessages?: number;
   /** From chat row / POST body; drives special GM instructions (e.g. stun override). */
@@ -602,6 +605,10 @@ function buildGmUserContentFromTail(
   );
 
   const scenarioHandoutsJson = scenarioHandoutsJsonForGmSession(input.sessionName);
+  const scenarioDocumentBlock =
+    input.scenarioDocumentText != null && String(input.scenarioDocumentText).trim().length > 0
+      ? String(input.scenarioDocumentText)
+      : '(none)';
 
   const overrideInstr = stunOverrideInstruction(input.playerMessageMetadata ?? null);
   const npcTurnInstr = npcTurnNarrationInstruction(input.playerMessageMetadata ?? null);
@@ -609,6 +616,7 @@ function buildGmUserContentFromTail(
   const parts = [
     `SESSION: ${input.sessionName}`,
     `SUMMARY: ${input.sessionSummary || '(none)'}`,
+    `SCENARIO_DOCUMENT:\n${scenarioDocumentBlock}`,
     `CURRENT_MESSAGE_SPEAKER: ${input.messageSpeaker || 'Player'} (the **player character** this message is from—not a human GM; you are the GM)`,
     `ACTIVE_SCENE_JSON: ${sceneJson}`,
     `TACTICAL_GRID_JSON: ${tacticalGridJson}`,

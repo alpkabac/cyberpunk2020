@@ -15,6 +15,7 @@ import { getAccessTokenForApi } from '@/lib/auth/client-access-token';
 import { applyGmPostSuccessToStore } from '@/lib/gm/apply-gm-client-response';
 import { supabase } from '@/lib/supabase';
 import type { DiceRollIntent, RollResult } from '@/lib/types';
+import { playSessionUi } from '@/lib/audio/session-sfx';
 
 interface DiceRollEntry {
   id: number;
@@ -84,6 +85,7 @@ export function DiceRoller() {
 
     setIsAnimating(true);
     setTimeout(() => setIsAnimating(false), 300);
+    playSessionUi('roll');
 
     const storeSnap = useGameStore.getState();
     const intentSnapshot = storeSnap.ui.diceRollIntent;

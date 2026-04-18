@@ -8,6 +8,7 @@ import { useShallow } from 'zustand/react/shallow';
 import type { SessionCombatPostBody } from '@/lib/api/schemas/session-routes';
 import { getAccessTokenForApi } from '@/lib/auth/client-access-token';
 import { applyGmPostSuccessToStore } from '@/lib/gm/apply-gm-client-response';
+import { playSessionUi } from '@/lib/audio/session-sfx';
 
 interface InitiativeTrackerProps {
   sessionId: string;
@@ -171,7 +172,10 @@ Follow **GM_TASK** in this request (narrate, resolve mechanics, then \`next_turn
           <button
             type="button"
             disabled={busy}
-            onClick={() => void postCombat({ action: 'start_combat' })}
+            onClick={() => {
+              playSessionUi('combatOn', 1.15);
+              void postCombat({ action: 'start_combat' });
+            }}
             className="w-full text-[11px] uppercase tracking-wide py-1.5 rounded border border-rose-800/60 text-rose-200 hover:bg-rose-950/35 disabled:opacity-50"
           >
             {busy ? '…' : 'Start combat (roll all)'}
@@ -217,7 +221,10 @@ Follow **GM_TASK** in this request (narrate, resolve mechanics, then \`next_turn
           <button
             type="button"
             disabled={diceOpen}
-            onClick={() => useGameStore.getState().openStartOfTurnSavesIfNeeded(pending)}
+            onClick={() => {
+              playSessionUi('tap');
+              useGameStore.getState().openStartOfTurnSavesIfNeeded(pending);
+            }}
             className="w-full text-[10px] uppercase py-1 rounded border border-amber-600/70 text-amber-100 hover:bg-amber-900/40 disabled:opacity-45 disabled:cursor-not-allowed"
           >
             {diceOpen ? 'Close the dice roller first' : 'Open dice roller for saves'}
@@ -234,7 +241,10 @@ Follow **GM_TASK** in this request (narrate, resolve mechanics, then \`next_turn
           <button
             type="button"
             disabled={narrateBusy || gmNarrationPending}
-            onClick={() => void requestNpcTurnNarration()}
+            onClick={() => {
+              playSessionUi('commit', 0.9);
+              void requestNpcTurnNarration();
+            }}
             className="w-full text-[10px] uppercase py-1 rounded border border-violet-600/70 text-violet-100 hover:bg-violet-900/35 disabled:opacity-50"
           >
             {narrateBusy || gmNarrationPending ? '…' : 'Narrate turn (AI-GM)'}
@@ -250,7 +260,10 @@ Follow **GM_TASK** in this request (narrate, resolve mechanics, then \`next_turn
           <button
             type="button"
             disabled={busy}
-            onClick={() => void postCombat({ action: 'next_turn' })}
+            onClick={() => {
+              playSessionUi('turnTick');
+              void postCombat({ action: 'next_turn' });
+            }}
             className="w-full text-[10px] uppercase py-1 rounded border border-emerald-700/60 text-emerald-100 hover:bg-emerald-900/35 disabled:opacity-50"
           >
             End my turn (pass)
@@ -263,7 +276,10 @@ Follow **GM_TASK** in this request (narrate, resolve mechanics, then \`next_turn
             <button
               type="button"
               disabled={busy}
-              onClick={() => void postCombat({ action: 'next_turn' })}
+              onClick={() => {
+                playSessionUi('turnTick');
+                void postCombat({ action: 'next_turn' });
+              }}
               className="flex-1 min-w-24 text-[10px] uppercase py-1 rounded border border-zinc-600 text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
             >
               Next turn
@@ -271,7 +287,10 @@ Follow **GM_TASK** in this request (narrate, resolve mechanics, then \`next_turn
             <button
               type="button"
               disabled={busy}
-              onClick={() => void postCombat({ action: 'advance_round' })}
+              onClick={() => {
+                playSessionUi('commit');
+                void postCombat({ action: 'advance_round' });
+              }}
               className="flex-1 min-w-24 text-[10px] uppercase py-1 rounded border border-zinc-600 text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
             >
               Advance round
@@ -281,7 +300,10 @@ Follow **GM_TASK** in this request (narrate, resolve mechanics, then \`next_turn
             <button
               type="button"
               disabled={busy}
-              onClick={() => void postCombat({ action: 'end_combat' })}
+              onClick={() => {
+                playSessionUi('warn', 0.85);
+                void postCombat({ action: 'end_combat' });
+              }}
               className="w-full text-[10px] uppercase py-1 rounded border border-zinc-700 text-zinc-400 hover:bg-zinc-800/80 disabled:opacity-50"
             >
               End combat
@@ -289,7 +311,10 @@ Follow **GM_TASK** in this request (narrate, resolve mechanics, then \`next_turn
             <button
               type="button"
               disabled={busy}
-              onClick={() => void postCombat({ action: 'end_combat', clear_timed_conditions: true })}
+              onClick={() => {
+                playSessionUi('warn');
+                void postCombat({ action: 'end_combat', clear_timed_conditions: true });
+              }}
               className="w-full text-[10px] uppercase py-1 rounded border border-amber-900/50 text-amber-200/90 hover:bg-amber-950/35 disabled:opacity-50"
             >
               End combat + clear timed conditions

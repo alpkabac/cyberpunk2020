@@ -29,6 +29,7 @@ describe('tactical-cover-hint', () => {
       mapShowGrid: true,
       mapSnapToGrid: true,
       mapMetersPerSquare: 2,
+      activeScenarioId: null,
     };
     const regions: MapCoverRegion[] = [
       { id: 'w', c0: 2, r0: 0, c1: 2, r1: 2, coverTypeId: 'sheetrock_wall' },

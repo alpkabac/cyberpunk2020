@@ -28,11 +28,13 @@ describe('scenarioHandoutsForSession', () => {
   it('matches Tales of Red session names case-insensitively', () => {
     const a = scenarioHandoutsForSession('Our first campaign — Tales of Red', base);
     expect(a.length).toBeGreaterThan(0);
-    expect(a[0]).toMatchObject({
+    const unionBasement = a.find((h) => h.id === 'union_chapel_basement');
+    expect(unionBasement).toBeDefined();
+    expect(unionBasement).toMatchObject({
       id: 'union_chapel_basement',
       caption: expect.stringContaining('Union Chapel'),
     });
-    expect(a[0].url).toBe(
+    expect(unionBasement!.url).toBe(
       `${base}/storage/v1/object/public/scenario-images/talesofred/union_chapel_basement.jpeg`,
     );
   });
@@ -50,7 +52,8 @@ describe('scenarioHandoutsForSession', () => {
     const s = scenarioHandoutsJsonForGmSession('Tales of Red', base);
     const parsed = JSON.parse(s) as unknown;
     expect(Array.isArray(parsed)).toBe(true);
-    expect((parsed as { url: string }[])[0].url).toContain('union_chapel_basement.jpeg');
+    const urls = (parsed as { url: string }[]).map((x) => x.url);
+    expect(urls.some((u) => u.includes('union_chapel_basement.jpeg'))).toBe(true);
   });
 });
 

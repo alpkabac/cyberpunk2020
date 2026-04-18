@@ -8,6 +8,7 @@ import { reportServerError } from '@/lib/logging/server-report';
 import { getGmMaxChatMessagesFromEnv, getGmMaxInputTokensFromEnv } from '@/lib/gm/openrouter-env';
 import { runGmCompletionWithTools } from '@/lib/gm/openrouter';
 import { fetchSessionSnapshot } from '@/lib/realtime/session-load';
+import { loadScenarioMarkdownForGm } from '@/lib/scenarios/load-scenario-markdown';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 const FALLBACK_GM_LINE =
@@ -80,6 +81,7 @@ export async function runGmCompletionAfterPlayerInsert(opts: {
   const chatHistory = snapshot.chatMessages;
   const loreRules = loadDefaultLoreRules();
   const loreInjection = buildLoreInjection(opts.playerMessage, opts.loreBudget, loreRules);
+  const scenarioDocumentText = loadScenarioMarkdownForGm(snapshot.session.settings.activeScenarioId);
 
   const systemPrompt = buildGmSystemPrompt(snapshot.session.settings);
   const maxInputTokens = getGmMaxInputTokensFromEnv();
@@ -99,6 +101,7 @@ export async function runGmCompletionAfterPlayerInsert(opts: {
       playerMessage: opts.playerMessage,
       messageSpeaker: opts.speakerName,
       loreInjection,
+      scenarioDocumentText,
       playerMessageMetadata: opts.playerMessageMetadata ?? null,
     },
     systemPrompt,

@@ -507,6 +507,12 @@ export interface SessionSettings {
   mapSnapToGrid: boolean;
   /** If greater than zero, distance labels also show approximate meters (× cell distance). */
   mapMetersPerSquare: number;
+
+  /**
+   * Active adventure module (`lib/scenarios/*.md`) for the AI-GM; `null` = none / freeform.
+   * Synced via `sessions.settings` + Realtime.
+   */
+  activeScenarioId: string | null;
 }
 
 /** Initiative row for FNFF turn order (persisted on `sessions.combat_state`). */

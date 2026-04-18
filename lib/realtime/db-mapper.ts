@@ -29,6 +29,7 @@ import {
   MAP_GRID_DEFAULT_ROWS,
   normalizeGridDimension,
 } from '../map/grid';
+import { parseActiveScenarioId } from '../scenarios/catalog';
 
 const WEAPON_TYPES: WeaponType[] = ['Pistol', 'SMG', 'Shotgun', 'Rifle', 'Heavy', 'Melee', 'Exotic'];
 const ZONES: Zone[] = ['Head', 'Torso', 'rArm', 'lArm', 'rLeg', 'lLeg'];
@@ -306,6 +307,7 @@ const DEFAULT_SETTINGS: SessionSettings = {
   mapShowGrid: true,
   mapSnapToGrid: true,
   mapMetersPerSquare: 5,
+  activeScenarioId: null,
 };
 
 export function parseSceneJson(v: unknown): Scene {
@@ -366,6 +368,7 @@ export function parseSessionSettingsJson(v: unknown): SessionSettings {
     mapShowGrid: typeof o.mapShowGrid === 'boolean' ? o.mapShowGrid : DEFAULT_SETTINGS.mapShowGrid,
     mapSnapToGrid: typeof o.mapSnapToGrid === 'boolean' ? o.mapSnapToGrid : DEFAULT_SETTINGS.mapSnapToGrid,
     mapMetersPerSquare,
+    activeScenarioId: parseActiveScenarioId(o.activeScenarioId),
   };
 }
 

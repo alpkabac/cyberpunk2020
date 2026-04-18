@@ -463,6 +463,7 @@ const initialState: GameState = {
       mapShowGrid: true,
       mapSnapToGrid: true,
       mapMetersPerSquare: 5,
+      activeScenarioId: null,
     },
     sessionSummary: '',
     combatState: null,

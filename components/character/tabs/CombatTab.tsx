@@ -29,6 +29,7 @@ import {
 import { summarizeMapFireCover } from '@/lib/map/fire-cover';
 import { burstAllowedAtBracket, burstAmmo } from '@/lib/game-logic/fire-modes';
 import { computeAutofireModStrip, runAutomatedWeaponFire } from '@/lib/game-logic/automated-weapon-fire';
+import { playWeaponFireSfx } from '@/lib/audio/session-sfx';
 
 /** Must match `rangedCombatModifiers` key for aimed shots (attack −4; zone chosen if hit). */
 const AIMED_SHOT_LABEL = 'Aimed shot (specific area)' as const;
@@ -589,6 +590,7 @@ export function CombatTab({ character, editable }: CombatTabProps) {
       window.alert('Not enough ammunition.');
       return;
     }
+    playWeaponFireSfx(w, mode);
     const modStrip = computeAutofireModStrip(rangedModToggles[w.id]);
     const targets = targetIds.map((id) => ({
       characterId: id,
@@ -633,6 +635,7 @@ export function CombatTab({ character, editable }: CombatTabProps) {
         window.alert('Not enough ammunition.');
         return;
       }
+      playWeaponFireSfx(weapon, 'Suppressive');
       saveSessionMapPendingSuppressive({
         characterId: character.id,
         weaponId: weapon.id,
@@ -645,6 +648,7 @@ export function CombatTab({ character, editable }: CombatTabProps) {
     }
     const success = fireWeapon(character.id, weapon.id, mode);
     if (success) {
+      playWeaponFireSfx(weapon, mode);
       const base = getAttackSkillTotal(weapon);
       const modSum = weapon.weaponType === 'Melee' ? 0 : getRangedModSum(weapon.id);
       const isAutoWeapon = weapon.isAutoCapable || weapon.attackType === 'Auto';
