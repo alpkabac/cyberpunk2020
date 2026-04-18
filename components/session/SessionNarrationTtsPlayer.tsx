@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { getAccessTokenForApi } from '@/lib/auth/client-access-token';
+import { unlockHtmlAudioFromUserGesture } from '@/lib/audio/unlock-html-audio';
 import { supabase } from '@/lib/supabase';
 import { useGameStore } from '@/lib/store/game-store';
 
@@ -14,6 +15,17 @@ export function SessionNarrationTtsPlayer({ sessionId }: { sessionId: string }) 
     })),
   );
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  /** Peers who never clicked "speak" still need one gesture before remote TTS can play. */
+  useEffect(() => {
+    const prime = () => unlockHtmlAudioFromUserGesture();
+    window.addEventListener('pointerdown', prime, { capture: true, passive: true });
+    window.addEventListener('keydown', prime, { capture: true, passive: true });
+    return () => {
+      window.removeEventListener('pointerdown', prime, { capture: true });
+      window.removeEventListener('keydown', prime, { capture: true });
+    };
+  }, []);
 
   useEffect(() => {
     if (cueSeq === 0) return;
@@ -49,7 +61,14 @@ export function SessionNarrationTtsPlayer({ sessionId }: { sessionId: string }) 
       objectUrl = URL.createObjectURL(blob);
       audio.volume = useGameStore.getState().ui.audioNarrationVolume;
       audio.src = objectUrl;
-      void audio.play().catch(() => {});
+      void audio.play().catch((e) => {
+        if (typeof console !== 'undefined') {
+          console.warn(
+            '[narration-tts] play() failed (often autoplay: tap the page or Speak button once)',
+            e,
+          );
+        }
+      });
     };
 
     const tid = window.setTimeout(run, delayMs);
@@ -68,5 +87,5 @@ export function SessionNarrationTtsPlayer({ sessionId }: { sessionId: string }) 
     if (a) a.volume = narrationVolume;
   }, [narrationVolume]);
 
-  return <audio ref={audioRef} preload="none" className="hidden" />;
+  return <audio ref={audioRef} preload="none" playsInline className="hidden" />;
 }

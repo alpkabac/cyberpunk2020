@@ -10,6 +10,7 @@ import {
 } from '@/lib/game-logic/resolve-gm-request-roll';
 import { useVoiceRecorder } from '@/lib/hooks/useVoiceRecorder';
 import { applyGmPostSuccessToStore } from '@/lib/gm/apply-gm-client-response';
+import { unlockHtmlAudioFromUserGesture } from '@/lib/audio/unlock-html-audio';
 import { getAccessTokenForApi } from '@/lib/auth/client-access-token';
 import { voiceBlobToGmPlayerMessage } from '@/lib/voice/voice-blob-to-player-message';
 import { requestSessionVoiceTurnMerge } from '@/lib/voice/request-session-voice-turn-merge';
@@ -1080,12 +1081,13 @@ export function ChatInterface({
                         title="Read aloud for everyone"
                         disabled={!enabled || isLoading || !sessionBroadcastReady}
                         aria-label="Read narration aloud for everyone"
-                        onClick={() =>
+                        onClick={() => {
+                          unlockHtmlAudioFromUserGesture();
                           void broadcastSessionNarrationTtsPlay({
                             messageId: m.id,
                             playAtMs: Date.now() + 500,
-                          })
-                        }
+                          });
+                        }}
                       >
                         <SpeakerNarrateIcon />
                       </button>
