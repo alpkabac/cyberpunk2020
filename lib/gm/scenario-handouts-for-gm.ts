@@ -15,6 +15,8 @@ type CatalogImage = {
 type CatalogSet = {
   id: string;
   sessionNameContains: string[];
+  /** When the session has this `activeScenarioId`, use this handout set (same as scenario markdown). */
+  activeScenarioIds?: string[];
   bucket: string;
   images: CatalogImage[];
 };
@@ -26,6 +28,10 @@ function isCatalogSet(v: unknown): v is CatalogSet {
   if (typeof o.bucket !== 'string' || !o.bucket.trim()) return false;
   if (!Array.isArray(o.sessionNameContains)) return false;
   if (!o.sessionNameContains.every((x) => typeof x === 'string')) return false;
+  if (o.activeScenarioIds !== undefined) {
+    if (!Array.isArray(o.activeScenarioIds)) return false;
+    if (!o.activeScenarioIds.every((x) => typeof x === 'string')) return false;
+  }
   if (!Array.isArray(o.images)) return false;
   for (const im of o.images) {
     if (!im || typeof im !== 'object' || Array.isArray(im)) return false;
@@ -72,19 +78,27 @@ function sessionMatchesSet(sessionNameNorm: string, needles: string[]): boolean 
   return false;
 }
 
+function setMatchesActiveScenario(activeScenarioId: string | null | undefined, ids: string[] | undefined): boolean {
+  if (!activeScenarioId || !ids || ids.length === 0) return false;
+  return ids.includes(activeScenarioId);
+}
+
 /**
- * Pick catalog images for this session name (substring match, case-insensitive).
+ * Pick catalog images when the session name matches configured substrings **or**
+ * `sessions.settings.activeScenarioId` matches `activeScenarioIds` in the catalog.
  */
 export function scenarioHandoutsForSession(
   sessionName: string,
   supabaseProjectUrl?: string | null,
+  activeScenarioId?: string | null,
 ): ScenarioHandoutForLlm[] {
   const norm = sessionName.trim().toLowerCase();
-  if (!norm) return [];
   const base = supabaseProjectUrl ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
   const sets = loadSets();
   for (const set of sets) {
-    if (!sessionMatchesSet(norm, set.sessionNameContains)) continue;
+    const byName = norm ? sessionMatchesSet(norm, set.sessionNameContains) : false;
+    const byScenario = setMatchesActiveScenario(activeScenarioId ?? null, set.activeScenarioIds);
+    if (!byName && !byScenario) continue;
     const out: ScenarioHandoutForLlm[] = [];
     for (const im of set.images) {
       const url = publicSupabaseStorageObjectUrl(base ?? undefined, set.bucket, im.objectPath);
@@ -100,7 +114,8 @@ export function scenarioHandoutsForSession(
 export function scenarioHandoutsJsonForGmSession(
   sessionName: string,
   supabaseProjectUrl?: string | null,
+  activeScenarioId?: string | null,
 ): string {
-  const list = scenarioHandoutsForSession(sessionName, supabaseProjectUrl);
+  const list = scenarioHandoutsForSession(sessionName, supabaseProjectUrl, activeScenarioId);
   return JSON.stringify(list);
 }

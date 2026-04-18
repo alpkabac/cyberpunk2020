@@ -236,21 +236,10 @@ CREATE POLICY "Users can update tokens they control"
     ))
   );
 
--- Users can delete tokens they control
-CREATE POLICY "Users can delete tokens they control"
+-- Any session participant may remove tokens from the map (GM markers, NPC/PC tokens, orphans).
+CREATE POLICY "Session participants can delete tokens"
   ON tokens FOR DELETE
-  USING (
-    (controlled_by = 'player' AND EXISTS (
-      SELECT 1 FROM characters 
-      WHERE characters.id = tokens.character_id 
-      AND characters.user_id = auth.uid()
-    )) OR
-    (controlled_by = 'gm' AND EXISTS (
-      SELECT 1 FROM sessions 
-      WHERE sessions.id = tokens.session_id 
-      AND sessions.created_by = auth.uid()
-    ))
-  );
+  USING (is_user_in_session(session_id));
 
 -- ============================================================================
 -- Chat Messages Table Policies

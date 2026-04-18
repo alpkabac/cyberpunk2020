@@ -4,6 +4,7 @@
     {
       "id": "talesofred",
       "sessionNameContains": ["tales of red", "talesofred"],
+      "activeScenarioIds": ["a-night-at-opera"],
       "bucket": "scenario-images",
       "images": [
         {

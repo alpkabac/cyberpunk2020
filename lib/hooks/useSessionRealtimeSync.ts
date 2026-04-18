@@ -122,6 +122,17 @@ export function useSessionRealtimeSync(
         }
         handleRef.current = handle;
         useGameStore.getState().registerSessionBroadcastSend(handle.sendBroadcast.bind(handle));
+        const persistNpc = (characterId: string) => {
+          const s = useGameStore.getState();
+          const c = s.characters.byId[characterId] ?? s.npcs.byId[characterId];
+          if (!c || c.type !== 'npc' || c.sessionId !== sessionId) return;
+          void saveCharacterToSupabase(client, c).then(({ error }) => {
+            if (error && typeof console !== 'undefined') {
+              console.warn('[session-sync] persist npc failed', characterId, error.message);
+            }
+          });
+        };
+        useGameStore.getState().registerSessionCharacterPersist(persistNpc);
         recoveryRef.current = attachSessionRealtimeRecovery(handle);
         onDoneRef.current?.();
       } catch (e) {
@@ -151,6 +162,7 @@ export function useSessionRealtimeSync(
         retryTimer = null;
       }
       useGameStore.getState().registerSessionBroadcastSend(null);
+      useGameStore.getState().registerSessionCharacterPersist(null);
       recoveryRef.current?.();
       recoveryRef.current = null;
       void handleRef.current?.dispose();

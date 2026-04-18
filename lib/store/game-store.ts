@@ -110,6 +110,12 @@ interface GameState {
     | ((event: string, payload: Record<string, unknown>) => Promise<void>)
     | null;
 
+  /**
+   * When set by session sync: persist an NPC sheet to Postgres after local `applyDamage`
+   * (including auto NPC stun/death resolution). PCs rely on `useCharacterCloudSync` for the open sheet.
+   */
+  sessionCharacterPersist: ((characterId: string) => void) | null;
+
   ui: {
     selectedCharacterId: string | null;
     selectedTokenId: string | null;
@@ -337,6 +343,7 @@ interface GameActions {
   registerSessionBroadcastSend: (
     fn: GameState['sessionBroadcastSend'],
   ) => void;
+  registerSessionCharacterPersist: (fn: GameState['sessionCharacterPersist']) => void;
   broadcastSessionRecordingState: (payload: { active: boolean; actorName: string }) => Promise<void>;
   applySessionRecordingBroadcast: (payload: unknown) => void;
   broadcastSessionVoiceStopAll: (turnId: string) => Promise<void>;
@@ -497,6 +504,7 @@ const initialState: GameState = {
   },
 
   sessionBroadcastSend: null,
+  sessionCharacterPersist: null,
 
   ui: {
     selectedCharacterId: null,
@@ -809,6 +817,12 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
         if (stillAlive) {
           get().autoResolveNpcDeathSave(queueForcedDeathFor);
         }
+      }
+      const persist = get().sessionCharacterPersist;
+      if (persist) {
+        queueMicrotask(() => {
+          persist(characterId);
+        });
       }
       return;
     }
@@ -1688,6 +1702,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     })),
 
   registerSessionBroadcastSend: (fn) => set({ sessionBroadcastSend: fn }),
+  registerSessionCharacterPersist: (fn) => set({ sessionCharacterPersist: fn }),
 
   broadcastSessionRecordingState: async ({ active, actorName }) => {
     const send = get().sessionBroadcastSend;

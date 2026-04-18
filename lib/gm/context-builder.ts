@@ -27,6 +27,7 @@ import { buildTacticalCoverHints } from '../map/tactical-cover-hint';
 import { CP2020_COVER_TYPES, coverTypeLabel } from '../map/cover-types';
 import { parseSessionSettingsJson } from '../realtime/db-mapper';
 import { GM_TOOL_DEFINITIONS } from './tool-definitions';
+import { parseActiveScenarioId } from '../scenarios/catalog';
 import { scenarioHandoutsJsonForGmSession } from './scenario-handouts-for-gm';
 
 /** Rough token cost of serializing `tools` on OpenRouter `chat/completions` (paid once per request). */
@@ -98,7 +99,7 @@ export const CORE_GM_RULES = `You are the Game Master for a Cyberpunk 2020 table
 You narrate scenes, adjudicate actions fairly, and use tools to update game state when outcomes are clear.
 Stay in setting (dark future, corporate dystopia). Do not invent major setting facts that contradict established table state.
 When uncertain about a PC's action, ask for a roll via request_roll (for ranged/melee shots use roll_kind attack + weapon_id + DV; otherwise skill/stat + ids from CHARACTERS_JSON, or raw_formula). You CAN roll dice yourself for NPCs and world events using roll_dice.
-Output engaging narration; use tools for concrete state changes (damage, money, items, map, etc.). **Scene handouts:** The user block includes \`SCENARIO_SCENE_HANDOUTS_JSON\` (array of \`{ id, caption, url }\`). When it is **non-empty**, use those **exact** \`url\` values with \`show_scene_image\` when a visual fits; use \`clear: true\` to dismiss. When it is \`[]\`, you may still use any **https** public image URL the players gave you in chat or that you already know is table-approved. For pictures, **prefer \`show_scene_image\`** over putting \`![alt](url)\` Markdown in narration—the handout is a dedicated floating window for everyone.
+Output engaging narration; use tools for concrete state changes (damage, money, items, map, etc.). **Scene handouts:** The user block includes \`SCENARIO_SCENE_HANDOUTS_JSON\` (array of \`{ id, caption, url }\`). When it is **non-empty**, you **must** use **only** those **exact** \`url\` strings with \`show_scene_image\` (pick the best \`id\`/\`caption\` for the scene); the server rejects other URLs. Use \`clear: true\` to dismiss. When it is \`[]\`, you may use any **https** public image URL the players gave you in chat or that you already know is table-approved. For pictures, **prefer \`show_scene_image\`** over putting \`![alt](url)\` Markdown in narration—the handout is a dedicated floating window for everyone.
 **Scenario module:** When \`SCENARIO_DOCUMENT:\` in the user block is not literally \`(none)\`, treat it as the table's active published adventure text—use it for beats, locations, and NPCs where it fits. **Do not** contradict CHARACTERS_JSON, MAP_TOKENS_JSON, or COMBAT_TRACKER_JSON. When it is \`(none)\`, improvise from chat and LORE_RULES only.
 **Narration prose only:** Never include XML tags (\`<function_calls>\`, \`<invoke>\`), JSON tool payloads, or any pseudo markup for dice/tools in the text players read—tools are invoked by the API separately.
 
@@ -604,7 +605,8 @@ function buildGmUserContentFromTail(
     buildCombatTrackerContextPayload(input.combatState ?? null, input.characters),
   );
 
-  const scenarioHandoutsJson = scenarioHandoutsJsonForGmSession(input.sessionName);
+  const activeScenarioId = parseActiveScenarioId(input.sessionSettings?.activeScenarioId ?? null);
+  const scenarioHandoutsJson = scenarioHandoutsJsonForGmSession(input.sessionName, undefined, activeScenarioId);
   const scenarioDocumentBlock =
     input.scenarioDocumentText != null && String(input.scenarioDocumentText).trim().length > 0
       ? String(input.scenarioDocumentText)

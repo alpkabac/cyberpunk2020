@@ -1,5 +1,7 @@
 /**
- * Pure mirror of characters UPDATE RLS: own row, GM editing NPC, or GM editing an unclaimed PC.
+ * Eligibility for **UI and API** checks (conservative). Postgres UPDATE for `type = 'npc'` also allows
+ * any `is_user_in_session(session_id)` participant — see migration `019_npc_update_for_session_participants.sql`.
+ * Own row, GM editing NPC in UI, or GM editing an unclaimed PC.
  */
 function isUnclaimedUser(userId: string | null | undefined): boolean {
   return userId == null || userId === '';

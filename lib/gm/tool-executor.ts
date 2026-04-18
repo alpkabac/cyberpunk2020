@@ -91,6 +91,10 @@ export interface ToolExecutorContext {
   loreRules: LoreRule[];
   /** Authoritative character state; updated as tools run */
   charactersById: Map<string, Character>;
+  /**
+   * When non-empty, `show_scene_image` may only use these exact URLs (from `SCENARIO_SCENE_HANDOUTS_JSON`).
+   */
+  allowedSceneImageUrls?: ReadonlySet<string>;
 }
 
 export type ToolExecutionSuccess = { ok: true; name: string; result: unknown };
@@ -995,6 +999,15 @@ export async function executeGmTool(
         return { ok: true, name, result: { cleared: true } };
       }
       const imageUrl = String(args.image_url);
+      const allow = ctx.allowedSceneImageUrls;
+      if (allow && allow.size > 0 && !allow.has(imageUrl)) {
+        return {
+          ok: false,
+          name,
+          error:
+            'show_scene_image: image_url must be an exact url from SCENARIO_SCENE_HANDOUTS_JSON for this session (pick the best id/caption). Other https images are blocked while that list is non-empty.',
+        };
+      }
       const cap = args.caption;
       const caption = cap == null || cap === '' ? null : String(cap);
       const payload = { url: imageUrl, caption, revision: Date.now() };

@@ -9,6 +9,8 @@ import { getGmMaxChatMessagesFromEnv, getGmMaxInputTokensFromEnv } from '@/lib/g
 import { runGmCompletionWithTools } from '@/lib/gm/openrouter';
 import { fetchSessionSnapshot } from '@/lib/realtime/session-load';
 import { loadScenarioMarkdownForGm } from '@/lib/scenarios/load-scenario-markdown';
+import { scenarioHandoutsForSession } from '@/lib/gm/scenario-handouts-for-gm';
+import { parseActiveScenarioId } from '@/lib/scenarios/catalog';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 const FALLBACK_GM_LINE =
@@ -118,6 +120,14 @@ export async function runGmCompletionAfterPlayerInsert(opts: {
   }
 
   const charactersById = new Map(snapshot.characters.map((c) => [c.id, c]));
+  const activeScenarioId = parseActiveScenarioId(snapshot.session.settings.activeScenarioId);
+  const sceneHandouts = scenarioHandoutsForSession(
+    snapshot.session.name,
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    activeScenarioId,
+  );
+  const allowedSceneImageUrls =
+    sceneHandouts.length > 0 ? new Set(sceneHandouts.map((h) => h.url)) : undefined;
 
   const toolErrors: { tool: string; error: string }[] = [];
   let toolStepCount = 0;
@@ -135,6 +145,7 @@ export async function runGmCompletionAfterPlayerInsert(opts: {
           sessionId: opts.sessionId,
           loreRules,
           charactersById,
+          allowedSceneImageUrls,
         },
         onToolResult: (r) => {
           if (!r.ok) {

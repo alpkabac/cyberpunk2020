@@ -54,7 +54,9 @@ export function SessionRoomClient() {
   const [presencePeers, setPresencePeers] = useState<SessionPresencePeer[]>([]);
   const [chargenFor, setChargenFor] = useState<{ userId: string; suggestedName: string } | null>(null);
   const [tokenPlaceBusyId, setTokenPlaceBusyId] = useState<string | null>(null);
+  const [tokenRemoveBusyId, setTokenRemoveBusyId] = useState<string | null>(null);
   const [npcRemoveBusy, setNpcRemoveBusy] = useState(false);
+  const [pcRemoveBusy, setPcRemoveBusy] = useState(false);
 
   // Token context card (left-click)
   const [contextTokenId, setContextTokenId] = useState<string | null>(null);
@@ -409,6 +411,66 @@ export function SessionRoomClient() {
       }
     },
     [user, sessionId, resolvedCharacterId, router],
+  );
+
+  const handleRemoveTokenFromMap = useCallback(
+    async (tokenId: string) => {
+      if (!user || !sessionId) return;
+      if (
+        !window.confirm(
+          'Remove this token from the map only? Sheets stay in the session (delete an NPC from its sheet if you want the character gone too).',
+        )
+      ) {
+        return;
+      }
+      setClaimError(null);
+      setTokenRemoveBusyId(tokenId);
+      try {
+        const { error } = await supabase.from('tokens').delete().eq('id', tokenId).eq('session_id', sessionId);
+        if (error) {
+          setClaimError(error.message);
+          return;
+        }
+        useGameStore.getState().removeToken(tokenId);
+        setContextTokenId((prev) => (prev === tokenId ? null : prev));
+      } finally {
+        setTokenRemoveBusyId(null);
+      }
+    },
+    [user, sessionId, supabase],
+  );
+
+  const handleRemoveMyCharacter = useCallback(
+    async (characterId: string) => {
+      if (!user || !sessionId) return;
+      const c = useGameStore.getState().characters.byId[characterId];
+      if (!c || c.type !== 'character' || c.userId !== user.id) return;
+      if (
+        !window.confirm(
+          'Permanently remove your character from this session? Your sheet and map token are deleted. You can join again with a new character if the host adds a slot.',
+        )
+      ) {
+        return;
+      }
+      setClaimError(null);
+      setPcRemoveBusy(true);
+      try {
+        const { error } = await supabase.from('characters').delete().eq('id', characterId).eq('session_id', sessionId);
+        if (error) {
+          setClaimError(error.message);
+          return;
+        }
+        if (resolvedCharacterId === characterId) {
+          router.replace(`/session/${sessionId}`, { scroll: false });
+          setSelectedId(null);
+        }
+        setTokenSheetPopoutId((id) => (id === characterId ? null : id));
+        setSheetPopout(false);
+      } finally {
+        setPcRemoveBusy(false);
+      }
+    },
+    [user, sessionId, supabase, resolvedCharacterId, router],
   );
 
   const signIn = async () => {
@@ -873,6 +935,9 @@ export function SessionRoomClient() {
                     token={contextToken}
                     character={contextCharacter}
                     canEdit={canEditContextChar}
+                    canRemoveFromMap={Boolean(user && sessionId)}
+                    removeFromMapBusy={tokenRemoveBusyId === contextToken.id}
+                    onRemoveFromMap={() => void handleRemoveTokenFromMap(contextToken.id)}
                     supabase={supabase}
                     sessionId={sessionId}
                     onViewSheet={() => {
@@ -920,6 +985,21 @@ export function SessionRoomClient() {
                       {npcRemoveBusy ? '…' : 'Remove NPC'}
                     </button>
                   )}
+                  {sheetOpen &&
+                    !sheetPopout &&
+                    selectedCharacter?.type === 'character' &&
+                    user &&
+                    selectedCharacter.userId === user.id && (
+                      <button
+                        type="button"
+                        disabled={pcRemoveBusy}
+                        title="Delete your character from this session"
+                        className="text-[10px] uppercase font-bold px-2 py-1 rounded border border-red-800/60 text-red-300 hover:bg-red-950/45 disabled:opacity-50"
+                        onClick={() => void handleRemoveMyCharacter(selectedCharacter.id)}
+                      >
+                        {pcRemoveBusy ? '…' : 'Remove my character'}
+                      </button>
+                    )}
                   {sheetOpen && !sheetPopout && (
                     <button
                       type="button"
@@ -1033,6 +1113,16 @@ export function SessionRoomClient() {
                 >
                   {npcRemoveBusy ? '…' : 'Remove NPC'}
                 </button>
+              ) : selectedCharacter.type === 'character' && user && selectedCharacter.userId === user.id ? (
+                <button
+                  type="button"
+                  disabled={pcRemoveBusy}
+                  title="Delete your character from this session"
+                  className="text-[10px] uppercase font-bold px-2 py-1 rounded border border-red-800/60 text-red-300 hover:bg-red-950/45 disabled:opacity-50 cursor-pointer"
+                  onClick={() => void handleRemoveMyCharacter(selectedCharacter.id)}
+                >
+                  {pcRemoveBusy ? '…' : 'Remove my character'}
+                </button>
               ) : undefined
             }
           >
@@ -1070,6 +1160,16 @@ export function SessionRoomClient() {
                 onClick={() => void handleRemoveNpc(tokenSheetCharacter.id)}
               >
                 {npcRemoveBusy ? '…' : 'Remove NPC'}
+              </button>
+            ) : tokenSheetCharacter.type === 'character' && user && tokenSheetCharacter.userId === user.id ? (
+              <button
+                type="button"
+                disabled={pcRemoveBusy}
+                title="Delete your character from this session"
+                className="text-[10px] uppercase font-bold px-2 py-1 rounded border border-red-800/60 text-red-300 hover:bg-red-950/45 disabled:opacity-50 cursor-pointer"
+                onClick={() => void handleRemoveMyCharacter(tokenSheetCharacter.id)}
+              >
+                {pcRemoveBusy ? '…' : 'Remove my character'}
               </button>
             ) : undefined
           }

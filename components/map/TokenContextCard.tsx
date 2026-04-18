@@ -46,6 +46,10 @@ export interface TokenContextCardProps {
   token: Token;
   character: Character | null;
   canEdit: boolean;
+  /** Any session participant may remove a map token (does not delete the character row). */
+  canRemoveFromMap?: boolean;
+  removeFromMapBusy?: boolean;
+  onRemoveFromMap?: () => void;
   supabase: SupabaseClient;
   sessionId: string;
   onViewSheet: () => void;
@@ -56,6 +60,9 @@ export function TokenContextCard({
   token,
   character,
   canEdit,
+  canRemoveFromMap = false,
+  removeFromMapBusy = false,
+  onRemoveFromMap,
   supabase,
   sessionId,
   onViewSheet,
@@ -311,6 +318,17 @@ export function TokenContextCard({
             className="w-full text-center text-[10px] uppercase font-bold text-violet-300 hover:text-violet-100 border border-violet-800/50 rounded px-1.5 py-1 hover:bg-violet-950/40"
           >
             View sheet ↗
+          </button>
+        )}
+
+        {canRemoveFromMap && onRemoveFromMap && (
+          <button
+            type="button"
+            disabled={removeFromMapBusy}
+            onClick={() => onRemoveFromMap()}
+            className="w-full text-center text-[10px] uppercase font-bold text-red-300/90 hover:text-red-200 border border-red-900/50 rounded px-1.5 py-1 hover:bg-red-950/35 disabled:opacity-50"
+          >
+            {removeFromMapBusy ? '…' : 'Remove from map'}
           </button>
         )}
       </div>

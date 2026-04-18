@@ -282,7 +282,7 @@ export const GM_TOOL_DEFINITIONS = [
     function: {
       name: 'show_scene_image',
       description:
-        'Show or hide a full-image illustration for every player in the session room (second monitor / handout). Prefer **exact** `url` strings from `SCENARIO_SCENE_HANDOUTS_JSON` in the user prompt when that list is non-empty; otherwise use any valid **https** public image URL. Call with clear:true to dismiss. Optional caption overrides the default label in the UI.',
+        'Show or hide a full-image illustration for every player in the session room (second monitor / handout). When `SCENARIO_SCENE_HANDOUTS_JSON` in the user prompt is **non-empty**, `image_url` **must** be one of the listed `url` values exactly (server-enforced). When that list is empty, use any valid **https** public image URL. Call with clear:true to dismiss. Optional caption overrides the default label in the UI.',
       parameters: {
         type: 'object',
         properties: {

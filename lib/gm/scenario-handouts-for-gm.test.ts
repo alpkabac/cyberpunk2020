@@ -48,6 +48,13 @@ describe('scenarioHandoutsForSession', () => {
     expect(scenarioHandoutsForSession('Night City generic', base)).toEqual([]);
   });
 
+  it('matches catalog when activeScenarioId is a-night-at-opera even if session title does not', () => {
+    const base = 'https://cawdcuogltifglyilsey.supabase.co';
+    const a = scenarioHandoutsForSession('Friday night one-shot', base, 'a-night-at-opera');
+    expect(a.length).toBeGreaterThan(0);
+    expect(a.some((h) => h.id === 'symphony_hall')).toBe(true);
+  });
+
   it('scenarioHandoutsJsonForGmSession returns valid JSON array', () => {
     const s = scenarioHandoutsJsonForGmSession('Tales of Red', base);
     const parsed = JSON.parse(s) as unknown;
