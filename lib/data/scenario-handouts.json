@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "sets": [
+    {
+      "id": "talesofred",
+      "sessionNameContains": ["tales of red", "talesofred"],
+      "bucket": "scenario-images",
+      "images": [
+        {
+          "id": "cover",
+          "objectPath": "talesofred/cover.jpeg",
+          "caption": "Cover"
+        },
+        {
+          "id": "intro_abucket",
+          "objectPath": "talesofred/intro_abucket.jpeg",
+          "caption": "Intro — A Bucket"
+        },
+        {
+          "id": "intro_image1",
+          "objectPath": "talesofred/intro_image1.jpeg",
+          "caption": "Intro — Image 1"
+        },
+        {
+          "id": "intro_opera",
+          "objectPath": "talesofred/intro_opera.jpeg",
+          "caption": "Intro — Opera"
+        },
+        {
+          "id": "noddles",
+          "objectPath": "talesofred/noddles.jpeg",
+          "caption": "Noddles"
+        },
+        {
+          "id": "poster1",
+          "objectPath": "talesofred/poster1.jpeg",
+          "caption": "Poster 1"
+        },
+        {
+          "id": "poster2",
+          "objectPath": "talesofred/poster2.jpeg",
+          "caption": "Poster 2"
+        },
+        {
+          "id": "poster3",
+          "objectPath": "talesofred/poster3.jpeg",
+          "caption": "Poster 3"
+        },
+        {
+          "id": "symphony_hall",
+          "objectPath": "talesofred/symphony_hall.jpeg",
+          "caption": "Symphony Hall"
+        },
+        {
+          "id": "the_clown",
+          "objectPath": "talesofred/the_clown.jpeg",
+          "caption": "The Clown"
+        },
+        {
+          "id": "the_monk",
+          "objectPath": "talesofred/the_monk.jpeg",
+          "caption": "The Monk"
+        },
+        {
+          "id": "union_chapel_basement",
+          "objectPath": "talesofred/union_chapel_basement.jpeg",
+          "caption": "Union Chapel — Basement"
+        },
+        {
+          "id": "union_chapel_building",
+          "objectPath": "talesofred/union_chapel_building.jpeg",
+          "caption": "Union Chapel — Building"
+        },
+        {
+          "id": "union_chapel_ground",
+          "objectPath": "talesofred/union_chapel_ground.jpeg",
+          "caption": "Union Chapel — Ground"
+        }
+      ]
+    }
+  ]
+}

@@ -47,7 +47,13 @@ CREATE TABLE IF NOT EXISTS sessions (
   }'::jsonb,
 
   -- FNFF initiative / turn order (null = not in combat)
-  combat_state JSONB DEFAULT NULL
+  combat_state JSONB DEFAULT NULL,
+
+  -- Shared soundtrack (Storage object paths under public bucket `soundtrack`)
+  soundtrack_state JSONB DEFAULT NULL,
+
+  -- GM scene image (HTTPS URL, synced to all clients)
+  narration_image JSONB DEFAULT NULL
 );
 
 -- Index for faster lookups

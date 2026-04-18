@@ -3,7 +3,18 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Character, ChatMessage, CombatState, Scene, SessionSettings, Token } from '../types';
+import type {
+  Character,
+  ChatMessage,
+  CombatState,
+  Scene,
+  SessionNarrationImage,
+  SessionSettings,
+  SessionSoundtrackState,
+  Token,
+} from '../types';
+import { parseNarrationImageJson } from '../session/narration-image-state';
+import { parseSoundtrackStateJson } from '../session/soundtrack-state';
 import {
   characterRowToCharacter,
   chatRowToMessage,
@@ -26,6 +37,8 @@ export interface LoadedSessionSnapshot {
     mapBackgroundUrl: string;
     combatState: CombatState | null;
     mapState: SessionMapState;
+    soundtrackState: SessionSoundtrackState | null;
+    narrationImage: SessionNarrationImage | null;
   };
   characters: Character[];
   tokens: Token[];
@@ -48,7 +61,7 @@ export async function fetchSessionSnapshot(
   const { data: sessionRow, error: sessionError } = await client
     .from('sessions')
     .select(
-      'id, name, created_by, created_at, map_background_url, active_scene, settings, session_summary, combat_state, map_state',
+      'id, name, created_by, created_at, map_background_url, active_scene, settings, session_summary, combat_state, map_state, soundtrack_state, narration_image',
     )
     .eq('id', sessionId)
     .maybeSingle();
@@ -90,6 +103,8 @@ export async function fetchSessionSnapshot(
       mapBackgroundUrl: String(s.map_background_url ?? ''),
       combatState: parseCombatStateJson(s.combat_state),
       mapState: parseMapStateJson(s.map_state),
+      soundtrackState: parseSoundtrackStateJson(s.soundtrack_state),
+      narrationImage: parseNarrationImageJson(s.narration_image),
     },
     characters,
     tokens,

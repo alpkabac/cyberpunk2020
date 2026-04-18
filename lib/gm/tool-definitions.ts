@@ -280,6 +280,31 @@ export const GM_TOOL_DEFINITIONS = [
   {
     type: 'function' as const,
     function: {
+      name: 'show_scene_image',
+      description:
+        'Show or hide a full-image illustration for every player in the session room (second monitor / handout). Prefer **exact** `url` strings from `SCENARIO_SCENE_HANDOUTS_JSON` in the user prompt when that list is non-empty; otherwise use any valid **https** public image URL. Call with clear:true to dismiss. Optional caption overrides the default label in the UI.',
+      parameters: {
+        type: 'object',
+        properties: {
+          image_url: {
+            type: 'string',
+            description: 'HTTPS URL to an image (jpeg, png, webp, etc.). Required unless clear is true.',
+          },
+          caption: {
+            type: 'string',
+            description: 'Short label (e.g. location name). Optional.',
+          },
+          clear: {
+            type: 'boolean',
+            description: 'If true, hide the scene image for everyone.',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
       name: 'lookup_rules',
       description:
         'Search the table\'s loaded CP2020 lore snippets (keyword match). Use this whenever the player asks how a rule works, wants a "refresh" on mechanics, or asks about armor/SP/BTM/combat/dice/etc. before answering.',

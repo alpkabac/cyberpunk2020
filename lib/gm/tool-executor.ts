@@ -64,6 +64,7 @@ export type GmToolName =
   | 'remove_token'
   | 'generate_scenery'
   | 'play_narration'
+  | 'show_scene_image'
   | 'lookup_rules'
   | 'update_character_field'
   | 'add_money'
@@ -121,6 +122,24 @@ function optStr(v: unknown): string | undefined {
 }
 
 const STAT_KEYS_FOR_GM = new Set<string>(['int', 'ref', 'tech', 'cool', 'attr', 'luck', 'ma', 'bt', 'emp']);
+
+const MAX_SCENE_IMAGE_URL_LEN = 2048;
+const MAX_SCENE_CAPTION_LEN = 280;
+
+function validatedSceneImageUrl(raw: unknown): string | { error: string } {
+  if (typeof raw !== 'string') return { error: 'image_url must be a string' };
+  const u = raw.trim();
+  if (!u) return { error: 'image_url must not be empty' };
+  if (u.length > MAX_SCENE_IMAGE_URL_LEN) return { error: 'image_url is too long' };
+  try {
+    const parsed = new URL(u);
+    if (parsed.protocol !== 'https:') return { error: 'image_url must use https' };
+    if (parsed.username || parsed.password) return { error: 'image_url must not include credentials' };
+    return u;
+  } catch {
+    return { error: 'image_url must be a valid URL' };
+  }
+}
 
 /** Optional `team` on spawn tools: trimmed tactical id, default hostile, max 64 chars. */
 function resolvedSpawnTeam(raw: Record<string, unknown>): string {
@@ -309,6 +328,24 @@ export function validateGmToolParameters(name: string, raw: unknown): { ok: true
       const text = str(raw.text, 'text');
       if (typeof text !== 'string') return { ok: false, error: text.error };
       return { ok: true, name: 'play_narration', args: raw };
+    }
+    case 'show_scene_image': {
+      const clear = raw.clear === true;
+      if (clear) {
+        if (raw.image_url !== undefined && raw.image_url !== null && typeof raw.image_url !== 'string') {
+          return { ok: false, error: 'image_url must be a string when provided' };
+        }
+        return { ok: true, name: 'show_scene_image', args: { clear: true } };
+      }
+      const url = validatedSceneImageUrl(raw.image_url);
+      if (typeof url !== 'string') return { ok: false, error: url.error };
+      let caption: string | null = null;
+      if (raw.caption !== undefined && raw.caption !== null) {
+        if (typeof raw.caption !== 'string') return { ok: false, error: 'caption must be a string' };
+        const c = raw.caption.trim().slice(0, MAX_SCENE_CAPTION_LEN);
+        caption = c.length > 0 ? c : null;
+      }
+      return { ok: true, name: 'show_scene_image', args: { image_url: url, caption } };
     }
     case 'lookup_rules': {
       const query = str(raw.query, 'query');
@@ -947,6 +984,26 @@ export async function executeGmTool(
       const err = await insertChatMessage(ctx.supabase, ctx.sessionId, 'Game Master', text, 'narration', {});
       if (err) return { ok: false, name, error: err.message };
       return { ok: true, name, result: { posted: true } };
+    }
+    case 'show_scene_image': {
+      if (args.clear === true) {
+        const { error } = await ctx.supabase
+          .from('sessions')
+          .update({ narration_image: null })
+          .eq('id', ctx.sessionId);
+        if (error) return { ok: false, name, error: error.message };
+        return { ok: true, name, result: { cleared: true } };
+      }
+      const imageUrl = String(args.image_url);
+      const cap = args.caption;
+      const caption = cap == null || cap === '' ? null : String(cap);
+      const payload = { url: imageUrl, caption, revision: Date.now() };
+      const { error } = await ctx.supabase
+        .from('sessions')
+        .update({ narration_image: payload })
+        .eq('id', ctx.sessionId);
+      if (error) return { ok: false, name, error: error.message };
+      return { ok: true, name, result: { narration_image: payload } };
     }
     case 'lookup_rules': {
       const query = String(args.query);

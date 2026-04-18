@@ -1,0 +1,39 @@
+-- ============================================================================
+-- Storage: soundtrack bucket — list() + public URLs
+-- ============================================================================
+-- A "public" bucket only makes object URLs readable over HTTP. The JS client's
+-- .list() still checks RLS on storage.objects; without SELECT, list() returns [].
+--
+-- WHY SQL EDITOR MAY ERROR (42501: must be owner of relation objects)
+-- ---------------------------------------------------------------------------
+-- storage.objects is owned by Supabase's storage subsystem. The Dashboard SQL
+-- editor often runs as a role that cannot CREATE POLICY on that table. Use the
+-- Storage UI below instead (recommended), or apply this file via
+-- `supabase db push` / linked migrations if your workflow runs with sufficient
+-- privileges.
+--
+-- OPTION A — Supabase Dashboard (works when SQL editor does not)
+-- ---------------------------------------------------------------------------
+-- 1) Storage → Buckets → ensure bucket id is `soundtrack` → Public bucket ON.
+--
+-- 2) Storage → Buckets → soundtrack → Policies → New policy →
+--    "For full customization" / Custom → Policy name e.g. "Public read soundtrack"
+--    - Allowed operation: SELECT
+--    - Target roles: leave default (applies to all) OR tick anon + authenticated
+--    - USING expression (policy definition):
+--        bucket_id = 'soundtrack'
+--    Save.
+--
+-- OPTION B — SQL (only if your role is allowed; e.g. some self-hosted setups)
+-- ---------------------------------------------------------------------------
+-- INSERT INTO storage.buckets (id, name, public)
+-- VALUES ('soundtrack', 'soundtrack', true)
+-- ON CONFLICT (id) DO UPDATE SET public = EXCLUDED.public;
+--
+-- DROP POLICY IF EXISTS "Public read soundtrack objects" ON storage.objects;
+-- CREATE POLICY "Public read soundtrack objects"
+--   ON storage.objects FOR SELECT
+--   USING (bucket_id = 'soundtrack');
+-- ============================================================================
+
+SELECT 1; -- no-op so this migration file is safe if your runner expects valid SQL

@@ -416,6 +416,25 @@ describe('Property 6: Tool parameter validation', () => {
     ).toBe(false);
   });
 
+  it('accepts show_scene_image (https URL or clear)', () => {
+    expect(
+      validateGmToolParameters('show_scene_image', {
+        image_url: 'https://example.com/a.jpg',
+      }).ok,
+    ).toBe(true);
+    expect(
+      validateGmToolParameters('show_scene_image', {
+        image_url: 'https://example.com/a.jpg',
+        caption: 'Basement',
+      }).ok,
+    ).toBe(true);
+    expect(validateGmToolParameters('show_scene_image', { clear: true }).ok).toBe(true);
+    expect(validateGmToolParameters('show_scene_image', {}).ok).toBe(false);
+    expect(validateGmToolParameters('show_scene_image', { image_url: 'http://insecure.com/x.png' }).ok).toBe(
+      false,
+    );
+  });
+
   it('accepts combat tracker tools', () => {
     expect(validateGmToolParameters('start_combat', {}).ok).toBe(true);
     expect(validateGmToolParameters('advance_round', {}).ok).toBe(true);

@@ -25,6 +25,8 @@ import {
   PendingVoiceGmPayload,
   CombatState,
   PendingGmAttackRequest,
+  SessionNarrationImage,
+  SessionSoundtrackState,
 } from '../types';
 import { BROADCAST_EVENTS } from '../realtime/realtime-events';
 import {
@@ -69,6 +71,10 @@ interface GameState {
     settings: SessionSettings;
     sessionSummary: string;
     combatState: CombatState | null;
+    /** Shared room music (sessions.soundtrack_state). */
+    soundtrackState: SessionSoundtrackState | null;
+    /** GM scene image (sessions.narration_image). */
+    narrationImage: SessionNarrationImage | null;
     /** Signed-in user in session room — used to prompt saves when GM updates this PC via Realtime. */
     viewerUserId: string | null;
   };
@@ -460,6 +466,8 @@ const initialState: GameState = {
     },
     sessionSummary: '',
     combatState: null,
+    soundtrackState: null,
+    narrationImage: null,
     viewerUserId: null,
   },
 
@@ -1765,6 +1773,8 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
           settings: snapshot.session.settings,
           sessionSummary: snapshot.session.sessionSummary,
           combatState: snapshot.session.combatState,
+          soundtrackState: snapshot.session.soundtrackState,
+          narrationImage: snapshot.session.narrationImage,
           viewerUserId: state.session.viewerUserId,
         },
         characters: { byId: byIdChar, allIds: allIdsChar },

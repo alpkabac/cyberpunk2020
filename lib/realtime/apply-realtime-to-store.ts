@@ -7,6 +7,8 @@ import { useGameStore } from '../store/game-store';
 import { parseCombatStateJson } from '../session/combat-state';
 import { chatRowToMessage, parseSceneJson, parseSessionSettingsJson } from './db-mapper';
 import { parseMapStateJson } from '../map/map-state';
+import { parseNarrationImageJson } from '../session/narration-image-state';
+import { parseSoundtrackStateJson } from '../session/soundtrack-state';
 import type { PostgresChangeHandlers } from './session-channel';
 
 export function createDefaultPostgresHandlersForGameStore(): PostgresChangeHandlers {
@@ -34,6 +36,14 @@ export function createDefaultPostgresHandlersForGameStore(): PostgresChangeHandl
 
       if ('combat_state' in row) {
         patch.combatState = parseCombatStateJson(row.combat_state);
+      }
+
+      if ('soundtrack_state' in row) {
+        patch.soundtrackState = parseSoundtrackStateJson(row.soundtrack_state);
+      }
+
+      if ('narration_image' in row) {
+        patch.narrationImage = parseNarrationImageJson(row.narration_image);
       }
 
       if (Object.keys(patch).length > 0) {

@@ -359,6 +359,31 @@ export interface Session {
 
   /** Session room: FNFF tracker (optional; store hydrates from Postgres). */
   combatState?: CombatState | null;
+
+  /** Shared room music (Postgres + Realtime). */
+  soundtrackState?: SessionSoundtrackState | null;
+
+  /** GM-shown illustration (Postgres + Realtime); HTTPS URL only. */
+  narrationImage?: SessionNarrationImage | null;
+}
+
+/** Persisted on `sessions.narration_image`. */
+export interface SessionNarrationImage {
+  url: string;
+  caption: string | null;
+  /** Bumped when the GM replaces the image (client cache key). */
+  revision: number;
+}
+
+/** Persisted on `sessions.soundtrack_state`; ambient vs combat paths follow Storage layout. */
+export interface SessionSoundtrackState {
+  /** e.g. `ambient/city.ogg` */
+  ambientPath: string;
+  /** e.g. `combat/fight.mp3` */
+  combatPath: string;
+  isPlaying: boolean;
+  /** Bumped on shared play/pause and track changes. Volume and playback time are local only. */
+  revision: number;
 }
 
 /** Tactical cover on the grid (CP2020 common cover SPs). Cell indices 0-based inclusive. */
