@@ -13,6 +13,7 @@ import {
 } from '@/lib/dice-roll-send-to-gm';
 import { getAccessTokenForApi } from '@/lib/auth/client-access-token';
 import { applyGmPostSuccessToStore } from '@/lib/gm/apply-gm-client-response';
+import { openRouterModelForGmApi } from '@/lib/gm/client-gm-openrouter-model';
 import { supabase } from '@/lib/supabase';
 import type { DiceRollIntent, RollResult } from '@/lib/types';
 import { playSessionUi } from '@/lib/audio/session-sfx';
@@ -234,6 +235,7 @@ export function DiceRoller() {
           sessionId: payload.sessionId,
           playerMessage: merge ? merge.playerMessage : payload.playerMessage,
           speakerName: payload.speakerName,
+          openRouterModel: openRouterModelForGmApi(useGameStore.getState().session.id),
           ...(merge?.playerMessageMetadata
             ? { playerMessageMetadata: merge.playerMessageMetadata }
             : {}),
@@ -336,6 +338,7 @@ export function DiceRoller() {
           playerMessage: payload.playerMessage,
           speakerName: payload.speakerName,
           playerMessageMetadata: payload.playerMessageMetadata,
+          openRouterModel: openRouterModelForGmApi(useGameStore.getState().session.id),
         }),
       });
       const data = await res.json().catch(() => ({}));

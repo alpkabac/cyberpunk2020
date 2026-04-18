@@ -1,8 +1,25 @@
 import { z } from 'zod';
+import { isGmSelectableOpenRouterModelId } from '@/lib/gm/gm-openrouter-models';
 
 function trimString(val: unknown): unknown {
   return typeof val === 'string' ? val.trim() : val;
 }
+
+function optionalTrimmedOpenRouterModel(val: unknown): unknown {
+  if (val === undefined || val === null) return undefined;
+  if (typeof val !== 'string') return val;
+  const t = val.trim();
+  return t.length === 0 ? undefined : t;
+}
+
+const gmOpenRouterModelField = z.preprocess(
+  optionalTrimmedOpenRouterModel,
+  z
+    .union([z.undefined(), z.string().max(120)])
+    .refine((s) => s === undefined || isGmSelectableOpenRouterModelId(s), {
+      message: 'Invalid OpenRouter model id',
+    }),
+);
 
 const uuid = z.preprocess(trimString, z.string().uuid());
 
@@ -20,6 +37,8 @@ export const gmPostBodySchema = z.object({
     .transform((s) => (s && s.length > 0 ? s : 'Player')),
   playerMessageMetadata: z.record(z.string(), z.unknown()).optional(),
   loreTokenBudget: z.number().int().positive().max(50_000).optional(),
+  /** Optional; when set must be a GM-selectable OpenRouter `model` id. */
+  openRouterModel: gmOpenRouterModelField,
 });
 
 export type GmPostBody = z.infer<typeof gmPostBodySchema>;
@@ -46,6 +65,7 @@ export const gmRegenerateBodySchema = z.object({
   sessionId: uuid,
   narrationMessageId: uuid,
   loreTokenBudget: z.number().int().positive().max(50_000).optional(),
+  openRouterModel: gmOpenRouterModelField,
 });
 
 export type GmRegenerateBody = z.infer<typeof gmRegenerateBodySchema>;
@@ -54,6 +74,7 @@ export type GmRegenerateBody = z.infer<typeof gmRegenerateBodySchema>;
 export const voiceTurnMergeBodySchema = z.object({
   sessionId: uuid,
   turnId: z.preprocess(trimString, z.string().min(1).max(128)),
+  openRouterModel: gmOpenRouterModelField,
 });
 
 export type VoiceTurnMergeBody = z.infer<typeof voiceTurnMergeBodySchema>;

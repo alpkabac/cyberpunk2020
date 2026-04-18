@@ -10,6 +10,7 @@ import { fetchSessionSnapshot } from '@/lib/realtime/session-load';
 import { reportServerError } from '@/lib/logging/server-report';
 import { getServiceRoleClient } from '@/lib/supabase';
 import { getOpenRouterApiKeyFromEnv } from '@/lib/gm/openrouter-env';
+import { defaultGmOpenRouterEnvModel, resolveGmOpenRouterCall } from '@/lib/gm/gm-openrouter-models';
 
 export const maxDuration = 120;
 
@@ -28,7 +29,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const model = process.env.OPENROUTER_MODEL?.trim() || 'deepseek/deepseek-v3.2';
+  const envModel = defaultGmOpenRouterEnvModel();
 
   const rawBody = await readJsonBody(request);
   if (!rawBody.ok) return rawBody.response;
@@ -38,9 +39,11 @@ export async function POST(request: Request) {
     return validationErrorResponse(parsed.error, 'api/gm:body');
   }
 
-  const { sessionId, playerMessage, speakerName, loreTokenBudget, playerMessageMetadata } = parsed.data;
+  const { sessionId, playerMessage, speakerName, loreTokenBudget, playerMessageMetadata, openRouterModel } =
+    parsed.data;
   const loreBudget = loreTokenBudget && loreTokenBudget > 0 ? loreTokenBudget : 2000;
   const meta = playerMessageMetadata ?? {};
+  const { model, reasoning: openRouterReasoning } = resolveGmOpenRouterCall(openRouterModel, envModel);
 
   const supabase = getServiceRoleClient();
   if (!(await fetchSessionSnapshot(supabase, sessionId))) {
@@ -87,6 +90,7 @@ export async function POST(request: Request) {
       loreBudget,
       apiKey,
       model,
+      openRouterReasoning,
       playerMessageMetadata: Object.keys(meta).length > 0 ? meta : null,
     });
   });

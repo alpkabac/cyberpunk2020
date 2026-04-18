@@ -12,6 +12,7 @@ import {
   setDevSpeakerName,
 } from '@/lib/dev/dev-session-storage';
 import { supabase } from '@/lib/supabase';
+import { openRouterModelForGmApi } from '@/lib/gm/client-gm-openrouter-model';
 
 export interface Scenario {
   id: string;
@@ -292,6 +293,7 @@ export function GmScenariosClient() {
           playerMessage: effectiveMessage,
           speakerName: speakerName.trim() || 'Player',
           loreTokenBudget: 2000,
+          openRouterModel: openRouterModelForGmApi(sid),
         }),
       });
       const data = (await res.json()) as ApiResponse;

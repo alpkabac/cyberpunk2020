@@ -17,7 +17,13 @@ import { supabase } from '@/lib/supabase';
 import { persistSessionLanguageSettings } from '@/lib/session/persist-session-language-settings';
 import { persistSessionScenarioSettings } from '@/lib/session/persist-session-scenario-settings';
 import { persistSessionVoiceSettings } from '@/lib/session/persist-session-voice-settings';
+import { persistSessionGmOpenRouterModel } from '@/lib/session/persist-session-gm-openrouter-model';
 import { SCENARIO_CATALOG } from '@/lib/scenarios/catalog';
+import {
+  GM_SELECTABLE_OPENROUTER_MODEL_IDS,
+  isGmSelectableOpenRouterModelId,
+} from '@/lib/gm/gm-openrouter-models';
+import { writeGmOpenRouterClientChoice } from '@/lib/gm/client-gm-openrouter-model';
 
 function typeLabel(type: ChatMessage['type'], meta?: Record<string, unknown>): string {
   if (type === 'system' && meta?.kind === 'roll_request') return 'ROLL';
@@ -47,6 +53,56 @@ function bubbleClasses(type: ChatMessage['type'], meta?: Record<string, unknown>
     case 'roll':
       return 'border-l-emerald-500 bg-emerald-950/35 text-emerald-50';
   }
+}
+
+type ChatImgSegment = { kind: 'text'; text: string } | { kind: 'img'; alt: string; src: string };
+
+/** Renders `![alt](https://...)` as inline images; other text stays plain (no full markdown). */
+function segmentChatTextWithMarkdownImages(text: string): ChatImgSegment[] {
+  const out: ChatImgSegment[] = [];
+  const re = /!\[([^\]]*)\]\((https:[^)\s]+)\)/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) {
+      const t = text.slice(last, m.index);
+      if (t) out.push({ kind: 'text', text: t });
+    }
+    out.push({ kind: 'img', alt: m[1], src: m[2] });
+    last = re.lastIndex;
+  }
+  if (last < text.length) {
+    const t = text.slice(last);
+    if (t) out.push({ kind: 'text', text: t });
+  }
+  return out.length ? out : [{ kind: 'text', text }];
+}
+
+function ChatMessageBody({ text }: { text: string }) {
+  const segments = segmentChatTextWithMarkdownImages(text);
+  if (segments.length === 1 && segments[0].kind === 'text') {
+    return <p className="mt-1 whitespace-pre-wrap wrap-break-word leading-snug">{segments[0].text}</p>;
+  }
+  return (
+    <div className="mt-1 space-y-2 wrap-break-word leading-snug">
+      {segments.map((s, i) =>
+        s.kind === 'text' ? (
+          <p key={i} className="whitespace-pre-wrap">
+            {s.text}
+          </p>
+        ) : (
+          <img
+            key={i}
+            src={s.src}
+            alt={s.alt || 'Image'}
+            className="max-w-full max-h-72 rounded border border-zinc-600/50 object-contain bg-black/20"
+            loading="lazy"
+            referrerPolicy="no-referrer"
+          />
+        ),
+      )}
+    </div>
+  );
 }
 
 function ChevronTruncateIcon({ className }: { className?: string }) {
@@ -123,6 +179,7 @@ export function ChatInterface({
   const sttLanguage = useGameStore((s) => s.session.settings.sttLanguage);
   const aiLanguage = useGameStore((s) => s.session.settings.aiLanguage);
   const activeScenarioId = useGameStore((s) => s.session.settings.activeScenarioId);
+  const gmOpenRouterModel = useGameStore((s) => s.session.settings.gmOpenRouterModel);
   const voiceInputMode = useGameStore((s) => s.ui.voiceInputMode);
   const sessionRecordingGroupActive = useGameStore((s) => s.ui.sessionRecordingGroupActive);
   const sessionRecordingStartedBy = useGameStore((s) => s.ui.sessionRecordingStartedBy);
@@ -241,7 +298,9 @@ export function ChatInterface({
           return;
         }
         useGameStore.getState().clearPendingRollsForSession(sessionId);
-        await requestSessionVoiceTurnMerge(sessionId, turnId, accessToken);
+        await requestSessionVoiceTurnMerge(sessionId, turnId, accessToken, {
+          openRouterModel: gmOpenRouterModel,
+        });
       } catch (e) {
         setVoiceError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -255,6 +314,7 @@ export function ChatInterface({
       charactersById,
       npcsById,
       sttLanguage,
+      gmOpenRouterModel,
       setChatLoading,
     ],
   );
@@ -523,7 +583,12 @@ export function ChatInterface({
           'Content-Type': 'application/json',
           Authorization: `Bearer ${accessToken}`,
         },
-        body: JSON.stringify({ sessionId, playerMessage: text, speakerName }),
+        body: JSON.stringify({
+          sessionId,
+          playerMessage: text,
+          speakerName,
+          openRouterModel: gmOpenRouterModel,
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -539,7 +604,16 @@ export function ChatInterface({
     } finally {
       setChatLoading(false);
     }
-  }, [draft, enabled, sessionId, speakerName, setChatLoading, clearPendingVoiceGm, clearPendingRollsForVoice]);
+  }, [
+    draft,
+    enabled,
+    sessionId,
+    speakerName,
+    gmOpenRouterModel,
+    setChatLoading,
+    clearPendingVoiceGm,
+    clearPendingRollsForVoice,
+  ]);
 
   const toggleVoice = useCallback(async () => {
     if (!enabled) return;
@@ -618,6 +692,7 @@ export function ChatInterface({
           playerMessage: textResult.playerMessage,
           speakerName,
           playerMessageMetadata: textResult.playerMessageMetadata,
+          openRouterModel: gmOpenRouterModel,
         }),
       });
       const gmData = await gmRes.json().catch(() => ({}));
@@ -647,6 +722,7 @@ export function ChatInterface({
     charactersById,
     npcsById,
     sttLanguage,
+    gmOpenRouterModel,
     setChatLoading,
     setVoiceRecordingStore,
     clearPendingVoiceGm,
@@ -742,7 +818,7 @@ export function ChatInterface({
             'Content-Type': 'application/json',
             Authorization: `Bearer ${accessToken}`,
           },
-          body: JSON.stringify({ sessionId, narrationMessageId }),
+          body: JSON.stringify({ sessionId, narrationMessageId, openRouterModel: gmOpenRouterModel }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -762,7 +838,14 @@ export function ChatInterface({
         setChatLoading(false);
       }
     },
-    [enabled, sessionId, setChatLoading, removeChatMessagesByIds, setGmNarrationPending],
+    [
+      enabled,
+      sessionId,
+      gmOpenRouterModel,
+      setChatLoading,
+      removeChatMessagesByIds,
+      setGmNarrationPending,
+    ],
   );
 
   const deleteChatMessage = useCallback(
@@ -994,7 +1077,7 @@ export function ChatInterface({
                       </div>
                     </div>
                   ) : (
-                    <p className="mt-1 whitespace-pre-wrap wrap-break-word leading-snug">{m.text}</p>
+                    <ChatMessageBody text={m.text} />
                   )}
                   {sheetHint && (
                     <p className="mt-1 text-[10px] text-amber-200/80 font-mono">
@@ -1191,6 +1274,38 @@ export function ChatInterface({
           </div>
           <span className="text-zinc-600 normal-case tracking-normal max-w-md">
             STT must match spoken language. GM language affects narration only (tools stay English).
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] uppercase tracking-wide text-zinc-500">
+          <span className="text-zinc-400">OpenRouter model</span>
+          <select
+            value={gmOpenRouterModel}
+            disabled={!enabled || isLoading}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (!isGmSelectableOpenRouterModelId(v)) return;
+              void persistSessionGmOpenRouterModel(supabase, sessionId, { gmOpenRouterModel: v }).then(
+                (r) => {
+                  if (r.error && typeof console !== 'undefined') {
+                    console.warn('[session] gm OpenRouter model persist failed', r.error);
+                  } else {
+                    writeGmOpenRouterClientChoice({ modelId: v });
+                  }
+                },
+              );
+            }}
+            className="max-w-[min(100%,24rem)] bg-zinc-950 border border-zinc-600 rounded px-1.5 py-0.5 text-[10px] font-mono normal-case tracking-normal text-zinc-200 disabled:opacity-40"
+            aria-label="OpenRouter model for AI-GM"
+          >
+            {GM_SELECTABLE_OPENROUTER_MODEL_IDS.map((id) => (
+              <option key={id} value={id}>
+                {id}
+              </option>
+            ))}
+          </select>
+          <span className="text-zinc-600 normal-case tracking-normal max-w-md">
+            Synced for everyone in this session (Postgres + Realtime). DeepSeek V3.2 uses OpenRouter{' '}
+            <span className="font-mono">reasoning</span>.
           </span>
         </div>
         {enabled && (

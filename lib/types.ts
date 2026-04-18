@@ -2,6 +2,8 @@
  * Core type definitions for the Cyberpunk 2020 AI-GM application
  */
 
+import type { GmSelectableOpenRouterModelId } from './gm/gm-openrouter-models';
+
 // ============================================================================
 // Character Types
 // ============================================================================
@@ -513,6 +515,12 @@ export interface SessionSettings {
    * Synced via `sessions.settings` + Realtime.
    */
   activeScenarioId: string | null;
+
+  /**
+   * OpenRouter `model` id for this room’s AI-GM (official slug).
+   * Synced via `sessions.settings` + Realtime.
+   */
+  gmOpenRouterModel: GmSelectableOpenRouterModelId;
 }
 
 /** Initiative row for FNFF turn order (persisted on `sessions.combat_state`). */

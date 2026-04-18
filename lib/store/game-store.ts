@@ -464,6 +464,7 @@ const initialState: GameState = {
       mapSnapToGrid: true,
       mapMetersPerSquare: 5,
       activeScenarioId: null,
+      gmOpenRouterModel: 'deepseek/deepseek-v3.2',
     },
     sessionSummary: '',
     combatState: null,

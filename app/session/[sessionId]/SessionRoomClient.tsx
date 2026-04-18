@@ -46,8 +46,6 @@ export function SessionRoomClient() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sheetPopout, setSheetPopout] = useState(false);
-  const [sceneImageOpen, setSceneImageOpen] = useState(true);
-  const [sceneImagePopout, setSceneImagePopout] = useState(false);
   const [wideChatLayout, setWideChatLayout] = useState(false);
 
   // Sheet drawer: collapsed by default
@@ -74,6 +72,10 @@ export function SessionRoomClient() {
 
   const session = useGameStore((s) => s.session);
   const narrationImage = session.narrationImage;
+  const sceneHandoutKey = narrationImage
+    ? `${narrationImage.url}\0${String(narrationImage.revision ?? '')}`
+    : '';
+  const [sceneHandoutDismissed, setSceneHandoutDismissed] = useState(false);
   const characters = useGameStore(
     useShallow((s) => ({ byId: s.characters.byId, allIds: s.characters.allIds })),
   );
@@ -83,12 +85,8 @@ export function SessionRoomClient() {
   const tokens = useGameStore((s) => s.map.tokens);
 
   useEffect(() => {
-    if (narrationImage?.url) setSceneImageOpen(true);
-  }, [narrationImage?.url]);
-
-  useEffect(() => {
-    if (!narrationImage) setSceneImagePopout(false);
-  }, [narrationImage]);
+    setSceneHandoutDismissed(false);
+  }, [sceneHandoutKey]);
 
   useEffect(() => {
     useGameStore.getState().reset();
@@ -888,82 +886,6 @@ export function SessionRoomClient() {
             />
           )}
 
-          {/* ── GM scene image (AI tool + Realtime) ── */}
-          {user && cloudHydrated && !loadError && narrationImage && (
-            <div className="rounded border border-zinc-800 bg-zinc-900/40 overflow-hidden">
-              <div className="w-full flex items-center justify-between gap-2 px-3 py-2.5">
-                <button
-                  type="button"
-                  onClick={() => setSceneImageOpen((v) => !v)}
-                  className="flex items-center gap-2 min-w-0 flex-1 text-left hover:opacity-80 transition-opacity"
-                >
-                  <span className="text-sm font-semibold text-zinc-100 truncate">
-                    {narrationImage.caption ?? 'Scene image'}
-                  </span>
-                  <span className="text-[10px] text-zinc-500 hidden sm:block">· Handout</span>
-                </button>
-                <div className="flex items-center gap-2 shrink-0">
-                  {sceneImageOpen && !sceneImagePopout && (
-                    <button
-                      type="button"
-                      className="text-[10px] uppercase font-bold px-2 py-1 rounded border border-cyan-700/50 text-cyan-300 hover:bg-cyan-950/40"
-                      onClick={() => {
-                        setSceneImagePopout(true);
-                        setSceneImageOpen(false);
-                      }}
-                    >
-                      Pop out
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setSceneImageOpen((v) => !v)}
-                    className="hover:opacity-80 transition-opacity"
-                    aria-label={sceneImageOpen ? 'Collapse scene image' : 'Expand scene image'}
-                  >
-                    {sceneImagePopout ? (
-                      <span className="text-[10px] text-violet-400">Floating ↗</span>
-                    ) : (
-                      <svg
-                        className={`w-4 h-4 text-zinc-400 transition-transform duration-150 ${sceneImageOpen ? 'rotate-180' : ''}`}
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth={2}
-                      >
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                      </svg>
-                    )}
-                  </button>
-                </div>
-              </div>
-
-              {sceneImageOpen && !sceneImagePopout && (
-                <div className="border-t border-zinc-800 p-2 flex justify-center bg-black/40 max-h-[min(70vh,520px)]">
-                  <img
-                    key={`${narrationImage.url}-${narrationImage.revision}`}
-                    src={narrationImage.url}
-                    alt={narrationImage.caption ?? 'Scene'}
-                    className="max-w-full max-h-[min(68vh,500px)] w-auto h-auto object-contain rounded"
-                  />
-                </div>
-              )}
-
-              {sceneImagePopout && (
-                <p className="text-xs text-zinc-500 px-3 py-2 border-t border-zinc-800">
-                  Image is in a floating window.{' '}
-                  <button
-                    type="button"
-                    onClick={() => setSceneImagePopout(false)}
-                    className="text-cyan-400 underline"
-                  >
-                    Dock here
-                  </button>
-                </p>
-              )}
-            </div>
-          )}
-
           {/* ── Sheet toggle bar ── */}
           {user && cloudHydrated && !loadError && resolvedCharacterId && selectedCharacter && (
             <div className="rounded border border-zinc-800 bg-zinc-900/40 overflow-hidden">
@@ -1082,12 +1004,12 @@ export function SessionRoomClient() {
       {user && cloudHydrated && !loadError && <StartOfTurnDeathSaveAck />}
 
       {/* Own character sheet popout (from toggle bar) */}
-      {user && cloudHydrated && !loadError && sceneImagePopout && narrationImage && (
+      {user && cloudHydrated && !loadError && narrationImage && !sceneHandoutDismissed && (
         <PopoutSceneImage
           title={narrationImage.caption ?? 'Scene image'}
           imageUrl={narrationImage.url}
           imageKey={`${narrationImage.url}-${narrationImage.revision}`}
-          onDock={() => setSceneImagePopout(false)}
+          onClose={() => setSceneHandoutDismissed(true)}
         />
       )}
 

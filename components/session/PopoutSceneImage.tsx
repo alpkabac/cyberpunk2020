@@ -8,7 +8,7 @@ type PopoutSceneImageProps = {
   imageUrl: string;
   /** Cache-bust / remount when GM replaces the asset */
   imageKey: string;
-  onDock: () => void;
+  onClose: () => void;
 };
 
 const MIN_W = 360;
@@ -17,7 +17,7 @@ const MIN_H = 280;
 /**
  * Floating handout image — same chrome as PopoutCharacterSheet (session room).
  */
-export function PopoutSceneImage({ title, imageUrl, imageKey, onDock }: PopoutSceneImageProps) {
+export function PopoutSceneImage({ title, imageUrl, imageKey, onClose }: PopoutSceneImageProps) {
   const [pos, setPos] = useState({ x: 80, y: 64 });
   const [size, setSize] = useState({ w: 720, h: 520 });
   const dragRef = useRef<{ startX: number; startY: number; ox: number; oy: number } | null>(null);
@@ -85,10 +85,10 @@ export function PopoutSceneImage({ title, imageUrl, imageKey, onDock }: PopoutSc
         <span className="text-xs font-bold uppercase tracking-wide text-cyan-400/90 truncate min-w-0">{title}</span>
         <button
           type="button"
-          onClick={onDock}
+          onClick={onClose}
           className="text-[10px] uppercase font-bold px-2 py-1 rounded border border-zinc-600 text-zinc-200 hover:bg-zinc-800 cursor-pointer shrink-0"
         >
-          Dock image
+          Close
         </button>
       </div>
       <div className="flex-1 min-h-0 flex flex-col items-center justify-center p-2 bg-black/50 relative overflow-hidden">

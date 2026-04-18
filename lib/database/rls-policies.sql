@@ -13,6 +13,7 @@ ALTER TABLE sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE characters ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tokens ENABLE ROW LEVEL SECURITY;
 ALTER TABLE chat_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE map_presets ENABLE ROW LEVEL SECURITY;
 
 -- Game data tables are read-only for all authenticated users
 ALTER TABLE weapons ENABLE ROW LEVEL SECURITY;
@@ -276,6 +277,51 @@ CREATE POLICY "Session creators can delete messages"
     WHERE sessions.id = chat_messages.session_id 
     AND sessions.created_by = auth.uid()
   ));
+
+-- ============================================================================
+-- Map presets (GM save/load of tactical map layout)
+-- ============================================================================
+
+CREATE POLICY "Session participants can view map presets"
+  ON map_presets FOR SELECT
+  USING (is_user_in_session(session_id));
+
+CREATE POLICY "GMs can create map presets"
+  ON map_presets FOR INSERT
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM sessions
+      WHERE sessions.id = session_id
+        AND sessions.created_by = auth.uid()
+    )
+  );
+
+CREATE POLICY "GMs can update map presets"
+  ON map_presets FOR UPDATE
+  USING (
+    EXISTS (
+      SELECT 1 FROM sessions
+      WHERE sessions.id = map_presets.session_id
+        AND sessions.created_by = auth.uid()
+    )
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM sessions
+      WHERE sessions.id = map_presets.session_id
+        AND sessions.created_by = auth.uid()
+    )
+  );
+
+CREATE POLICY "GMs can delete map presets"
+  ON map_presets FOR DELETE
+  USING (
+    EXISTS (
+      SELECT 1 FROM sessions
+      WHERE sessions.id = map_presets.session_id
+        AND sessions.created_by = auth.uid()
+    )
+  );
 
 -- ============================================================================
 -- Game Data Tables Policies (Read-only for all authenticated users)

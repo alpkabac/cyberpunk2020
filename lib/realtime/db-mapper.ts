@@ -30,6 +30,7 @@ import {
   normalizeGridDimension,
 } from '../map/grid';
 import { parseActiveScenarioId } from '../scenarios/catalog';
+import { isGmSelectableOpenRouterModelId } from '../gm/gm-openrouter-models';
 
 const WEAPON_TYPES: WeaponType[] = ['Pistol', 'SMG', 'Shotgun', 'Rifle', 'Heavy', 'Melee', 'Exotic'];
 const ZONES: Zone[] = ['Head', 'Torso', 'rArm', 'lArm', 'rLeg', 'lLeg'];
@@ -308,6 +309,7 @@ const DEFAULT_SETTINGS: SessionSettings = {
   mapSnapToGrid: true,
   mapMetersPerSquare: 5,
   activeScenarioId: null,
+  gmOpenRouterModel: 'deepseek/deepseek-v3.2',
 };
 
 export function parseSceneJson(v: unknown): Scene {
@@ -369,6 +371,10 @@ export function parseSessionSettingsJson(v: unknown): SessionSettings {
     mapSnapToGrid: typeof o.mapSnapToGrid === 'boolean' ? o.mapSnapToGrid : DEFAULT_SETTINGS.mapSnapToGrid,
     mapMetersPerSquare,
     activeScenarioId: parseActiveScenarioId(o.activeScenarioId),
+    gmOpenRouterModel:
+      typeof o.gmOpenRouterModel === 'string' && isGmSelectableOpenRouterModelId(o.gmOpenRouterModel)
+        ? o.gmOpenRouterModel
+        : DEFAULT_SETTINGS.gmOpenRouterModel,
   };
 }
 

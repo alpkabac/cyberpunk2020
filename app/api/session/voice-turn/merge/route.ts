@@ -9,6 +9,7 @@ import { chatRowToMessage } from '@/lib/realtime/db-mapper';
 import { fetchSessionSnapshot } from '@/lib/realtime/session-load';
 import { getServiceRoleClient } from '@/lib/supabase';
 import { getOpenRouterApiKeyFromEnv } from '@/lib/gm/openrouter-env';
+import { defaultGmOpenRouterEnvModel, resolveGmOpenRouterCall } from '@/lib/gm/gm-openrouter-models';
 import { mergeSessionVoiceTurnFragmentsForGm } from '@/lib/voice/merge-session-voice-fragments';
 
 export const maxDuration = 120;
@@ -38,9 +39,10 @@ export async function POST(request: Request) {
     return validationErrorResponse(parsed.error, 'api/session/voice-turn/merge:body');
   }
 
-  const { sessionId, turnId } = parsed.data;
+  const { sessionId, turnId, openRouterModel } = parsed.data;
 
-  const model = process.env.OPENROUTER_MODEL?.trim() || 'deepseek/deepseek-v3.2';
+  const envModel = defaultGmOpenRouterEnvModel();
+  const { model, reasoning: openRouterReasoning } = resolveGmOpenRouterCall(openRouterModel, envModel);
   const loreBudget = 2000;
 
   const supabase = getServiceRoleClient();
@@ -162,6 +164,7 @@ export async function POST(request: Request) {
       loreBudget,
       apiKey,
       model,
+      openRouterReasoning,
     });
   });
 

@@ -8,6 +8,7 @@ import { useShallow } from 'zustand/react/shallow';
 import type { SessionCombatPostBody } from '@/lib/api/schemas/session-routes';
 import { getAccessTokenForApi } from '@/lib/auth/client-access-token';
 import { applyGmPostSuccessToStore } from '@/lib/gm/apply-gm-client-response';
+import { openRouterModelForGmApi } from '@/lib/gm/client-gm-openrouter-model';
 import { playSessionUi } from '@/lib/audio/session-sfx';
 
 interface InitiativeTrackerProps {
@@ -130,6 +131,7 @@ Follow **GM_TASK** in this request (narrate, resolve mechanics, then \`next_turn
           sessionId,
           playerMessage,
           speakerName: gmRequestSpeakerName,
+          openRouterModel: openRouterModelForGmApi(sessionId),
           playerMessageMetadata: {
             kind: 'npc_turn_narration_request',
             npcCharacterId: ac.id,

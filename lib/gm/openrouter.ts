@@ -70,12 +70,18 @@ async function callOpenRouterChatOnce(params: {
   model: string;
   messages: OpenRouterChatMessage[];
   tools?: boolean;
+  /** OpenRouter unified reasoning (e.g. DeepSeek V3.2 thinking). */
+  reasoning?: { effort: 'high' };
 }): Promise<OpenRouterCompletionResult> {
   const body: Record<string, unknown> = {
     model: params.model,
     messages: params.messages,
     temperature: 0.7,
   };
+
+  if (params.reasoning) {
+    body.reasoning = params.reasoning;
+  }
 
   if (params.tools) {
     body.tools = GM_TOOL_DEFINITIONS;
@@ -127,6 +133,7 @@ export async function callOpenRouterChat(params: {
   model: string;
   messages: OpenRouterChatMessage[];
   tools?: boolean;
+  reasoning?: { effort: 'high' };
   /** Retries for transient HTTP / network failures (default 4). */
   maxRetries?: number;
 }): Promise<OpenRouterCompletionResult> {
@@ -175,6 +182,7 @@ const MAX_TOOL_STEPS = 6;
 export async function runGmCompletionWithTools(params: {
   apiKey: string;
   model: string;
+  reasoning?: { effort: 'high' };
   systemPrompt: string;
   userContent: string;
   toolContext: ToolExecutorContext;
@@ -194,6 +202,7 @@ export async function runGmCompletionWithTools(params: {
       model: params.model,
       messages,
       tools: true,
+      reasoning: params.reasoning,
     });
     lastRaw = raw;
 
@@ -235,6 +244,7 @@ export async function runGmCompletionWithTools(params: {
     model: params.model,
     messages,
     tools: false,
+    reasoning: params.reasoning,
   });
   lastRaw = raw;
   return { narration: sanitizeGmNarrationText(content ?? ''), lastRaw, toolLog };

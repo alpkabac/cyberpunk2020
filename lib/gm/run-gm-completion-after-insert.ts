@@ -68,6 +68,7 @@ export async function runGmCompletionAfterPlayerInsert(opts: {
   loreBudget: number;
   apiKey: string;
   model: string;
+  openRouterReasoning?: { effort: 'high' };
   playerMessageMetadata?: Record<string, unknown> | null;
 }): Promise<void> {
   const snapshot = await fetchSessionSnapshot(opts.supabase, opts.sessionId);
@@ -126,6 +127,7 @@ export async function runGmCompletionAfterPlayerInsert(opts: {
       runGmCompletionWithTools({
         apiKey: opts.apiKey,
         model: opts.model,
+        reasoning: opts.openRouterReasoning,
         systemPrompt,
         userContent,
         toolContext: {
@@ -153,7 +155,10 @@ export async function runGmCompletionAfterPlayerInsert(opts: {
         speaker: 'Game Master',
         text: narration.trim(),
         type: 'narration',
-        metadata: { model: opts.model },
+        metadata: {
+          model: opts.model,
+          ...(opts.openRouterReasoning ? { openRouterReasoning: opts.openRouterReasoning } : {}),
+        },
       });
       if (narrErr) {
         reportServerError('ai-gm:narration-insert-failed', new Error(narrErr.message), {

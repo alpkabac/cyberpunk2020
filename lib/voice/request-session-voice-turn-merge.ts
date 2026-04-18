@@ -6,6 +6,7 @@ export async function requestSessionVoiceTurnMerge(
   sessionId: string,
   turnId: string,
   accessToken: string,
+  opts?: { openRouterModel?: string },
 ): Promise<void> {
   for (let attempt = 0; attempt < 15; attempt++) {
     const res = await fetch('/api/session/voice-turn/merge', {
@@ -14,7 +15,11 @@ export async function requestSessionVoiceTurnMerge(
         'Content-Type': 'application/json',
         Authorization: `Bearer ${accessToken}`,
       },
-      body: JSON.stringify({ sessionId, turnId }),
+      body: JSON.stringify({
+        sessionId,
+        turnId,
+        ...(opts?.openRouterModel ? { openRouterModel: opts.openRouterModel } : {}),
+      }),
     });
 
     if (res.status === 202) {
