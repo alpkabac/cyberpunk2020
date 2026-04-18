@@ -1,5 +1,5 @@
 import { prepareGmCompletionInput } from '@/lib/gm/prepare-gm-completion-input';
-import { runGmCompletionWithTools } from '@/lib/gm/openrouter';
+import { runGmCompletionWithToolsStreaming } from '@/lib/gm/openrouter';
 import { reportServerError } from '@/lib/logging/server-report';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -49,10 +49,13 @@ async function insertFallbackNarration(supabase: SupabaseClient, sessionId: stri
   }
 }
 
+export type GmStreamSseWrite = (event: string, data: Record<string, unknown>) => void;
+
 /**
- * Runs after the HTTP response so the client can show the player message immediately.
+ * Runs GM completion with OpenRouter streaming; forwards token deltas and tool-round signals via SSE.
+ * Inserts the final narration row when done (same as background job).
  */
-export async function runGmCompletionAfterPlayerInsert(opts: {
+export async function runGmCompletionStreamingWithSse(opts: {
   supabase: SupabaseClient;
   sessionId: string;
   playerMessage: string;
@@ -62,6 +65,7 @@ export async function runGmCompletionAfterPlayerInsert(opts: {
   model: string;
   openRouterReasoning?: { effort: 'high' };
   playerMessageMetadata?: Record<string, unknown> | null;
+  write: GmStreamSseWrite;
 }): Promise<void> {
   const prepared = await prepareGmCompletionInput({
     supabase: opts.supabase,
@@ -73,20 +77,30 @@ export async function runGmCompletionAfterPlayerInsert(opts: {
     openRouterReasoning: opts.openRouterReasoning,
     playerMessageMetadata: opts.playerMessageMetadata ?? null,
   });
-  if (!prepared) return;
+  if (!prepared) {
+    opts.write('error', { message: 'Session unavailable' });
+    return;
+  }
 
   const toolErrors: { tool: string; error: string }[] = [];
   let toolStepCount = 0;
 
   try {
     const { narration, toolLog } = await withRetry(() =>
-      runGmCompletionWithTools({
+      runGmCompletionWithToolsStreaming({
         apiKey: opts.apiKey,
         model: prepared.model,
         reasoning: prepared.openRouterReasoning,
         systemPrompt: prepared.systemPrompt,
         userContent: prepared.userContent,
         toolContext: prepared.toolContext,
+        onNarrationDelta: (delta) => {
+          if (delta.length === 0) return;
+          opts.write('delta', { text: delta });
+        },
+        onAssistantToolRound: () => {
+          opts.write('tool_round', {});
+        },
         onToolResult: (r) => {
           if (!r.ok) {
             toolErrors.push({ tool: r.name, error: r.error });
@@ -101,23 +115,36 @@ export async function runGmCompletionAfterPlayerInsert(opts: {
     toolStepCount = toolLog.length;
 
     if (narration.trim()) {
-      const { error: narrErr } = await opts.supabase.from('chat_messages').insert({
-        session_id: opts.sessionId,
-        speaker: 'Game Master',
-        text: narration.trim(),
-        type: 'narration',
-        metadata: {
-          model: opts.model,
-          ...(opts.openRouterReasoning ? { openRouterReasoning: opts.openRouterReasoning } : {}),
-        },
-      });
-      if (narrErr) {
-        reportServerError('ai-gm:narration-insert-failed', new Error(narrErr.message), {
-          sessionId: opts.sessionId,
-        });
+      const { data: inserted, error: narrErr } = await opts.supabase
+        .from('chat_messages')
+        .insert({
+          session_id: opts.sessionId,
+          speaker: 'Game Master',
+          text: narration.trim(),
+          type: 'narration',
+          metadata: {
+            model: opts.model,
+            ...(opts.openRouterReasoning ? { openRouterReasoning: opts.openRouterReasoning } : {}),
+          },
+        })
+        .select('id')
+        .single();
+
+      if (narrErr || !inserted) {
+        reportServerError(
+          'ai-gm:narration-insert-failed',
+          new Error(narrErr?.message ?? 'no row'),
+          { sessionId: opts.sessionId },
+        );
+        opts.write('error', { message: 'Failed to save narration' });
+        return;
       }
+
+      const row = inserted as { id?: string };
+      opts.write('done', { messageId: row.id ?? null });
     } else {
       await insertFallbackNarration(opts.supabase, opts.sessionId);
+      opts.write('done', { messageId: null, fallback: true });
     }
 
     if (toolErrors.length > 0) {
@@ -129,9 +156,10 @@ export async function runGmCompletionAfterPlayerInsert(opts: {
     }
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    reportServerError('ai-gm:background-completion-failed', e instanceof Error ? e : new Error(message), {
+    reportServerError('ai-gm:streaming-completion-failed', e instanceof Error ? e : new Error(message), {
       sessionId: opts.sessionId,
     });
     await insertFallbackNarration(opts.supabase, opts.sessionId);
+    opts.write('error', { message: message || 'AI-GM failed', fallbackPosted: true });
   }
 }

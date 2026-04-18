@@ -19,12 +19,27 @@ import { persistSessionLanguageSettings } from '@/lib/session/persist-session-la
 import { persistSessionScenarioSettings } from '@/lib/session/persist-session-scenario-settings';
 import { persistSessionVoiceSettings } from '@/lib/session/persist-session-voice-settings';
 import { persistSessionGmOpenRouterModel } from '@/lib/session/persist-session-gm-openrouter-model';
+import { persistSessionTtsEnabled } from '@/lib/session/persist-session-tts-enabled';
+import { parseGmSseResponse } from '@/lib/gm/consume-gm-sse-stream';
+import { pullCompleteSentences } from '@/lib/narration/pull-complete-sentences';
+import { GmStreamTtsQueue } from '@/lib/audio/gm-stream-tts-queue';
 import { SCENARIO_CATALOG } from '@/lib/scenarios/catalog';
 import {
   GM_SELECTABLE_OPENROUTER_MODEL_IDS,
   isGmSelectableOpenRouterModelId,
 } from '@/lib/gm/gm-openrouter-models';
 import { writeGmOpenRouterClientChoice } from '@/lib/gm/client-gm-openrouter-model';
+
+function formatGmStreamClientError(e: unknown): string {
+  const base = e instanceof Error ? e.message : String(e);
+  if (
+    e instanceof TypeError ||
+    /network|fetch|load failed|aborted|stream|incomplete|closed|reset/i.test(base)
+  ) {
+    return `${base} If you only lost the live preview, the GM reply may still appear in chat shortly.`;
+  }
+  return base;
+}
 
 function typeLabel(type: ChatMessage['type'], meta?: Record<string, unknown>): string {
   if (type === 'system' && meta?.kind === 'roll_request') return 'ROLL';
@@ -207,6 +222,7 @@ export function ChatInterface({
   const aiLanguage = useGameStore((s) => s.session.settings.aiLanguage);
   const activeScenarioId = useGameStore((s) => s.session.settings.activeScenarioId);
   const gmOpenRouterModel = useGameStore((s) => s.session.settings.gmOpenRouterModel);
+  const ttsEnabled = useGameStore((s) => s.session.settings.ttsEnabled);
   const voiceInputMode = useGameStore((s) => s.ui.voiceInputMode);
   const sessionRecordingGroupActive = useGameStore((s) => s.ui.sessionRecordingGroupActive);
   const sessionRecordingStartedBy = useGameStore((s) => s.ui.sessionRecordingStartedBy);
@@ -239,6 +255,8 @@ export function ChatInterface({
   const [showToolLog, setShowToolLog] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingDraft, setEditingDraft] = useState('');
+  /** Live AI-GM narration from POST /api/gm/stream; `null` when idle. */
+  const [streamingGmText, setStreamingGmText] = useState<string | null>(null);
   const {
     isRecording: voiceRecording,
     micReady,
@@ -273,6 +291,69 @@ export function ChatInterface({
     () => (messages.length > 0 ? messages[messages.length - 1]?.id : undefined),
     [messages],
   );
+
+  const ttsQueueRef = useRef<GmStreamTtsQueue | null>(null);
+  useEffect(() => {
+    ttsQueueRef.current = new GmStreamTtsQueue({
+      sessionId,
+      getToken: () => getAccessTokenForApi(supabase),
+      getVolume: () => useGameStore.getState().ui.audioNarrationVolume,
+    });
+    return () => {
+      ttsQueueRef.current?.cancel();
+    };
+  }, [sessionId]);
+
+  const consumeGmStreamBody = useCallback(async (res: Response, onStreamError: (message: string) => void) => {
+    let sentenceCarry = '';
+    setStreamingGmText('');
+    ttsQueueRef.current?.cancel();
+    ttsQueueRef.current?.resetCancelFlag();
+    try {
+      for await (const { event, data } of parseGmSseResponse(res)) {
+        if (event === 'open') {
+          applyGmPostSuccessToStore(data);
+          continue;
+        }
+        if (event === 'delta') {
+          const text = typeof data.text === 'string' ? data.text : '';
+          if (text.length > 0) {
+            setStreamingGmText((prev) => (prev ?? '') + text);
+            if (useGameStore.getState().session.settings.ttsEnabled) {
+              const { sentences, carry } = pullCompleteSentences(sentenceCarry, text);
+              sentenceCarry = carry;
+              for (const s of sentences) ttsQueueRef.current?.enqueue(s);
+            }
+          }
+          continue;
+        }
+        if (event === 'tool_round') {
+          setStreamingGmText('');
+          sentenceCarry = '';
+          ttsQueueRef.current?.cancel();
+          ttsQueueRef.current?.resetCancelFlag();
+          continue;
+        }
+        if (event === 'done') {
+          if (useGameStore.getState().session.settings.ttsEnabled) {
+            const tail = sentenceCarry.trim();
+            if (tail.length >= 2) ttsQueueRef.current?.enqueue(tail);
+          }
+          sentenceCarry = '';
+          setStreamingGmText(null);
+          continue;
+        }
+        if (event === 'error') {
+          const msg = typeof data.message === 'string' ? data.message : 'AI-GM stream failed';
+          onStreamError(msg);
+          ttsQueueRef.current?.cancel();
+          setStreamingGmText(null);
+        }
+      }
+    } finally {
+      setStreamingGmText(null);
+    }
+  }, []);
 
   const submitSessionVoiceFragment = useCallback(
     async (turnId: string, blob: Blob, recordingStartedAtMs: number | undefined) => {
@@ -368,7 +449,7 @@ export function ChatInterface({
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [lastMessageId, pendingRollsForVoice.length]);
+  }, [lastMessageId, pendingRollsForVoice.length, streamingGmText]);
 
   const lastRollRequest = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -600,13 +681,14 @@ export function ChatInterface({
     if (!text || !enabled) return;
     setSendError(null);
     setChatLoading(true);
+    unlockHtmlAudioFromUserGesture();
     try {
       const accessToken = await getAccessTokenForApi(supabase);
       if (!accessToken) {
         setSendError('Not signed in');
         return;
       }
-      const res = await fetch('/api/gm', {
+      const res = await fetch('/api/gm/stream', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -619,17 +701,17 @@ export function ChatInterface({
           openRouterModel: gmOpenRouterModel,
         }),
       });
-      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
         setSendError((data as { error?: string }).error ?? res.statusText ?? 'Request failed');
         return;
       }
-      applyGmPostSuccessToStore(data);
+      await consumeGmStreamBody(res, (m) => setSendError(m));
       clearPendingVoiceGm();
       clearPendingRollsForVoice();
       setDraft('');
     } catch (e) {
-      setSendError(e instanceof Error ? e.message : String(e));
+      setSendError(formatGmStreamClientError(e));
     } finally {
       setChatLoading(false);
     }
@@ -642,6 +724,7 @@ export function ChatInterface({
     setChatLoading,
     clearPendingVoiceGm,
     clearPendingRollsForVoice,
+    consumeGmStreamBody,
   ]);
 
   const toggleVoice = useCallback(async () => {
@@ -691,6 +774,7 @@ export function ChatInterface({
       return;
     }
     setChatLoading(true);
+    unlockHtmlAudioFromUserGesture();
     try {
       const accessToken = await getAccessTokenForApi(supabase);
       if (!accessToken) {
@@ -710,7 +794,7 @@ export function ChatInterface({
         setVoiceError(textResult.error);
         return;
       }
-      const gmRes = await fetch('/api/gm', {
+      const gmRes = await fetch('/api/gm/stream', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -724,16 +808,16 @@ export function ChatInterface({
           openRouterModel: gmOpenRouterModel,
         }),
       });
-      const gmData = await gmRes.json().catch(() => ({}));
       if (!gmRes.ok) {
+        const gmData = await gmRes.json().catch(() => ({}));
         setVoiceError((gmData as { error?: string }).error ?? gmRes.statusText ?? 'AI-GM request failed');
       } else {
-        applyGmPostSuccessToStore(gmData);
+        await consumeGmStreamBody(gmRes, (m) => setVoiceError(m));
         clearPendingVoiceGm();
         clearPendingRollsForVoice();
       }
     } catch (e) {
-      setVoiceError(e instanceof Error ? e.message : String(e));
+      setVoiceError(formatGmStreamClientError(e));
     } finally {
       setChatLoading(false);
     }
@@ -757,6 +841,7 @@ export function ChatInterface({
     clearPendingVoiceGm,
     clearPendingRollsForVoice,
     submitSessionVoiceFragment,
+    consumeGmStreamBody,
   ]);
 
   const openRollRequestInRoller = useCallback(
@@ -995,6 +1080,24 @@ export function ChatInterface({
             />
             Tool log
           </label>
+          <label className="inline-flex items-center gap-1.5 cursor-pointer text-[9px] uppercase tracking-wide text-zinc-500 select-none">
+            <input
+              type="checkbox"
+              className="accent-violet-600 scale-90"
+              checked={ttsEnabled}
+              disabled={!enabled || isLoading}
+              title="Speak each sentence as the AI-GM streams (Cartesia)"
+              onChange={(e) => {
+                const on = e.target.checked;
+                void persistSessionTtsEnabled(supabase, sessionId, { ttsEnabled: on }).then((r) => {
+                  if (r.error && typeof console !== 'undefined') {
+                    console.warn('[session] TTS setting persist failed', r.error);
+                  }
+                });
+              }}
+            />
+            Auto TTS
+          </label>
           {!showToolLog && hiddenMessageCount > 0 && (
             <span className="text-[9px] text-zinc-600 font-mono normal-case">
               {hiddenMessageCount} hidden
@@ -1021,7 +1124,8 @@ export function ChatInterface({
             system lines.
           </p>
         ) : (
-          displayedMessages.map((m) => {
+          <>
+            {displayedMessages.map((m) => {
             const sheetHint =
               m.type === 'system' && m.metadata?.kind === 'roll_request' ? rollHint(m) : null;
             const canRegenerateGm = m.type === 'narration' && m.speaker === 'Game Master';
@@ -1078,7 +1182,7 @@ export function ChatInterface({
                       <button
                         type="button"
                         className="shrink-0 p-0.5 rounded normal-case text-violet-300/85 hover:text-violet-200 hover:bg-violet-950/40 disabled:opacity-35 transition-colors"
-                        title="Read aloud for everyone"
+                        title="Read aloud for everyone (replays from cache after first fetch)"
                         disabled={!enabled || isLoading || !sessionBroadcastReady}
                         aria-label="Read narration aloud for everyone"
                         onClick={() => {
@@ -1155,7 +1259,23 @@ export function ChatInterface({
                 ) : null}
               </div>
             );
-          })
+          })}
+            {streamingGmText !== null && (
+              <div className="group flex items-stretch min-h-9 rounded-r border-l-2 border-l-violet-400 bg-violet-950/40 text-violet-50">
+                <div className="shrink-0 w-7 flex items-center justify-center self-stretch rounded-l-sm border-r border-black/15 bg-black/10 text-zinc-600">
+                  <span className="text-[9px] font-mono">···</span>
+                </div>
+                <div className="relative flex-1 min-w-0 py-1.5 pl-2 pr-3">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] uppercase tracking-wide opacity-80">
+                    <span className="font-bold text-violet-200">Game Master</span>
+                    <span className="text-violet-500/90 font-mono">GM</span>
+                    <span className="text-violet-600/90 font-mono animate-pulse">Streaming…</span>
+                  </div>
+                  <ChatMessageBody text={streamingGmText} />
+                </div>
+              </div>
+            )}
+          </>
         )}
         {rollsForSession.length > 0 && (
           <div className="rounded border border-amber-800/50 bg-amber-950/25 px-2 py-2 space-y-2">
@@ -1241,11 +1361,19 @@ export function ChatInterface({
               disabled={!enabled || voiceRecording || isLoading}
               onChange={() => {
                 clearPendingVoiceGm();
-                applySessionRecordingBroadcast({ active: true, actorName: speakerName });
-                void broadcastSessionRecordingState({ active: true, actorName: speakerName });
+                const settings = useGameStore.getState().session.settings;
+                const existing =
+                  settings.voiceInputMode === 'session' &&
+                  typeof settings.sessionRecordingStartedBy === 'string' &&
+                  settings.sessionRecordingStartedBy.trim().length > 0
+                    ? settings.sessionRecordingStartedBy.trim()
+                    : null;
+                const actorName = existing ?? speakerName;
+                applySessionRecordingBroadcast({ active: true, actorName });
+                void broadcastSessionRecordingState({ active: true, actorName });
                 void persistSessionVoiceSettings(supabase, sessionId, {
                   voiceInputMode: 'session',
-                  sessionRecordingStartedBy: speakerName,
+                  sessionRecordingStartedBy: actorName,
                 }).then((r) => {
                   if (r.error && typeof console !== 'undefined') {
                     console.warn('[session] voice settings persist failed', r.error);

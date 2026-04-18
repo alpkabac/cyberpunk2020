@@ -3,8 +3,15 @@ import { NextResponse } from 'next/server';
 import { requireAuthFromRequest } from '@/lib/auth/require-auth';
 import { userHasSessionAccess } from '@/lib/auth/session-access';
 import { plainTextForNarrationTts } from '@/lib/narration/plain-text-for-tts';
+import {
+  chunkTtsCacheKey,
+  getCachedChunkWav,
+  setCachedChunkWav,
+  synthesizeCartesiaNarrationWav,
+} from '@/lib/narration/cartesia-tts';
 import { reportServerError } from '@/lib/logging/server-report';
 import { getServiceRoleClient } from '@/lib/supabase';
+import { readJsonBody, validationErrorResponse } from '@/lib/api/validation';
 import { z } from 'zod';
 
 export const maxDuration = 120;
@@ -21,17 +28,6 @@ function cacheSet(key: string, buf: Buffer) {
     if (first) ttsCache.delete(first);
   }
   ttsCache.set(key, buf);
-}
-
-function getCartesiaApiKey(): string | null {
-  const k = process.env.CARTESIA_API_KEY?.trim();
-  return k && k.length > 0 ? k : null;
-}
-
-function defaultVoiceId(): string {
-  return (
-    process.env.CARTESIA_VOICE_ID?.trim() || 'fa7bfcdc-603c-4bf1-a600-a371400d2f8c'
-  );
 }
 
 /**
@@ -96,74 +92,81 @@ export async function GET(request: Request) {
     });
   }
 
-  const apiKey = getCartesiaApiKey();
-  if (!apiKey) {
+  const synth = await synthesizeCartesiaNarrationWav(transcript, { sessionId, label: 'message-tts' });
+  if (!synth.ok) {
     return NextResponse.json(
-      {
-        error:
-          'Set CARTESIA_API_KEY in .env.local (server-side). Optional: CARTESIA_VOICE_ID, CARTESIA_MODEL_ID.',
-      },
-      { status: 503 },
+      synth.detail ? { error: synth.error, detail: synth.detail } : { error: synth.error },
+      { status: synth.status },
     );
   }
+  cacheSet(cacheKey, synth.buffer);
 
-  const modelId = process.env.CARTESIA_MODEL_ID?.trim() || 'sonic-3';
-  const voiceId = defaultVoiceId();
+  return new NextResponse(new Uint8Array(synth.buffer), {
+    status: 200,
+    headers: {
+      'Content-Type': 'audio/wav',
+      'Cache-Control': 'private, max-age=3600',
+    },
+  });
+}
 
-  try {
-    const cartesiaRes = await fetch('https://api.cartesia.ai/tts/bytes', {
-      method: 'POST',
-      headers: {
-        'Cartesia-Version': '2025-04-16',
-        'X-API-Key': apiKey,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model_id: modelId,
-        transcript,
-        voice: { mode: 'id', id: voiceId },
-        output_format: {
-          container: 'wav',
-          encoding: 'pcm_f32le',
-          sample_rate: 44100,
-        },
-        speed: 'normal',
-        generation_config: {
-          speed: 0.9,
-          volume: 1,
-          emotion: 'calm',
-        },
-      }),
-    });
+const narrationTtsChunkBodySchema = z.object({
+  sessionId: uuid,
+  text: z.string().min(1).max(4000),
+});
 
-    if (!cartesiaRes.ok) {
-      const errBody = await cartesiaRes.text().catch(() => '');
-      reportServerError('api/session/narration-tts:cartesia', new Error(errBody || cartesiaRes.statusText), {
-        status: cartesiaRes.status,
-        sessionId,
-        messageId,
-      });
-      return NextResponse.json(
-        { error: 'TTS provider error', detail: errBody.slice(0, 500) },
-        { status: 502 },
-      );
-    }
+/**
+ * POST WAV for arbitrary narration text (streaming / sentence chunks). Requires session access.
+ */
+export async function POST(request: Request) {
+  const auth = await requireAuthFromRequest(request);
+  if (!auth.ok) return auth.response;
 
-    const buf = Buffer.from(await cartesiaRes.arrayBuffer());
-    if (buf.length < 64) {
-      return NextResponse.json({ error: 'TTS returned empty audio' }, { status: 502 });
-    }
-    cacheSet(cacheKey, buf);
+  const rawBody = await readJsonBody(request);
+  if (!rawBody.ok) return rawBody.response;
+  const parsed = narrationTtsChunkBodySchema.safeParse(rawBody.data);
+  if (!parsed.success) {
+    return validationErrorResponse(parsed.error, 'api/session/narration-tts:chunk-body');
+  }
 
-    return new NextResponse(new Uint8Array(buf), {
+  const { sessionId, text } = parsed.data;
+  const supabase = getServiceRoleClient();
+  if (!(await userHasSessionAccess(supabase, sessionId, auth.user.id))) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+
+  const transcript = plainTextForNarrationTts(text);
+  if (!transcript || transcript.length < 2) {
+    return NextResponse.json({ error: 'Nothing to speak after stripping markup' }, { status: 400 });
+  }
+
+  const cacheKey = chunkTtsCacheKey(sessionId, transcript);
+  const hit = getCachedChunkWav(cacheKey);
+  if (hit) {
+    return new NextResponse(new Uint8Array(hit), {
       status: 200,
       headers: {
         'Content-Type': 'audio/wav',
-        'Cache-Control': 'private, max-age=3600',
+        'Cache-Control': 'private, max-age=300',
       },
     });
-  } catch (e) {
-    reportServerError('api/session/narration-tts', e, { sessionId, messageId });
-    return NextResponse.json({ error: 'TTS request failed' }, { status: 500 });
   }
+
+  const synth = await synthesizeCartesiaNarrationWav(transcript, { sessionId, label: 'chunk-tts' });
+  if (!synth.ok) {
+    reportServerError('api/session/narration-tts:chunk', new Error(synth.error), { sessionId });
+    return NextResponse.json(
+      synth.detail ? { error: synth.error, detail: synth.detail } : { error: synth.error },
+      { status: synth.status },
+    );
+  }
+  setCachedChunkWav(cacheKey, synth.buffer);
+
+  return new NextResponse(new Uint8Array(synth.buffer), {
+    status: 200,
+    headers: {
+      'Content-Type': 'audio/wav',
+      'Cache-Control': 'private, max-age=300',
+    },
+  });
 }

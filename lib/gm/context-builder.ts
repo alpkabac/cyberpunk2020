@@ -162,7 +162,7 @@ function gmResponseLanguageInstruction(lang: GmSessionLanguage): string {
   if (lang === 'tr') {
     return `\n\n**Language (session):** Write all narration, NPC dialogue, and player-facing explanations in Turkish (Türkçe). Player messages may be in Turkish or English; default to Turkish for your replies. Keep tool calls valid: use exact \`character_id\` UUIDs from CHARACTERS_JSON and English tool names/JSON keys.`;
   }
-  return `\n\n**Language (session):** Write all narration and dialogue in English.`;
+  return `\n\n**Language (session):** Write all narration, NPC dialogue, and player-facing explanations in English. Player messages may be in Turkish, English, or another language (including voice transcripts); **always** reply in English anyway—do not match the player's message language. Keep tool calls valid: use exact \`character_id\` UUIDs from CHARACTERS_JSON and English tool names/JSON keys.`;
 }
 
 /** System prompt for the AI-GM, including session reply language. */

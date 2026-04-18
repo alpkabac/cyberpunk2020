@@ -7,6 +7,7 @@ import { GM_TOOL_DEFINITIONS } from './tool-definitions';
 import type { ToolExecutorContext, ToolExecutionResult } from './tool-executor';
 import { executeGmToolCallFromModel } from './tool-executor';
 import { sanitizeGmNarrationText } from './sanitize-gm-narration';
+import { callOpenRouterChatStream } from './openrouter-stream';
 
 /** NPC sheet tools — must run before `start_combat` so initiative includes new combatants. */
 const GM_SPAWN_TOOL_NAMES = new Set(['spawn_npc', 'spawn_random_npc', 'spawn_unique_npc']);
@@ -245,6 +246,91 @@ export async function runGmCompletionWithTools(params: {
     messages,
     tools: false,
     reasoning: params.reasoning,
+  });
+  lastRaw = raw;
+  return { narration: sanitizeGmNarrationText(content ?? ''), lastRaw, toolLog };
+}
+
+/**
+ * Same tool loop as {@link runGmCompletionWithTools}, but uses OpenRouter streaming for
+ * each completion so token deltas can be forwarded to the client (and TTS) as they arrive.
+ */
+export async function runGmCompletionWithToolsStreaming(params: {
+  apiKey: string;
+  model: string;
+  reasoning?: { effort: 'high' };
+  systemPrompt: string;
+  userContent: string;
+  toolContext: ToolExecutorContext;
+  onToolResult?: (r: ToolExecutionResult) => void;
+  /** Fired for each streamed text delta on assistant turns (including turns that later use tools). */
+  onNarrationDelta?: (delta: string) => void;
+  /** After a streamed turn that includes tool calls; client should discard partial narration UI. */
+  onAssistantToolRound?: () => void;
+}): Promise<{ narration: string; lastRaw: unknown; toolLog: ToolExecutionResult[] }> {
+  const messages: OpenRouterChatMessage[] = [
+    { role: 'system', content: params.systemPrompt },
+    { role: 'user', content: params.userContent },
+  ];
+
+  const toolLog: ToolExecutionResult[] = [];
+  let lastRaw: unknown = null;
+
+  for (let step = 0; step < MAX_TOOL_STEPS; step++) {
+    const { content, raw } = await callOpenRouterChatStream({
+      apiKey: params.apiKey,
+      model: params.model,
+      messages,
+      tools: true,
+      reasoning: params.reasoning,
+      onContentDelta: params.onNarrationDelta,
+    });
+    lastRaw = raw;
+
+    const toolCalls = extractToolCalls(raw);
+    if (toolCalls.length > 0) {
+      params.onAssistantToolRound?.();
+    }
+
+    if (toolCalls.length === 0) {
+      return { narration: sanitizeGmNarrationText(content ?? ''), lastRaw, toolLog };
+    }
+
+    const orderedToolCalls = sortGmToolCallsForExecution(toolCalls);
+
+    const assistantMsg: OpenRouterChatMessage = {
+      role: 'assistant',
+      content: content ?? null,
+      tool_calls: orderedToolCalls,
+    };
+    messages.push(assistantMsg);
+
+    for (const tc of orderedToolCalls) {
+      const name = tc.function?.name ?? '';
+      const args = tc.function?.arguments ?? '{}';
+      const exec = await executeGmToolCallFromModel(name, args, params.toolContext);
+      toolLog.push(exec);
+      params.onToolResult?.(exec);
+
+      const payload = exec.ok
+        ? { ok: true, result: exec.result }
+        : { ok: false, error: exec.error };
+      messages.push({
+        role: 'tool',
+        content: JSON.stringify(payload),
+        tool_call_id: tc.id,
+        name: tc.function?.name,
+      });
+    }
+  }
+
+  const { content, raw } = await callOpenRouterChatStream({
+    apiKey: params.apiKey,
+    model: params.model,
+    messages,
+    tools: false,
+    reasoning: params.reasoning,
+    onContentDelta: params.onNarrationDelta,
   });
   lastRaw = raw;
   return { narration: sanitizeGmNarrationText(content ?? ''), lastRaw, toolLog };
