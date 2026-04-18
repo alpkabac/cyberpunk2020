@@ -72,14 +72,6 @@ export function SessionRoomClient() {
     return () => mq.removeEventListener('change', sync);
   }, []);
 
-  useEffect(() => {
-    if (narrationImage?.url) setSceneImageOpen(true);
-  }, [narrationImage?.url]);
-
-  useEffect(() => {
-    if (!narrationImage) setSceneImagePopout(false);
-  }, [narrationImage]);
-
   const session = useGameStore((s) => s.session);
   const narrationImage = session.narrationImage;
   const characters = useGameStore(
@@ -89,6 +81,14 @@ export function SessionRoomClient() {
     useShallow((s) => ({ byId: s.npcs.byId, allIds: s.npcs.allIds })),
   );
   const tokens = useGameStore((s) => s.map.tokens);
+
+  useEffect(() => {
+    if (narrationImage?.url) setSceneImageOpen(true);
+  }, [narrationImage?.url]);
+
+  useEffect(() => {
+    if (!narrationImage) setSceneImagePopout(false);
+  }, [narrationImage]);
 
   useEffect(() => {
     useGameStore.getState().reset();
