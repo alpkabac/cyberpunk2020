@@ -11,8 +11,9 @@ import {
   buildGmSystemPrompt,
   buildGmUserContent,
   buildGmUserContentWithinInputTokenBudget,
-  sliceRecentChat,
   formatChatLine,
+  serializeCharacterForLlm,
+  sliceRecentChat,
 } from './context-builder';
 import {
   applyGmDamage,
@@ -84,6 +85,59 @@ const minimalChar = (id: string): Character => ({
   items: [],
   netrunDeck: null,
   lifepath: null,
+});
+
+describe('serializeCharacterForLlm', () => {
+  it('includes compact lifepath when present', () => {
+    const c = minimalChar('c1');
+    c.lifepath = {
+      style: { clothes: 'chrome trench', hair: 'buzz', affectations: 'tap teeth' },
+      ethnicity: 'mixed',
+      language: 'English',
+      familyBackground: 'orphan',
+      siblings: 'none',
+      motivations: {
+        traits: 'greedy',
+        valuedPerson: 'fixer',
+        valueMost: 'eddies',
+        feelAboutPeople: 'distrust',
+        valuedPossession: 'knife',
+      },
+      lifeEvents: [
+        { age: 16, event: 'first gig' },
+        { age: 18, event: 'burned a bridge' },
+      ],
+      notes: 'allergic to synth-sushi',
+    };
+    const p = serializeCharacterForLlm(c);
+    expect(p.lifepath).not.toBeNull();
+    expect(p.lifepath?.style.clothes).toBe('chrome trench');
+    expect(p.lifepath?.lifeEvents).toHaveLength(2);
+    expect(p.lifepath?.lifeEventsOmitted).toBeUndefined();
+  });
+
+  it('reports lifeEventsOmitted when events exceed cap', () => {
+    const c = minimalChar('c1');
+    c.lifepath = {
+      style: { clothes: '', hair: '', affectations: '' },
+      ethnicity: '',
+      language: '',
+      familyBackground: '',
+      siblings: '',
+      motivations: {
+        traits: '',
+        valuedPerson: '',
+        valueMost: '',
+        feelAboutPeople: '',
+        valuedPossession: '',
+      },
+      lifeEvents: Array.from({ length: 45 }, (_, i) => ({ age: i, event: `e${i}` })),
+      notes: '',
+    };
+    const p = serializeCharacterForLlm(c);
+    expect(p.lifepath?.lifeEvents).toHaveLength(40);
+    expect(p.lifepath?.lifeEventsOmitted).toBe(5);
+  });
 });
 
 describe('Property 7: Conversation continuity', () => {

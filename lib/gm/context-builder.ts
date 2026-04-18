@@ -7,6 +7,7 @@ import type {
   ChatMessage,
   CombatState,
   GmSessionLanguage,
+  Lifepath,
   MapCoverRegion,
   MapSuppressiveZone,
   PendingSuppressivePlacement,
@@ -30,17 +31,87 @@ import { GM_TOOL_DEFINITIONS } from './tool-definitions';
 /** Rough token cost of serializing `tools` on OpenRouter `chat/completions` (paid once per request). */
 const GM_OPENROUTER_TOOL_SCHEMA_TOKEN_ESTIMATE = estimateTokens(JSON.stringify(GM_TOOL_DEFINITIONS));
 
+/** Lifepath / Life-tab fields sent to the GM (bounded to limit context size). */
+export interface LifepathCompact {
+  style: { clothes: string; hair: string; affectations: string };
+  ethnicity: string;
+  language: string;
+  familyBackground: string;
+  siblings: string;
+  motivations: {
+    traits: string;
+    valuedPerson: string;
+    valueMost: string;
+    feelAboutPeople: string;
+    valuedPossession: string;
+  };
+  lifeEvents: Array<{ age: number; event: string }>;
+  /** Present when `lifeEvents` was truncated from the sheet. */
+  lifeEventsOmitted?: number;
+  notes: string;
+}
+
+const LIFEPATH_FIELD_MAX = 800;
+const LIFEPATH_NOTES_MAX = 1600;
+const LIFEPATH_EVENT_TEXT_MAX = 600;
+const LIFEPATH_LIFE_EVENTS_MAX = 40;
+
+function truncateForGmContext(s: string, max: number): string {
+  const t = s.trim();
+  if (t.length <= max) return t;
+  return `${t.slice(0, Math.max(0, max - 1))}…`;
+}
+
+function compactLifepathForLlm(lp: Lifepath): LifepathCompact {
+  const rawEvents = lp.lifeEvents ?? [];
+  const sliced = rawEvents.slice(0, LIFEPATH_LIFE_EVENTS_MAX);
+  return {
+    style: {
+      clothes: truncateForGmContext(lp.style?.clothes ?? '', LIFEPATH_FIELD_MAX),
+      hair: truncateForGmContext(lp.style?.hair ?? '', LIFEPATH_FIELD_MAX),
+      affectations: truncateForGmContext(lp.style?.affectations ?? '', LIFEPATH_FIELD_MAX),
+    },
+    ethnicity: truncateForGmContext(lp.ethnicity ?? '', LIFEPATH_FIELD_MAX),
+    language: truncateForGmContext(lp.language ?? '', LIFEPATH_FIELD_MAX),
+    familyBackground: truncateForGmContext(lp.familyBackground ?? '', LIFEPATH_FIELD_MAX),
+    siblings: truncateForGmContext(lp.siblings ?? '', LIFEPATH_FIELD_MAX),
+    motivations: {
+      traits: truncateForGmContext(lp.motivations?.traits ?? '', LIFEPATH_FIELD_MAX),
+      valuedPerson: truncateForGmContext(lp.motivations?.valuedPerson ?? '', LIFEPATH_FIELD_MAX),
+      valueMost: truncateForGmContext(lp.motivations?.valueMost ?? '', LIFEPATH_FIELD_MAX),
+      feelAboutPeople: truncateForGmContext(lp.motivations?.feelAboutPeople ?? '', LIFEPATH_FIELD_MAX),
+      valuedPossession: truncateForGmContext(lp.motivations?.valuedPossession ?? '', LIFEPATH_FIELD_MAX),
+    },
+    lifeEvents: sliced.map((e) => ({
+      age: e.age,
+      event: truncateForGmContext(e.event ?? '', LIFEPATH_EVENT_TEXT_MAX),
+    })),
+    ...(rawEvents.length > sliced.length
+      ? { lifeEventsOmitted: rawEvents.length - sliced.length }
+      : {}),
+    notes: truncateForGmContext(lp.notes ?? '', LIFEPATH_NOTES_MAX),
+  };
+}
+
 export const CORE_GM_RULES = `You are the Game Master for a Cyberpunk 2020 tabletop session (R. Talsorian Games).
 You narrate scenes, adjudicate actions fairly, and use tools to update game state when outcomes are clear.
 Stay in setting (dark future, corporate dystopia). Do not invent major setting facts that contradict established table state.
 When uncertain about a PC's action, ask for a roll via request_roll (for ranged/melee shots use roll_kind attack + weapon_id + DV; otherwise skill/stat + ids from CHARACTERS_JSON, or raw_formula). You CAN roll dice yourself for NPCs and world events using roll_dice.
-Output engaging but concise narration; use tools for concrete state changes (damage, money, items, map, etc.).
+Output engaging narration; use tools for concrete state changes (damage, money, items, map, etc.).
 **Narration prose only:** Never include XML tags (\`<function_calls>\`, \`<invoke>\`), JSON tool payloads, or any pseudo markup for dice/tools in the text players read—tools are invoked by the API separately.
+
+**Narration quality:** Narrate with an immersive voice (second person toward the acting PC when natural, or clear scene-wide description). The world **reacts**: people, places, and objects change because of events; relationships and reputations **accumulate**; introduce new faces and complications when they fit the fiction.
+**Knowledge & believability:** NPCs and the in-world rumor mill only "know" what they could plausibly know from what they've witnessed, been told, or reasonably inferred—allow gaps, wrong guesses, lies, and stupid mistakes. Do not omnisciently leak hidden PC intentions or player metagame to NPCs unless the fiction exposes it.
+**Bodies & limits:** Respect fatigue, injury, fear, incompetence, panic, and bad luck. Competence and heroics cost something; failures should have texture.
+**Scene craft:** Where grounding helps, include concrete **visual props**: signage, menus, paperwork, UI screens, ads, packaging, labels—specific shapes or text when it matters.
+**Pacing:** Do not sprint past the current beat to the next plot point. Linger long enough for tension, comedy, or unease to land when the scene invites it. Progress should feel **earned**.
+**Length & rhythm:** Match density to the moment: **high tension** → short, sharp beats; **exploration** → richer environmental detail; **character beats** → balanced dialogue and pressure; **set-piece sequences** → allow wider cinematic description. Every line should earn its place.
+**Characters:** Avoid stock molds. **Traits are partial**, not destiny; let people be inconsistent, petty, clever, cowardly, or kind in surprising ratios.
 
 **Humans are players; you are the referee:** The people at the keyboard are **players only**. You are the **only** narrative Game Master. Never call a human "GM", never write as if they referee the world, and never ask them to roll **for an NPC or enemy**. \`CURRENT_MESSAGE_SPEAKER\` is the **player character name** tied to the latest player chat line (who is acting)—not a human referee.
 **request_roll vs roll_dice:** Use \`request_roll\` **only** when you need the **human player** to roll **for their own PC** (or a check only they should make on the sheet). For **any NPC / hostile / ally NPC action**—including **NPC shooting at a PC**, enemy skill checks, and similar—use \`roll_dice\` yourself (with \`character_id\` of that NPC when applicable), narrate the result, then resolve outcomes with tools (\`apply_damage\`, etc.). **Wrong:** \`request_roll\` with the NPC's \`character_id\` so the player rolls the enemy's rifle. **Right:** \`roll_dice\` for the NPC's attack, then damage if it hits.
 
-**Character sheets and tools:** The user message block includes CHARACTERS_JSON. Every entry has an \`id\` field (UUID) and \`name\`. You always have this data—do not claim you lack access to character sheets.
+**Character sheets and tools:** The user message block includes CHARACTERS_JSON. Every entry has an \`id\` field (UUID) and \`name\`. You always have this data—do not claim you lack access to character sheets. When \`lifepath\` is non-null, it is the player's **Life tab** (style, motivations, life events, notes)—use it for portrayal and plot hooks; it does not change mechanics unless the table says so.
 For character tools (apply_damage, deduct_money, add_money, heal_damage, add_item, remove_item, equip_item, modify_skill, adjust_improvement_points, update_ammo, set_condition, update_character_field), pass \`character_id\` from that JSON. Prefer the character whose \`name\` matches CURRENT_MESSAGE_SPEAKER when it clearly refers to the **acting player character**; if there is only one PC (type "character"), use that id; if several PCs could apply, ask which **character by name**, never ask the human to paste a UUID.
 For move_token, add_token, and remove_token, use token ids from MAP_TOKENS_JSON when present; if missing, describe map changes in narration and avoid guessing ids.
 **Tactical map:** TACTICAL_GRID_JSON gives cols, rows, snap_to_grid, and meters_per_square. MAP_TOKENS_JSON lists each token's x,y (0–100% of map width/height) plus cell_column and cell_row (0-based) on that grid—use cells for range, flanking, and movement. When snap_to_grid is true, the client snaps positions to cell centers; pass x,y as percentages (cell center ≈ ((col+0.5)/cols)*100 for x, ((row+0.5)/rows)*100 for y).
@@ -115,6 +186,8 @@ export interface CompactCharacterPayload {
   skills: Array<{ id: string; name: string; value: number; linkedStat: string }>;
   items: Array<{ id: string; name: string; type: string; equipped?: boolean }>;
   hitLocations: Record<string, { stoppingPower: number; ablation: number }>;
+  /** Life tab / lifepath — null if unset. */
+  lifepath: LifepathCompact | null;
 }
 
 /** Strip heavy / redundant fields; keep what the GM needs for play. */
@@ -161,6 +234,7 @@ export function serializeCharacterForLlm(c: Character): CompactCharacterPayload 
     skills,
     items,
     hitLocations,
+    lifepath: c.lifepath ? compactLifepathForLlm(c.lifepath) : null,
   };
 }
 
