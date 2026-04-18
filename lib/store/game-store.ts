@@ -53,6 +53,14 @@ import { cellInsideSuppressiveZone } from '../map/suppressive-zone-cells';
 import { resolveSuppressiveZoneEntry } from '../game-logic/resolve-suppressive-entry';
 import { sortChatMessagesByTimestamp } from '../chat/chat-order';
 
+const LS_AUDIO_MUSIC_VOL = 'cp2020-session-music-volume';
+const LS_AUDIO_NARRATION_VOL = 'cp2020-session-narration-volume';
+
+function clampUnitVolume(v: number, fallback: number): number {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return fallback;
+  return Math.min(1, Math.max(0, v));
+}
+
 function deathSaveBonusFromMods(m: Character['combatModifiers'] | undefined): number {
   return (m?.stunSave ?? 0) + (m?.deathSave ?? 0);
 }
@@ -173,6 +181,15 @@ interface GameState {
     lastAnsweredGmAttackRequestMessageId: string | null;
     /** Head of `map.pendingSuppressivePlacements` (who draws next on the tactical map). */
     pendingSuppressivePlacement: PendingSuppressivePlacement | null;
+    /** Local-only (persisted in localStorage). Soundtrack bus volume. */
+    audioMusicVolume: number;
+    /** Local-only (persisted). Cartesia narration playback volume. */
+    audioNarrationVolume: number;
+    /**
+     * Latest room narration TTS cue from realtime broadcast (`SESSION_NARRATION_TTS`).
+     * `seq` bumps so clients can schedule playback even for repeated lines.
+     */
+    narrationTtsCue: { seq: number; messageId: string; playAtMs: number } | null;
   };
 
   /** Optimistic edit backups for Supabase writes (rollback on RLS/error). */
@@ -350,6 +367,14 @@ interface GameActions {
   bumpSessionVoiceStopAllFromBroadcast: (payload: unknown) => void;
   broadcastSessionVoicePeerStart: () => Promise<void>;
   bumpSessionVoicePeerStartFromBroadcast: () => void;
+  hydrateLocalAudioVolumes: () => void;
+  setAudioMusicVolume: (volume: number) => void;
+  setAudioNarrationVolume: (volume: number) => void;
+  broadcastSessionNarrationTtsPlay: (payload: {
+    messageId: string;
+    playAtMs: number;
+  }) => Promise<void>;
+  applySessionNarrationTtsFromBroadcast: (payload: unknown) => void;
 
   // Supabase Realtime / session sync
   hydrateFromLoadedSnapshot: (snapshot: LoadedSessionSnapshot) => void;
@@ -530,6 +555,9 @@ const initialState: GameState = {
     pendingGmAttackRequest: null,
     lastAnsweredGmAttackRequestMessageId: null,
     pendingSuppressivePlacement: null,
+    audioMusicVolume: 0.7,
+    audioNarrationVolume: 0.85,
+    narrationTtsCue: null,
   },
 
   realtime: {
@@ -1761,6 +1789,76 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
         sessionVoicePeerStartTick: state.ui.sessionVoicePeerStartTick + 1,
       },
     })),
+
+  hydrateLocalAudioVolumes: () => {
+    if (typeof window === 'undefined') return;
+    let music = initialState.ui.audioMusicVolume;
+    let narration = initialState.ui.audioNarrationVolume;
+    try {
+      const rawM = localStorage.getItem(LS_AUDIO_MUSIC_VOL);
+      const rawN = localStorage.getItem(LS_AUDIO_NARRATION_VOL);
+      if (rawM != null) music = clampUnitVolume(parseFloat(rawM), music);
+      if (rawN != null) narration = clampUnitVolume(parseFloat(rawN), narration);
+    } catch {
+      /* ignore */
+    }
+    set((state) => ({
+      ui: {
+        ...state.ui,
+        audioMusicVolume: music,
+        audioNarrationVolume: narration,
+      },
+    }));
+  },
+
+  setAudioMusicVolume: (volume) => {
+    const v = clampUnitVolume(volume, initialState.ui.audioMusicVolume);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(LS_AUDIO_MUSIC_VOL, String(v));
+      } catch {
+        /* ignore */
+      }
+    }
+    set((state) => ({ ui: { ...state.ui, audioMusicVolume: v } }));
+  },
+
+  setAudioNarrationVolume: (volume) => {
+    const v = clampUnitVolume(volume, initialState.ui.audioNarrationVolume);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(LS_AUDIO_NARRATION_VOL, String(v));
+      } catch {
+        /* ignore */
+      }
+    }
+    set((state) => ({ ui: { ...state.ui, audioNarrationVolume: v } }));
+  },
+
+  broadcastSessionNarrationTtsPlay: async ({ messageId, playAtMs }) => {
+    const send = get().sessionBroadcastSend;
+    if (!send) return;
+    await send(BROADCAST_EVENTS.SESSION_NARRATION_TTS, { messageId, playAtMs });
+  },
+
+  applySessionNarrationTtsFromBroadcast: (payload) => {
+    if (!payload || typeof payload !== 'object') return;
+    const o = payload as Record<string, unknown>;
+    const messageId = o.messageId;
+    const playAtMs = o.playAtMs;
+    if (typeof messageId !== 'string' || messageId.length === 0) return;
+    if (typeof playAtMs !== 'number' || !Number.isFinite(playAtMs)) return;
+    set((state) => ({
+      ui: {
+        ...state.ui,
+        narrationTtsCue: {
+          seq: (state.ui.narrationTtsCue?.seq ?? 0) + 1,
+          messageId,
+          playAtMs,
+        },
+      },
+    }));
+  },
 
   hydrateFromLoadedSnapshot: (snapshot) =>
     set((state) => {

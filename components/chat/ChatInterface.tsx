@@ -147,6 +147,32 @@ function ChevronRegenerateIcon({ className }: { className?: string }) {
   );
 }
 
+function SpeakerNarrateIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden
+    >
+      <path
+        d="M11 5L6 9H3v6h3l5 4V5z"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M15.54 8.46a5 5 0 010 7.07M17.66 6.34a8 8 0 010 11.32"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 /** Narration, player lines, dice results, and GM roll requests — hides other system/tool audit lines. */
 function isStoryFocusedMessage(m: ChatMessage): boolean {
   if (m.type === 'player' || m.type === 'narration' || m.type === 'roll') return true;
@@ -202,6 +228,8 @@ export function ChatInterface({
   const removeChatMessagesByIds = useGameStore((s) => s.removeChatMessagesByIds);
   const mergeRemoteChatMessage = useGameStore((s) => s.mergeRemoteChatMessage);
   const setGmNarrationPending = useGameStore((s) => s.setGmNarrationPending);
+  const broadcastSessionNarrationTtsPlay = useGameStore((s) => s.broadcastSessionNarrationTtsPlay);
+  const sessionBroadcastReady = useGameStore((s) => s.sessionBroadcastSend != null);
 
   const [draft, setDraft] = useState('');
   const [sendError, setSendError] = useState<string | null>(null);
@@ -1039,12 +1067,29 @@ export function ChatInterface({
                       del
                     </button>
                   </div>
-                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[10px] uppercase tracking-wide opacity-80 pr-6">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] uppercase tracking-wide opacity-80 pr-6">
                     <span className="font-bold text-zinc-300">{m.speaker}</span>
                     <span className="text-zinc-500 font-mono">{typeLabel(m.type, m.metadata)}</span>
                     <span className="text-zinc-600 font-mono">
                       {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </span>
+                    {m.type === 'narration' && (
+                      <button
+                        type="button"
+                        className="shrink-0 p-0.5 rounded normal-case text-violet-300/85 hover:text-violet-200 hover:bg-violet-950/40 disabled:opacity-35 transition-colors"
+                        title="Read aloud for everyone"
+                        disabled={!enabled || isLoading || !sessionBroadcastReady}
+                        aria-label="Read narration aloud for everyone"
+                        onClick={() =>
+                          void broadcastSessionNarrationTtsPlay({
+                            messageId: m.id,
+                            playAtMs: Date.now() + 500,
+                          })
+                        }
+                      >
+                        <SpeakerNarrateIcon />
+                      </button>
+                    )}
                   </div>
                   {isEditing ? (
                     <div className="mt-1 space-y-1">

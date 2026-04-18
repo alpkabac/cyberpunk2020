@@ -9,6 +9,7 @@ import { ChatInterface, ResizableChatPanel } from '@/components/chat';
 import { PopoutCharacterSheet } from '@/components/session/PopoutCharacterSheet';
 import { PopoutSceneImage } from '@/components/session/PopoutSceneImage';
 import { InitiativeTracker } from '@/components/session/InitiativeTracker';
+import { SessionNarrationTtsPlayer } from '@/components/session/SessionNarrationTtsPlayer';
 import { SessionSoundtrackPlayer } from '@/components/session/SessionSoundtrackPlayer';
 import { StartOfTurnDeathSaveAck } from '@/components/session/StartOfTurnDeathSaveAck';
 import { MapCanvas, TokenContextCard } from '@/components/map';
@@ -92,6 +93,10 @@ export function SessionRoomClient() {
 
   useEffect(() => {
     useGameStore.getState().reset();
+  }, [sessionId]);
+
+  useEffect(() => {
+    useGameStore.getState().hydrateLocalAudioVolumes();
   }, [sessionId]);
 
   useEffect(() => {
@@ -912,6 +917,7 @@ export function SessionRoomClient() {
                 gmRequestSpeakerName={selectedCharacter?.name ?? user.email ?? 'Referee'}
               />
               <SessionSoundtrackPlayer sessionId={sessionId} supabase={supabase} />
+              <SessionNarrationTtsPlayer sessionId={sessionId} />
             </>
           )}
         </aside>

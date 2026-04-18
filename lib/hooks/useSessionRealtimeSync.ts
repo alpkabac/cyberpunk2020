@@ -112,6 +112,8 @@ export function useSessionRealtimeSync(
               useGameStore.getState().bumpSessionVoiceStopAllFromBroadcast(payload);
             } else if (event === BROADCAST_EVENTS.SESSION_VOICE_PEER_START) {
               useGameStore.getState().bumpSessionVoicePeerStartFromBroadcast();
+            } else if (event === BROADCAST_EVENTS.SESSION_NARRATION_TTS) {
+              useGameStore.getState().applySessionNarrationTtsFromBroadcast(payload);
             }
           },
         });
