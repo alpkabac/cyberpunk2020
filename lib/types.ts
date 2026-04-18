@@ -457,6 +457,9 @@ export interface PendingSuppressivePlacement {
   weaponName: string;
 }
 
+/** Session UI: voice STT + AI-GM reply language (English / Turkish). */
+export type GmSessionLanguage = 'en' | 'tr';
+
 export interface SessionSettings {
   ttsEnabled: boolean;
   ttsVoice: string;
@@ -466,6 +469,10 @@ export interface SessionSettings {
   voiceInputMode: 'pushToTalk' | 'session';
   /** Display name of who last turned on group Session mode (best-effort). */
   sessionRecordingStartedBy: string | null;
+  /** Deepgram speech-to-text language for voice input. */
+  sttLanguage: GmSessionLanguage;
+  /** AI-GM narration and player-facing dialogue language. */
+  aiLanguage: GmSessionLanguage;
 
   /** Tactical map grid: column count (2–99). */
   mapGridCols: number;

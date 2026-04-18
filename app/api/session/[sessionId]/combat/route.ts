@@ -4,6 +4,7 @@ import { readJsonBody, validationErrorResponse } from '@/lib/api/validation';
 import { requireAuthFromRequest } from '@/lib/auth/require-auth';
 import { characterRowEditableByUser } from '@/lib/auth/character-edit-policy';
 import { userHasSessionAccess, userIsSessionGm } from '@/lib/auth/session-access';
+import { assertEligiblePlayerNextTurn } from '@/lib/session/player-next-turn-eligibility';
 import { fetchSessionSnapshot } from '@/lib/realtime/session-load';
 import { parseCombatStateJson } from '@/lib/session/combat-state';
 import {
@@ -89,18 +90,29 @@ export async function POST(
   }
 
   const isGm = await userIsSessionGm(supabase, sessionId, auth.user.id);
+
+  if (action === 'next_turn') {
+    if (!isGm) {
+      const access = await userHasSessionAccess(supabase, sessionId, auth.user.id);
+      if (!access) {
+        return NextResponse.json({ error: 'Not a participant in this session' }, { status: 403 });
+      }
+      const gate = await assertEligiblePlayerNextTurn(supabase, sessionId, auth.user.id);
+      if (!gate.ok) {
+        return NextResponse.json({ error: gate.error }, { status: 403 });
+      }
+    }
+    const r = await sessionNextTurn(supabase, sessionId);
+    if (!r.ok) return NextResponse.json({ error: r.error }, { status: 400 });
+    return NextResponse.json({ ok: true, combat_state: r.combat_state });
+  }
+
   if (!isGm) {
     return NextResponse.json({ error: 'Only the session GM may update combat' }, { status: 403 });
   }
 
   if (action === 'start_combat') {
     const r = await sessionStartCombat(supabase, sessionId);
-    if (!r.ok) return NextResponse.json({ error: r.error }, { status: 400 });
-    return NextResponse.json({ ok: true, combat_state: r.combat_state });
-  }
-
-  if (action === 'next_turn') {
-    const r = await sessionNextTurn(supabase, sessionId);
     if (!r.ok) return NextResponse.json({ error: r.error }, { status: 400 });
     return NextResponse.json({ ok: true, combat_state: r.combat_state });
   }

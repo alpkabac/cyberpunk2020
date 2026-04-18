@@ -25,3 +25,23 @@ export function getOpenRouterApiKeyFromEnv(): string {
     '';
   return normalizeOpenRouterApiKey(raw);
 }
+
+/**
+ * Max estimated tokens for system + user + tool schema on the **first** OpenRouter
+ * `chat/completions` call. Default leaves room on typical 128k models for tool rounds
+ * and output; override if you use a smaller-context model.
+ */
+export function getGmMaxInputTokensFromEnv(): number {
+  const raw = process.env.CP2020_GM_MAX_INPUT_TOKENS?.trim();
+  if (!raw) return 100_000;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 4000 ? n : 100_000;
+}
+
+/** Upper bound on tail chat messages considered before token trimming (default 40). */
+export function getGmMaxChatMessagesFromEnv(): number {
+  const raw = process.env.CP2020_GM_MAX_CHAT_MESSAGES?.trim();
+  if (!raw) return 40;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) ? Math.min(500, Math.max(1, n)) : 40;
+}

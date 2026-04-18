@@ -8,7 +8,9 @@ import type { Character, ChatMessage, Scene } from '../types';
 import { createStatBlock } from '../types';
 import {
   buildCombatTrackerContextPayload,
+  buildGmSystemPrompt,
   buildGmUserContent,
+  buildGmUserContentWithinInputTokenBudget,
   sliceRecentChat,
   formatChatLine,
 } from './context-builder';
@@ -105,6 +107,43 @@ describe('Property 7: Conversation continuity', () => {
         }
       }),
     );
+  });
+
+  it('buildGmUserContentWithinInputTokenBudget trims oldest chat lines first to respect token cap', () => {
+    const chars = [minimalChar('c1')];
+    const blob = 'x'.repeat(4000);
+    const history: ChatMessage[] = [0, 1, 2, 3, 4].map((i) => ({
+      id: String(i),
+      speaker: 'P',
+      text: blob,
+      timestamp: i,
+      type: 'player',
+    }));
+    const base = {
+      sessionName: 'S',
+      sessionSummary: 'sum',
+      activeScene: minimalScene,
+      characters: chars,
+      mapTokens: [],
+      chatHistory: history,
+      playerMessage: 'next',
+      messageSpeaker: 'Player',
+      loreInjection: '',
+    };
+    const systemPrompt = buildGmSystemPrompt(null);
+    const rFull = buildGmUserContentWithinInputTokenBudget(base, systemPrompt, 500_000, {
+      maxChatMessagesCeiling: 40,
+    });
+    expect(rFull.chatMessagesTotal).toBe(5);
+    expect(rFull.chatTailMessages).toBe(5);
+    const tightBudget = rFull.estimatedInputTokens - 500;
+    const r = buildGmUserContentWithinInputTokenBudget(base, systemPrompt, tightBudget, {
+      maxChatMessagesCeiling: 40,
+    });
+    expect(r.chatTailMessages).toBeLessThan(rFull.chatTailMessages);
+    expect(r.omittedOlderCount).toBeGreaterThan(0);
+    expect(r.userContent).toContain('Older messages omitted from context');
+    expect(r.estimatedInputTokens).toBeLessThanOrEqual(tightBudget);
   });
 
   it('buildGmUserContent includes player line and last chat lines', () => {
@@ -326,6 +365,7 @@ describe('Property 6: Tool parameter validation', () => {
   it('accepts combat tracker tools', () => {
     expect(validateGmToolParameters('start_combat', {}).ok).toBe(true);
     expect(validateGmToolParameters('advance_round', {}).ok).toBe(true);
+    expect(validateGmToolParameters('next_turn', {}).ok).toBe(true);
     expect(validateGmToolParameters('end_combat', {}).ok).toBe(true);
     expect(validateGmToolParameters('end_combat', { clear_timed_conditions: true }).ok).toBe(true);
     expect(validateGmToolParameters('end_combat', { narration: 'Stand down.' }).ok).toBe(true);

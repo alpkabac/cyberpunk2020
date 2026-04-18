@@ -299,6 +299,8 @@ const DEFAULT_SETTINGS: SessionSettings = {
   allowPlayerTokenMovement: true,
   voiceInputMode: 'pushToTalk',
   sessionRecordingStartedBy: null,
+  sttLanguage: 'en',
+  aiLanguage: 'en',
   mapGridCols: MAP_GRID_DEFAULT_COLS,
   mapGridRows: MAP_GRID_DEFAULT_ROWS,
   mapShowGrid: true,
@@ -331,6 +333,9 @@ export function parseSessionSettingsJson(v: unknown): SessionSettings {
         ? o.sessionRecordingStartedBy
         : DEFAULT_SETTINGS.sessionRecordingStartedBy;
 
+  const sttLanguage = o.sttLanguage === 'tr' ? 'tr' : 'en';
+  const aiLanguage = o.aiLanguage === 'tr' ? 'tr' : 'en';
+
   const mapMetersRaw = o.mapMetersPerSquare;
   const mapMetersPerSquare =
     typeof mapMetersRaw === 'number' && Number.isFinite(mapMetersRaw)
@@ -348,6 +353,8 @@ export function parseSessionSettingsJson(v: unknown): SessionSettings {
         : DEFAULT_SETTINGS.allowPlayerTokenMovement,
     voiceInputMode,
     sessionRecordingStartedBy,
+    sttLanguage,
+    aiLanguage,
     mapGridCols: normalizeGridDimension(
       typeof o.mapGridCols === 'number' ? o.mapGridCols : Number.NaN,
       DEFAULT_SETTINGS.mapGridCols,

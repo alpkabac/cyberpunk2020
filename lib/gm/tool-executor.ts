@@ -37,6 +37,8 @@ import { resolveGmRequestRollForServer } from '../game-logic/resolve-gm-request-
 import {
   sessionAdvanceRound,
   sessionEndCombat,
+  sessionMaybeAutoEndCombatWhenAllDown,
+  sessionNextTurn,
   sessionStartCombat,
 } from '../session/session-combat-service';
 import type { LoreRule } from './lorebook';
@@ -75,6 +77,7 @@ export type GmToolName =
   | 'update_summary'
   | 'start_combat'
   | 'advance_round'
+  | 'next_turn'
   | 'end_combat'
   | 'spawn_npc'
   | 'spawn_random_npc'
@@ -424,6 +427,9 @@ export function validateGmToolParameters(name: string, raw: unknown): { ok: true
     case 'advance_round': {
       return { ok: true, name: 'advance_round', args: raw };
     }
+    case 'next_turn': {
+      return { ok: true, name: 'next_turn', args: raw };
+    }
     case 'end_combat': {
       if (raw.clear_timed_conditions !== undefined && typeof raw.clear_timed_conditions !== 'boolean') {
         return { ok: false, error: 'clear_timed_conditions must be a boolean if provided' };
@@ -715,6 +721,9 @@ export async function executeGmTool(
         const e3 = await saveCharacterToSupabase(ctx.supabase, working);
         if (e3.error) return { ok: false, name, error: e3.error.message };
       }
+
+      const autoEnd = await sessionMaybeAutoEndCombatWhenAllDown(ctx.supabase, ctx.sessionId);
+      if (!autoEnd.ok) return { ok: false, name, error: autoEnd.error };
 
       return {
         ok: true,
@@ -1114,6 +1123,11 @@ export async function executeGmTool(
     }
     case 'advance_round': {
       const r = await sessionAdvanceRound(ctx.supabase, ctx.sessionId);
+      if (!r.ok) return { ok: false, name, error: r.error };
+      return { ok: true, name, result: { combat_state: r.combat_state } };
+    }
+    case 'next_turn': {
+      const r = await sessionNextTurn(ctx.supabase, ctx.sessionId);
       if (!r.ok) return { ok: false, name, error: r.error };
       return { ok: true, name, result: { combat_state: r.combat_state } };
     }

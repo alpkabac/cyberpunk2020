@@ -1,4 +1,4 @@
-import type { Character } from '@/lib/types';
+import type { Character, GmSessionLanguage } from '@/lib/types';
 import {
   buildGmVoicePlayerMessage,
   buildGmVoicePlayerMessageFromSegments,
@@ -19,8 +19,11 @@ export async function voiceBlobToGmPlayerMessage(params: {
   charactersById: Record<string, Character>;
   npcsById: Record<string, Character>;
   accessToken: string;
+  /** Session STT language; overrides \`NEXT_PUBLIC_STT_LANGUAGE\` when set. */
+  sttLanguage?: GmSessionLanguage;
 }): Promise<VoiceBlobToMessageResult> {
-  const { blob, focusCharacterId, speakerName, charactersById, npcsById, accessToken } = params;
+  const { blob, focusCharacterId, speakerName, charactersById, npcsById, accessToken, sttLanguage } =
+    params;
   if (blob.size < 64) {
     return { ok: false, error: 'Recording too short' };
   }
@@ -30,7 +33,10 @@ export async function voiceBlobToGmPlayerMessage(params: {
     Authorization: `Bearer ${accessToken}`,
   };
   if (focusCharacterId) headers['X-Character-Id'] = focusCharacterId;
-  const sttLang = process.env.NEXT_PUBLIC_STT_LANGUAGE?.trim();
+  const sttLang =
+    sttLanguage === 'tr' || sttLanguage === 'en'
+      ? sttLanguage
+      : process.env.NEXT_PUBLIC_STT_LANGUAGE?.trim();
   if (sttLang) headers['X-STT-Language'] = sttLang;
 
   const res = await fetch('/api/voice', { method: 'POST', body: blob, headers });

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useGameStore } from '@/lib/store/game-store';
 import { sortChatMessagesByTimestamp } from '@/lib/chat/chat-order';
-import type { ChatMessage } from '@/lib/types';
+import type { ChatMessage, GmSessionLanguage } from '@/lib/types';
 import {
   resolveGmRequestRoll,
   rollRequestMetadataToInput,
@@ -14,6 +14,7 @@ import { getAccessTokenForApi } from '@/lib/auth/client-access-token';
 import { voiceBlobToGmPlayerMessage } from '@/lib/voice/voice-blob-to-player-message';
 import { requestSessionVoiceTurnMerge } from '@/lib/voice/request-session-voice-turn-merge';
 import { supabase } from '@/lib/supabase';
+import { persistSessionLanguageSettings } from '@/lib/session/persist-session-language-settings';
 import { persistSessionVoiceSettings } from '@/lib/session/persist-session-voice-settings';
 
 function typeLabel(type: ChatMessage['type'], meta?: Record<string, unknown>): string {
@@ -117,6 +118,8 @@ export function ChatInterface({
   const isLoading = useGameStore((s) => s.chat.isLoading);
   const setChatLoading = useGameStore((s) => s.setChatLoading);
   const openDiceRoller = useGameStore((s) => s.openDiceRoller);
+  const sttLanguage = useGameStore((s) => s.session.settings.sttLanguage);
+  const aiLanguage = useGameStore((s) => s.session.settings.aiLanguage);
   const voiceInputMode = useGameStore((s) => s.ui.voiceInputMode);
   const sessionRecordingGroupActive = useGameStore((s) => s.ui.sessionRecordingGroupActive);
   const sessionRecordingStartedBy = useGameStore((s) => s.ui.sessionRecordingStartedBy);
@@ -203,6 +206,7 @@ export function ChatInterface({
           charactersById,
           npcsById,
           accessToken,
+          sttLanguage,
         });
         if (!textResult.ok) {
           setVoiceError(textResult.error);
@@ -247,6 +251,7 @@ export function ChatInterface({
       speakerName,
       charactersById,
       npcsById,
+      sttLanguage,
       setChatLoading,
     ],
   );
@@ -593,6 +598,7 @@ export function ChatInterface({
         charactersById,
         npcsById,
         accessToken,
+        sttLanguage,
       });
       if (!textResult.ok) {
         setVoiceError(textResult.error);
@@ -637,6 +643,7 @@ export function ChatInterface({
     speakerName,
     charactersById,
     npcsById,
+    sttLanguage,
     setChatLoading,
     setVoiceRecordingStore,
     clearPendingVoiceGm,
@@ -1093,6 +1100,63 @@ export function ChatInterface({
               Group session mode (started by {sessionRecordingStartedBy})
             </span>
           )}
+        </div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] uppercase tracking-wide text-zinc-500">
+          <span className="text-zinc-400">Voice STT</span>
+          <div className="inline-flex rounded border border-zinc-600 overflow-hidden">
+            {(['en', 'tr'] as const satisfies readonly GmSessionLanguage[]).map((code) => (
+              <button
+                key={code}
+                type="button"
+                disabled={!enabled || isLoading}
+                className={`px-2 py-0.5 normal-case tracking-normal text-[10px] font-mono ${
+                  sttLanguage === code
+                    ? 'bg-cyan-900/55 text-cyan-100'
+                    : 'bg-zinc-950 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300'
+                } disabled:opacity-40`}
+                onClick={() => {
+                  void persistSessionLanguageSettings(supabase, sessionId, { sttLanguage: code }).then(
+                    (r) => {
+                      if (r.error && typeof console !== 'undefined') {
+                        console.warn('[session] language settings persist failed', r.error);
+                      }
+                    },
+                  );
+                }}
+              >
+                {code.toUpperCase()}
+              </button>
+            ))}
+          </div>
+          <span className="text-zinc-400">AI-GM lang</span>
+          <div className="inline-flex rounded border border-zinc-600 overflow-hidden">
+            {(['en', 'tr'] as const satisfies readonly GmSessionLanguage[]).map((code) => (
+              <button
+                key={code}
+                type="button"
+                disabled={!enabled || isLoading}
+                className={`px-2 py-0.5 normal-case tracking-normal text-[10px] font-mono ${
+                  aiLanguage === code
+                    ? 'bg-violet-900/45 text-violet-100'
+                    : 'bg-zinc-950 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300'
+                } disabled:opacity-40`}
+                onClick={() => {
+                  void persistSessionLanguageSettings(supabase, sessionId, { aiLanguage: code }).then(
+                    (r) => {
+                      if (r.error && typeof console !== 'undefined') {
+                        console.warn('[session] language settings persist failed', r.error);
+                      }
+                    },
+                  );
+                }}
+              >
+                {code.toUpperCase()}
+              </button>
+            ))}
+          </div>
+          <span className="text-zinc-600 normal-case tracking-normal max-w-md">
+            STT must match spoken language. GM language affects narration only (tools stay English).
+          </span>
         </div>
         {enabled && (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-zinc-500">

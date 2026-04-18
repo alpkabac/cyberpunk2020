@@ -6,6 +6,33 @@ import type { OpenRouterChatMessage, OpenRouterToolCall } from './context-builde
 import { GM_TOOL_DEFINITIONS } from './tool-definitions';
 import type { ToolExecutorContext, ToolExecutionResult } from './tool-executor';
 import { executeGmToolCallFromModel } from './tool-executor';
+import { sanitizeGmNarrationText } from './sanitize-gm-narration';
+
+/** NPC sheet tools — must run before `start_combat` so initiative includes new combatants. */
+const GM_SPAWN_TOOL_NAMES = new Set(['spawn_npc', 'spawn_random_npc', 'spawn_unique_npc']);
+
+/** Run after state-changing tools in the same step (e.g. damage before handing off initiative). */
+const GM_COMBAT_STEP_TOOL_NAMES = new Set(['next_turn', 'advance_round']);
+
+function gmToolExecutionPriority(functionName: string): number {
+  if (GM_SPAWN_TOOL_NAMES.has(functionName)) return 0;
+  if (functionName === 'start_combat') return 2;
+  if (GM_COMBAT_STEP_TOOL_NAMES.has(functionName)) return 3;
+  if (functionName === 'end_combat') return 4;
+  return 1;
+}
+
+/**
+ * Stable reorder of parallel tool calls: spawns first, ordinary tools, `start_combat`,
+ * then `next_turn` / `advance_round`, then `end_combat`.
+ */
+export function sortGmToolCallsForExecution(calls: OpenRouterToolCall[]): OpenRouterToolCall[] {
+  return [...calls].sort((a, b) => {
+    const pa = gmToolExecutionPriority(a.function?.name ?? '');
+    const pb = gmToolExecutionPriority(b.function?.name ?? '');
+    return pa - pb;
+  });
+}
 
 export interface OpenRouterCompletionResult {
   /** Final assistant text (narration) */
@@ -172,17 +199,19 @@ export async function runGmCompletionWithTools(params: {
 
     const toolCalls = extractToolCalls(raw);
     if (toolCalls.length === 0) {
-      return { narration: content ?? '', lastRaw, toolLog };
+      return { narration: sanitizeGmNarrationText(content ?? ''), lastRaw, toolLog };
     }
+
+    const orderedToolCalls = sortGmToolCallsForExecution(toolCalls);
 
     const assistantMsg: OpenRouterChatMessage = {
       role: 'assistant',
       content: content ?? null,
-      tool_calls: toolCalls,
+      tool_calls: orderedToolCalls,
     };
     messages.push(assistantMsg);
 
-    for (const tc of toolCalls) {
+    for (const tc of orderedToolCalls) {
       const name = tc.function?.name ?? '';
       const args = tc.function?.arguments ?? '{}';
       const exec = await executeGmToolCallFromModel(name, args, params.toolContext);
@@ -208,5 +237,5 @@ export async function runGmCompletionWithTools(params: {
     tools: false,
   });
   lastRaw = raw;
-  return { narration: content ?? '', lastRaw, toolLog };
+  return { narration: sanitizeGmNarrationText(content ?? ''), lastRaw, toolLog };
 }

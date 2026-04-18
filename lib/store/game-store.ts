@@ -450,6 +450,8 @@ const initialState: GameState = {
       allowPlayerTokenMovement: true,
       voiceInputMode: 'pushToTalk',
       sessionRecordingStartedBy: null,
+      sttLanguage: 'en',
+      aiLanguage: 'en',
       mapGridCols: 20,
       mapGridRows: 20,
       mapShowGrid: true,

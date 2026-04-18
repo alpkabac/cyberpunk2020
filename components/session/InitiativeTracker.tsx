@@ -86,6 +86,15 @@ export function InitiativeTracker({
   });
   const showNarrateNpcTurn = isGm && activeCombatant?.type === 'npc';
 
+  const viewerMayEndOwnTurn =
+    !isGm &&
+    !!viewerUserId &&
+    !!combatState &&
+    !!activeCombatant &&
+    activeCombatant.type === 'character' &&
+    activeCombatant.userId === viewerUserId &&
+    combatState.startOfTurnSavesPendingFor !== activeCombatant.id;
+
   const requestNpcTurnNarration = useCallback(async () => {
     if (!isGm) return;
     const { session, characters, npcs } = useGameStore.getState();
@@ -108,7 +117,7 @@ export function InitiativeTracker({
       const stun = ac.isStunned ? 'stunned' : 'not stunned';
       const playerMessage = `[NPC turn — referee tool] Round ${cs.round}. Active combatant: **${ac.name}** (NPC, sheet id \`${ac.id}\`). Snapshot: wound **${wound}**, ${stun}, damage **${ac.damage}**/41, stabilized **${ac.isStabilized}**.
 
-Please narrate the **start of this NPC's turn** in combat (brief, tense, actionable). Do **not** advance the initiative tracker, resolve PC start-of-turn saves, or roll dice unless the table asks — those are human/tool controlled.`;
+Follow **GM_TASK** in this request (narrate, resolve mechanics, then \`next_turn\` when the NPC is done).`;
 
       const res = await fetch('/api/gm', {
         method: 'POST',
@@ -231,6 +240,21 @@ Please narrate the **start of this NPC's turn** in combat (brief, tense, actiona
             {narrateBusy || gmNarrationPending ? '…' : 'Narrate turn (AI-GM)'}
           </button>
           {narrateErr && <p className="text-[10px] text-red-400">{narrateErr}</p>}
+        </div>
+      )}
+      {viewerMayEndOwnTurn && (
+        <div className="rounded border border-emerald-900/45 bg-emerald-950/20 px-2 py-1.5">
+          <p className="text-[10px] text-emerald-100/90 leading-snug mb-1">
+            <span className="font-bold uppercase">Your turn</span> — {activeCombatant?.name}
+          </p>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void postCombat({ action: 'next_turn' })}
+            className="w-full text-[10px] uppercase py-1 rounded border border-emerald-700/60 text-emerald-100 hover:bg-emerald-900/35 disabled:opacity-50"
+          >
+            End my turn (pass)
+          </button>
         </div>
       )}
       {isGm && (

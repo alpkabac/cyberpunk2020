@@ -22,6 +22,8 @@ describe('tactical-cover-hint', () => {
       allowPlayerTokenMovement: true,
       voiceInputMode: 'pushToTalk',
       sessionRecordingStartedBy: null,
+      sttLanguage: 'en',
+      aiLanguage: 'en',
       mapGridCols: 5,
       mapGridRows: 3,
       mapShowGrid: true,

@@ -482,7 +482,7 @@ export const GM_TOOL_DEFINITIONS = [
     function: {
       name: 'start_combat',
       description:
-        'Begin FNFF combat for this session: roll initiative (full REF after recalc + exploding 1d10 + manual initiative mod + Solo Combat Sense + equipped cyberware initiative/booster bonuses) for every character/NPC in the session, build turn order, set round 1, and post the initiative results to chat.',
+        'Begin FNFF combat for this session: roll initiative (full REF after recalc + exploding 1d10 + manual initiative mod + Solo Combat Sense + equipped cyberware initiative/booster bonuses) for every character/NPC **already saved** to this session, build turn order, set round 1, and post the initiative results to chat. Call **after** all \`spawn_npc\` / \`spawn_random_npc\` / \`spawn_unique_npc\` for combatants who are not yet in the session—otherwise they will be missing from turn order.',
       parameters: {
         type: 'object',
         properties: {},
@@ -495,7 +495,20 @@ export const GM_TOOL_DEFINITIONS = [
     function: {
       name: 'advance_round',
       description:
-        'Start the next combat round: increment the round counter, move to the top of initiative, decrement duration_rounds on all timed conditions across every character in the session, remove expired conditions, and post a round summary to chat.',
+        '**GM shortcut:** increment the round counter, tick timed conditions on every sheet (same tick as a full initiative wrap), move **activeTurn** to the **top** of the order, and post a round summary—**even if** you are mid-order. Use \`next_turn\` to pass turn normally; wrapping last→first via \`next_turn\` also ticks conditions and bumps the round.',
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'next_turn',
+      description:
+        'Advance **one step** in initiative (next combatant; server skips dead NPCs and resolves NPC start-of-turn auto-saves). When this step wraps from the **last** slot to the **first**, the server **increments the round** and ticks timed conditions on **all** characters—same bookkeeping as completing a full initiative cycle. Use when the active fighter is done. For a **GM shortcut** to tick conditions and jump to round+1 **and** first in order **without** stepping through intervening turns, use \`advance_round\` instead.',
       parameters: {
         type: 'object',
         properties: {},

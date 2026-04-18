@@ -1,7 +1,11 @@
-import { buildGmUserContent, CORE_GM_RULES } from '@/lib/gm/context-builder';
+import {
+  buildGmSystemPrompt,
+  buildGmUserContentWithinInputTokenBudget,
+} from '@/lib/gm/context-builder';
 import { buildLoreInjection } from '@/lib/gm/lorebook';
 import { loadDefaultLoreRules } from '@/lib/gm/load-lore-rules';
 import { reportServerError } from '@/lib/logging/server-report';
+import { getGmMaxChatMessagesFromEnv, getGmMaxInputTokensFromEnv } from '@/lib/gm/openrouter-env';
 import { runGmCompletionWithTools } from '@/lib/gm/openrouter';
 import { fetchSessionSnapshot } from '@/lib/realtime/session-load';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -77,23 +81,37 @@ export async function runGmCompletionAfterPlayerInsert(opts: {
   const loreRules = loadDefaultLoreRules();
   const loreInjection = buildLoreInjection(opts.playerMessage, opts.loreBudget, loreRules);
 
-  const userContent = buildGmUserContent({
-    sessionName: snapshot.session.name,
-    sessionSummary: snapshot.session.sessionSummary,
-    activeScene: snapshot.session.activeScene,
-    characters: snapshot.characters,
-    combatState: snapshot.session.combatState,
-    mapTokens: snapshot.tokens,
-    sessionSettings: snapshot.session.settings,
-    mapCoverRegions: snapshot.session.mapState.coverRegions,
-    mapSuppressiveZones: snapshot.session.mapState.suppressiveZones,
-    mapSuppressivePending: snapshot.session.mapState.pendingSuppressivePlacements,
-    chatHistory,
-    playerMessage: opts.playerMessage,
-    messageSpeaker: opts.speakerName,
-    loreInjection,
-    playerMessageMetadata: opts.playerMessageMetadata ?? null,
-  });
+  const systemPrompt = buildGmSystemPrompt(snapshot.session.settings);
+  const maxInputTokens = getGmMaxInputTokensFromEnv();
+  const { userContent, estimatedInputTokens, omittedOlderCount } = buildGmUserContentWithinInputTokenBudget(
+    {
+      sessionName: snapshot.session.name,
+      sessionSummary: snapshot.session.sessionSummary,
+      activeScene: snapshot.session.activeScene,
+      characters: snapshot.characters,
+      combatState: snapshot.session.combatState,
+      mapTokens: snapshot.tokens,
+      sessionSettings: snapshot.session.settings,
+      mapCoverRegions: snapshot.session.mapState.coverRegions,
+      mapSuppressiveZones: snapshot.session.mapState.suppressiveZones,
+      mapSuppressivePending: snapshot.session.mapState.pendingSuppressivePlacements,
+      chatHistory,
+      playerMessage: opts.playerMessage,
+      messageSpeaker: opts.speakerName,
+      loreInjection,
+      playerMessageMetadata: opts.playerMessageMetadata ?? null,
+    },
+    systemPrompt,
+    maxInputTokens,
+    { maxChatMessagesCeiling: getGmMaxChatMessagesFromEnv() },
+  );
+  if (estimatedInputTokens > maxInputTokens) {
+    reportServerError(
+      'ai-gm:context-exceeds-budget',
+      new Error('GM prompt still exceeds CP2020_GM_MAX_INPUT_TOKENS after trimming chat'),
+      { sessionId: opts.sessionId, estimatedInputTokens, omittedOlderCount },
+    );
+  }
 
   const charactersById = new Map(snapshot.characters.map((c) => [c.id, c]));
 
@@ -105,7 +123,7 @@ export async function runGmCompletionAfterPlayerInsert(opts: {
       runGmCompletionWithTools({
         apiKey: opts.apiKey,
         model: opts.model,
-        systemPrompt: CORE_GM_RULES,
+        systemPrompt,
         userContent,
         toolContext: {
           supabase: opts.supabase,

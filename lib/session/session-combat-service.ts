@@ -60,6 +60,78 @@ async function loadSessionCharacters(supabase: SupabaseClient, sessionId: string
   return data.map((r) => characterRowToCharacter(r as Record<string, unknown>));
 }
 
+/** One combat-round tick: decrement `duration_rounds` on every character in the session; persist changes. */
+async function tickTimedConditionsAllSession(
+  supabase: SupabaseClient,
+  sessionId: string,
+): Promise<{ ok: true; clearedLines: string[] } | { ok: false; error: string }> {
+  const chars = await loadSessionCharacters(supabase, sessionId);
+  const clearedLines: string[] = [];
+  for (const c of chars) {
+    const { character: ticked, expired } = tickConditionsOneRound(c);
+    if (expired.length > 0) {
+      for (const ex of expired) {
+        clearedLines.push(`${ex.name} cleared from **${ticked.name}**`);
+      }
+    }
+    const condChanged = JSON.stringify(ticked.conditions) !== JSON.stringify(c.conditions);
+    if (condChanged) {
+      const { error } = await saveCharacterToSupabase(supabase, ticked);
+      if (error) return { ok: false, error: error.message };
+    }
+  }
+  return { ok: true, clearedLines };
+}
+
+/**
+ * Every initiative slot is empty of a living combatant (CP2020: damage ≥ 41 is dead).
+ * Rows missing from `byId` (deleted sheet) count as out of the fight.
+ */
+export function allInitiativeEntriesIncapacitated(
+  entries: InitiativeEntry[],
+  byId: Map<string, Character>,
+): boolean {
+  if (entries.length === 0) return false;
+  for (const e of entries) {
+    const c = byId.get(e.characterId);
+    if (c && c.damage < 41) return false;
+  }
+  return true;
+}
+
+async function endCombatIfAllIncapacitated(
+  supabase: SupabaseClient,
+  sessionId: string,
+  entries: InitiativeEntry[],
+  byId: Map<string, Character>,
+  narration: string,
+): Promise<{ ok: true; ended: true } | { ok: true; ended: false } | { ok: false; error: string }> {
+  if (!allInitiativeEntriesIncapacitated(entries, byId)) return { ok: true, ended: false };
+  const r = await sessionEndCombat(supabase, sessionId, { narration });
+  if (!r.ok) return { ok: false, error: r.error };
+  return { ok: true, ended: true };
+}
+
+/** End combat if the tracker has no living combatants (e.g. after lethal `apply_damage`). */
+export async function sessionMaybeAutoEndCombatWhenAllDown(
+  supabase: SupabaseClient,
+  sessionId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const current = await fetchSessionCombatState(supabase, sessionId);
+  if (!current?.entries.length) return { ok: true };
+  const latest = await loadSessionCharacters(supabase, sessionId);
+  const byId = new Map(latest.map((c) => [c.id, recalcCharacterForGm(c)]));
+  const fin = await endCombatIfAllIncapacitated(
+    supabase,
+    sessionId,
+    current.entries,
+    byId,
+    '*Combat ends — no combatants remain in the fight.*',
+  );
+  if (!fin.ok) return { ok: false, error: fin.error };
+  return { ok: true };
+}
+
 function formatInitiativeLine(entries: InitiativeEntry[]): string {
   const parts = entries.map((e) => {
     const tail: string[] = [`d10 ${e.d10Detail}`];
@@ -105,17 +177,50 @@ export async function sessionStartCombat(
 export async function sessionNextTurn(
   supabase: SupabaseClient,
   sessionId: string,
-): Promise<{ ok: true; combat_state: CombatState } | { ok: false; error: string }> {
+): Promise<{ ok: true; combat_state: CombatState | null } | { ok: false; error: string }> {
   const current = await fetchSessionCombatState(supabase, sessionId);
   if (!current || current.entries.length === 0) {
     return { ok: false, error: 'No active combat' };
   }
 
+  const n = current.entries.length;
+  /** Raw initiative step from last slot to first — a full in-game round elapsed; tick timed conditions. */
+  const initiativeWrapsToNewRound = (current.activeTurnIndex + 1) % n === 0;
+
   let state: CombatState = {
     ...current,
-    activeTurnIndex: (current.activeTurnIndex + 1) % current.entries.length,
+    activeTurnIndex: (current.activeTurnIndex + 1) % n,
     startOfTurnSavesPendingFor: null,
+    round: initiativeWrapsToNewRound ? current.round + 1 : current.round,
   };
+
+  if (initiativeWrapsToNewRound) {
+    const ticked = await tickTimedConditionsAllSession(supabase, sessionId);
+    if (!ticked.ok) return { ok: false, error: ticked.error };
+
+    const charsAfterTick = await loadSessionCharacters(supabase, sessionId);
+    const byAfterTick = new Map(charsAfterTick.map((c) => [c.id, recalcCharacterForGm(c)]));
+    const endedAfterTick = await endCombatIfAllIncapacitated(
+      supabase,
+      sessionId,
+      state.entries,
+      byAfterTick,
+      '*Combat ends — no combatants remain in the fight.*',
+    );
+    if (!endedAfterTick.ok) return { ok: false, error: endedAfterTick.error };
+    if (endedAfterTick.ended) return { ok: true, combat_state: null };
+
+    let line = `— Round **${state.round}** begins —`;
+    if (ticked.clearedLines.length > 0) {
+      line += ` ${ticked.clearedLines.join('; ')}.`;
+    }
+    const roundChatErr = await insertChatLine(supabase, sessionId, line, 'system', {
+      kind: 'combat_advance_round',
+      round: state.round,
+      via: 'next_turn_wrap',
+    });
+    if (roundChatErr) return { ok: false, error: roundChatErr.message };
+  }
 
   const chars = await loadSessionCharacters(supabase, sessionId);
   const byId = new Map(chars.map((c) => [c.id, c]));
@@ -233,6 +338,18 @@ export async function sessionNextTurn(
     break;
   }
 
+  const latest = await loadSessionCharacters(supabase, sessionId);
+  const byLatest = new Map(latest.map((c) => [c.id, recalcCharacterForGm(c)]));
+  const ended = await endCombatIfAllIncapacitated(
+    supabase,
+    sessionId,
+    state.entries,
+    byLatest,
+    '*Combat ends — no combatants remain in the fight.*',
+  );
+  if (!ended.ok) return { ok: false, error: ended.error };
+  if (ended.ended) return { ok: true, combat_state: null };
+
   const err = await persistCombatState(supabase, sessionId, state);
   if (err) return { ok: false, error: err.message };
   return { ok: true, combat_state: state };
@@ -258,28 +375,27 @@ export async function sessionClearStartOfTurnSavesPending(
 export async function sessionAdvanceRound(
   supabase: SupabaseClient,
   sessionId: string,
-): Promise<{ ok: true; combat_state: CombatState } | { ok: false; error: string }> {
+): Promise<{ ok: true; combat_state: CombatState | null } | { ok: false; error: string }> {
   const current = await fetchSessionCombatState(supabase, sessionId);
   if (!current || current.entries.length === 0) {
     return { ok: false, error: 'No active combat' };
   }
 
-  const chars = await loadSessionCharacters(supabase, sessionId);
-  const clearedLines: string[] = [];
+  const ticked = await tickTimedConditionsAllSession(supabase, sessionId);
+  if (!ticked.ok) return { ok: false, error: ticked.error };
+  const clearedLines = ticked.clearedLines;
 
-  for (const c of chars) {
-    const { character: ticked, expired } = tickConditionsOneRound(c);
-    if (expired.length > 0) {
-      for (const ex of expired) {
-        clearedLines.push(`${ex.name} cleared from **${ticked.name}**`);
-      }
-    }
-    const condChanged = JSON.stringify(ticked.conditions) !== JSON.stringify(c.conditions);
-    if (condChanged) {
-      const { error } = await saveCharacterToSupabase(supabase, ticked);
-      if (error) return { ok: false, error: error.message };
-    }
-  }
+  const charsAfterTick = await loadSessionCharacters(supabase, sessionId);
+  const byAfterTick = new Map(charsAfterTick.map((c) => [c.id, recalcCharacterForGm(c)]));
+  const endedAfterTick = await endCombatIfAllIncapacitated(
+    supabase,
+    sessionId,
+    current.entries,
+    byAfterTick,
+    '*Combat ends — no combatants remain in the fight.*',
+  );
+  if (!endedAfterTick.ok) return { ok: false, error: endedAfterTick.error };
+  if (endedAfterTick.ended) return { ok: true, combat_state: null };
 
   const state: CombatState = {
     ...current,

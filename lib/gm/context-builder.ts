@@ -6,6 +6,7 @@ import type {
   Character,
   ChatMessage,
   CombatState,
+  GmSessionLanguage,
   MapCoverRegion,
   MapSuppressiveZone,
   PendingSuppressivePlacement,
@@ -24,12 +25,17 @@ import {
 import { buildTacticalCoverHints } from '../map/tactical-cover-hint';
 import { CP2020_COVER_TYPES, coverTypeLabel } from '../map/cover-types';
 import { parseSessionSettingsJson } from '../realtime/db-mapper';
+import { GM_TOOL_DEFINITIONS } from './tool-definitions';
+
+/** Rough token cost of serializing `tools` on OpenRouter `chat/completions` (paid once per request). */
+const GM_OPENROUTER_TOOL_SCHEMA_TOKEN_ESTIMATE = estimateTokens(JSON.stringify(GM_TOOL_DEFINITIONS));
 
 export const CORE_GM_RULES = `You are the Game Master for a Cyberpunk 2020 tabletop session (R. Talsorian Games).
 You narrate scenes, adjudicate actions fairly, and use tools to update game state when outcomes are clear.
 Stay in setting (dark future, corporate dystopia). Do not invent major setting facts that contradict established table state.
 When uncertain about a PC's action, ask for a roll via request_roll (for ranged/melee shots use roll_kind attack + weapon_id + DV; otherwise skill/stat + ids from CHARACTERS_JSON, or raw_formula). You CAN roll dice yourself for NPCs and world events using roll_dice.
 Output engaging but concise narration; use tools for concrete state changes (damage, money, items, map, etc.).
+**Narration prose only:** Never include XML tags (\`<function_calls>\`, \`<invoke>\`), JSON tool payloads, or any pseudo markup for dice/tools in the text players read—tools are invoked by the API separately.
 
 **Humans are players; you are the referee:** The people at the keyboard are **players only**. You are the **only** narrative Game Master. Never call a human "GM", never write as if they referee the world, and never ask them to roll **for an NPC or enemy**. \`CURRENT_MESSAGE_SPEAKER\` is the **player character name** tied to the latest player chat line (who is acting)—not a human referee.
 **request_roll vs roll_dice:** Use \`request_roll\` **only** when you need the **human player** to roll **for their own PC** (or a check only they should make on the sheet). For **any NPC / hostile / ally NPC action**—including **NPC shooting at a PC**, enemy skill checks, and similar—use \`roll_dice\` yourself (with \`character_id\` of that NPC when applicable), narrate the result, then resolve outcomes with tools (\`apply_damage\`, etc.). **Wrong:** \`request_roll\` with the NPC's \`character_id\` so the player rolls the enemy's rifle. **Right:** \`roll_dice\` for the NPC's attack, then damage if it hits.
@@ -65,7 +71,7 @@ Use \`roll_dice\` to roll server-side for **NPC attacks and NPC checks**, random
 
 **Conditions:** Use \`set_condition\` to apply or remove status effects. "stunned" toggles only the isStunned flag (not stored in conditions[]). Other conditions are persisted in the character's conditions array (with optional \`duration_rounds\`) and visible to all players. Specify \`duration_rounds\` when the CP2020 rules define one (Dazzle grenade = blinded 12 rounds, Sonic grenade = deafened 12 rounds, Incendiary = on_fire 9 rounds; 1 CP2020 "turn" = 3 rounds). Omit duration for indefinite conditions. CP2020-relevant conditions: unconscious, asleep (also sets isStunned), blinded, on_fire, grappled, prone, deafened, poisoned, drugged, cyberpsychosis. Severance conditions (\`severed_right_arm\`, \`severed_left_arm\`, \`severed_right_leg\`, \`severed_left_leg\`) are auto-applied by \`apply_damage\` on limb hits dealing >8 final damage; leave them in place unless the character receives cyberware replacement or similar narrative healing.
 
-**Initiative / combat rounds:** When a fight starts, call \`start_combat\` to roll initiative for **every** character in the session (full **REF** after cyberware/armor/wounds + exploding 1d10 + manual initiative mod + Solo Combat Sense + **cyber initiative bonus** from equipped ware such as Kerenzikov). That builds turn order, sets round 1, and posts the order to chat. Call \`advance_round\` at the start of each new round: it increments the round counter, ticks \`duration_rounds\` on **all** conditions in the session, removes expired ones, and posts a summary line. Call \`end_combat\` to clear the tracker; set \`clear_timed_conditions\` true if timed conditions should be wiped, and optional \`narration\` for the closing line. The human GM can also advance turns from the session sidebar.
+**Initiative / combat rounds:** Initiative is rolled once for **every character sheet already in the session** at the moment \`start_combat\` runs—new NPCs added afterward are **not** inserted into that order automatically. **Before** \`start_combat\`, use \`spawn_npc\` / \`spawn_random_npc\` / \`spawn_unique_npc\` for every new enemy or ally NPC who will act in this fight (PCs are already in the session). Then call \`start_combat\` to roll initiative (full **REF** after cyberware/armor/wounds + exploding 1d10 + manual initiative mod + Solo Combat Sense + **cyber initiative bonus** from equipped ware such as Kerenzikov), build turn order, set round 1, and post the order to chat. Use \`next_turn\` to move **one slot** forward in the initiative list. When the step wraps from the **last** combatant back to the **first**, the server treats that as a new **combat round**: it increments the round counter, ticks \`duration_rounds\` on **every** character (same as \`advance_round\`), posts a round line, then continues. Use \`advance_round\` when you need that tick + round bump **without** walking initiative (e.g. jump to top of order from the middle as a GM shortcut). If **everyone** in the current initiative order is dead (damage ≥ 41) or their sheets are gone, the server ends combat automatically on \`next_turn\` / \`advance_round\` / lethal \`apply_damage\`. Call \`end_combat\` to clear the tracker; set \`clear_timed_conditions\` true if timed conditions should be wiped, and optional \`narration\` for the closing line. The human GM and **owning players** (for their PC's turn, after saves) can also advance turns from the session sidebar.
 
 **Combat tracker snapshot:** \`COMBAT_TRACKER_JSON\` (when \`inCombat\` is true) lists initiative order and, for each combatant, \`isStunned\`, \`isStabilized\`, \`woundState\`, \`damage\`, and \`deathSaveTarget\` merged from the live sheet—use it so narration matches the table. If \`startOfTurnSavesPendingFor\` is set, that character's **start-of-turn stun recovery / ongoing death save** is still being resolved in the client; keep your narration compatible with CP2020 until that flag clears (see lore \`start-of-turn-saves\`). When a player asks the GM to override a **stun** outcome, weigh the fiction but default to the rules unless the table clearly agrees to a fiat.
 
@@ -75,6 +81,19 @@ Use \`roll_dice\` to roll server-side for **NPC attacks and NPC checks**, random
 
 **Rules lookups:** When the player asks how a rule works, to "look up", "refresh", "before I roll", "what does the book say", or asks about mechanics (armor, SP, BTM, damage pipeline, initiative, skills, netrunning, economy), call \`lookup_rules\` with a short \`query\` string **before** you answer. Ground your answer in the tool text (it comes from the table's loaded lore JSON). If the snippet is thin, say so and supplement with general CP2020 knowledge—do not rely on memory alone when the player explicitly wants a rules refresh.
 `;
+
+function gmResponseLanguageInstruction(lang: GmSessionLanguage): string {
+  if (lang === 'tr') {
+    return `\n\n**Language (session):** Write all narration, NPC dialogue, and player-facing explanations in Turkish (Türkçe). Player messages may be in Turkish or English; default to Turkish for your replies. Keep tool calls valid: use exact \`character_id\` UUIDs from CHARACTERS_JSON and English tool names/JSON keys.`;
+  }
+  return `\n\n**Language (session):** Write all narration and dialogue in English.`;
+}
+
+/** System prompt for the AI-GM, including session reply language. */
+export function buildGmSystemPrompt(sessionSettings?: SessionSettings | null): string {
+  const lang: GmSessionLanguage = sessionSettings?.aiLanguage === 'tr' ? 'tr' : 'en';
+  return CORE_GM_RULES + gmResponseLanguageInstruction(lang);
+}
 
 export interface CompactCharacterPayload {
   id: string;
@@ -440,9 +459,51 @@ function stunOverrideInstruction(meta: Record<string, unknown> | null | undefine
 You must resolve whether **isStunned** should change using tools: prefer \`set_condition\` with \`condition\` "stunned" and \`active\` true/false (toggles isStunned). Narrate briefly; lean on CP2020 unless the PLAYER_MESSAGE clearly asks for table fiat.`;
 }
 
-export function buildGmUserContent(input: BuildContextInput): string {
-  const history = sliceRecentChat(input.chatHistory, input.maxHistoryMessages ?? 40);
-  const historyBlock = history.map(formatChatLine).join('\n');
+function npcTurnNarrationInstruction(meta: Record<string, unknown> | null | undefined): string | null {
+  if (!meta || meta.kind !== 'npc_turn_narration_request') return null;
+  const id = meta.npcCharacterId;
+  const rid = meta.combatRound;
+  const idStr = typeof id === 'string' && id ? id : '(see PLAYER_MESSAGE)';
+  const rStr = typeof rid === 'number' && Number.isFinite(rid) ? String(Math.floor(rid)) : '?';
+  return `GM_TASK: **NPC turn narration** (round ${rStr}, NPC character_id \`${idStr}\`). Narrate this NPC's beat—brief, tense, actionable. Resolve their actions with tools as needed (\`roll_dice\`, \`apply_damage\`, \`move_token\`, etc.). When this NPC's turn is **done** for the moment, call \`next_turn\` **once** so initiative advances to the next combatant. Do **not** call \`advance_round\` unless the table is explicitly moving to a **new round**. Do not resolve a **player** character's start-of-turn saves here—the client handles those.`;
+}
+
+function formatRecentChatBlock(history: ChatMessage[], omittedOlderCount: number): string {
+  const lines: string[] = [];
+  if (omittedOlderCount > 0) {
+    lines.push('(Older messages omitted from context; see SUMMARY for continuity.)');
+  }
+  if (history.length > 0) {
+    lines.push(...history.map(formatChatLine));
+  }
+  if (lines.length === 0) return '(empty)';
+  return lines.join('\n');
+}
+
+/**
+ * Estimated input size for the first OpenRouter call: system + user + tool definitions JSON.
+ */
+export function estimateGmOpenRouterInputTokens(systemPrompt: string, userContent: string): number {
+  return (
+    estimateTokens(systemPrompt) + estimateTokens(userContent) + GM_OPENROUTER_TOOL_SCHEMA_TOKEN_ESTIMATE
+  );
+}
+
+export interface GmUserContentBudgetResult {
+  userContent: string;
+  estimatedInputTokens: number;
+  /** Messages included in RECENT_CHAT (tail of log). */
+  chatTailMessages: number;
+  chatMessagesTotal: number;
+  omittedOlderCount: number;
+}
+
+function buildGmUserContentFromTail(
+  input: BuildContextInput,
+  historyTail: ChatMessage[],
+  omittedOlderCount: number,
+): string {
+  const historyBlock = formatRecentChatBlock(historyTail, omittedOlderCount);
 
   const settings = input.sessionSettings ?? parseSessionSettingsJson(null);
   const charsJson = JSON.stringify(input.characters.map(serializeCharacterForLlm));
@@ -466,6 +527,7 @@ export function buildGmUserContent(input: BuildContextInput): string {
   );
 
   const overrideInstr = stunOverrideInstruction(input.playerMessageMetadata ?? null);
+  const npcTurnInstr = npcTurnNarrationInstruction(input.playerMessageMetadata ?? null);
 
   const parts = [
     `SESSION: ${input.sessionName}`,
@@ -480,15 +542,82 @@ export function buildGmUserContent(input: BuildContextInput): string {
     `MAP_TOKENS_JSON: ${mapTokensJson}`,
     `COMBAT_TRACKER_JSON: ${combatTrackerJson}`,
     `CHARACTERS_JSON: ${charsJson}`,
-    `RECENT_CHAT:\n${historyBlock || '(empty)'}`,
+    `RECENT_CHAT:\n${historyBlock}`,
     `LORE_RULES:\n${input.loreInjection || '(none)'}`,
     ...(overrideInstr ? [`GM_TASK:\n${overrideInstr}`] : []),
+    ...(npcTurnInstr ? [`GM_TASK:\n${npcTurnInstr}`] : []),
     `PLAYER_MESSAGE:\n${input.playerMessage}`,
   ];
 
   return parts.join('\n\n');
 }
 
+/**
+ * Builds GM user payload, shrinking the RECENT_CHAT tail (oldest dropped first) until
+ * system + user + tool schema fit under `maxInputTokens` (rough estimate).
+ */
+export function buildGmUserContentWithinInputTokenBudget(
+  input: BuildContextInput,
+  systemPrompt: string,
+  maxInputTokens: number,
+  options?: { maxChatMessagesCeiling?: number },
+): GmUserContentBudgetResult {
+  const len = input.chatHistory.length;
+  const ceiling = options?.maxChatMessagesCeiling ?? input.maxHistoryMessages ?? 40;
+  const cap = Math.min(len, ceiling);
+
+  const measure = (tailN: number) => {
+    const history = sliceRecentChat(input.chatHistory, tailN);
+    const omitted = len > tailN ? len - tailN : 0;
+    const user = buildGmUserContentFromTail(input, history, omitted);
+    return estimateGmOpenRouterInputTokens(systemPrompt, user);
+  };
+
+  if (cap === 0) {
+    const userContent = buildGmUserContentFromTail(input, [], len);
+    return {
+      userContent,
+      estimatedInputTokens: estimateGmOpenRouterInputTokens(systemPrompt, userContent),
+      chatTailMessages: 0,
+      chatMessagesTotal: len,
+      omittedOlderCount: len,
+    };
+  }
+
+  let lo = 0;
+  let hi = cap;
+  let best = 0;
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (measure(mid) <= maxInputTokens) {
+      best = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+
+  const history = sliceRecentChat(input.chatHistory, best);
+  const omittedOlderCount = len - best;
+  const userContent = buildGmUserContentFromTail(input, history, omittedOlderCount);
+
+  return {
+    userContent,
+    estimatedInputTokens: estimateGmOpenRouterInputTokens(systemPrompt, userContent),
+    chatTailMessages: best,
+    chatMessagesTotal: len,
+    omittedOlderCount,
+  };
+}
+
+export function buildGmUserContent(input: BuildContextInput): string {
+  const cap = input.maxHistoryMessages ?? 40;
+  const history = sliceRecentChat(input.chatHistory, Math.min(cap, input.chatHistory.length));
+  const omittedOlderCount = Math.max(0, input.chatHistory.length - history.length);
+  return buildGmUserContentFromTail(input, history, omittedOlderCount);
+}
+
+/** System + user only (excludes OpenRouter `tools` JSON). */
 export function estimateContextTokens(userContent: string, systemPrompt: string): number {
   return estimateTokens(systemPrompt) + estimateTokens(userContent);
 }
