@@ -188,8 +188,9 @@ interface GameState {
     /**
      * Latest room narration TTS cue from realtime broadcast (`SESSION_NARRATION_TTS`).
      * `seq` bumps so clients can schedule playback even for repeated lines.
+     * `playAfterMs`: delay from local apply time (not wall-clock sync across devices).
      */
-    narrationTtsCue: { seq: number; messageId: string; playAtMs: number } | null;
+    narrationTtsCue: { seq: number; messageId: string; playAfterMs: number } | null;
   };
 
   /** Optimistic edit backups for Supabase writes (rollback on RLS/error). */
@@ -372,7 +373,8 @@ interface GameActions {
   setAudioNarrationVolume: (volume: number) => void;
   broadcastSessionNarrationTtsPlay: (payload: {
     messageId: string;
-    playAtMs: number;
+    /** Delay from when each peer applies the broadcast (default 500). */
+    playAfterMs?: number;
   }) => Promise<void>;
   applySessionNarrationTtsFromBroadcast: (payload: unknown) => void;
 
@@ -1835,26 +1837,41 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     set((state) => ({ ui: { ...state.ui, audioNarrationVolume: v } }));
   },
 
-  broadcastSessionNarrationTtsPlay: async ({ messageId, playAtMs }) => {
+  broadcastSessionNarrationTtsPlay: async ({ messageId, playAfterMs }) => {
     const send = get().sessionBroadcastSend;
     if (!send) return;
-    await send(BROADCAST_EVENTS.SESSION_NARRATION_TTS, { messageId, playAtMs });
+    const ms =
+      typeof playAfterMs === 'number' && Number.isFinite(playAfterMs)
+        ? Math.min(Math.max(playAfterMs, 0), 120_000)
+        : 500;
+    await send(BROADCAST_EVENTS.SESSION_NARRATION_TTS, { messageId, playAfterMs: ms });
   },
 
   applySessionNarrationTtsFromBroadcast: (payload) => {
     if (!payload || typeof payload !== 'object') return;
     const o = payload as Record<string, unknown>;
     const messageId = o.messageId;
-    const playAtMs = o.playAtMs;
     if (typeof messageId !== 'string' || messageId.length === 0) return;
-    if (typeof playAtMs !== 'number' || !Number.isFinite(playAtMs)) return;
+
+    const playAfterRaw = o.playAfterMs;
+    const playAtRaw = o.playAtMs;
+    let playAfterMs: number;
+    if (typeof playAfterRaw === 'number' && Number.isFinite(playAfterRaw)) {
+      playAfterMs = playAfterRaw;
+    } else if (typeof playAtRaw === 'number' && Number.isFinite(playAtRaw)) {
+      playAfterMs = Math.max(0, playAtRaw - Date.now());
+    } else {
+      playAfterMs = 500;
+    }
+    playAfterMs = Math.min(Math.max(playAfterMs, 0), 120_000);
+
     set((state) => ({
       ui: {
         ...state.ui,
         narrationTtsCue: {
           seq: (state.ui.narrationTtsCue?.seq ?? 0) + 1,
           messageId,
-          playAtMs,
+          playAfterMs,
         },
       },
     }));

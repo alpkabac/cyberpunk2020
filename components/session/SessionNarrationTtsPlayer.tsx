@@ -52,11 +52,11 @@ export function SessionNarrationTtsPlayer({ sessionId }: { sessionId: string }) 
     const audio = audioRef.current;
     if (!audio) return;
 
-    const { messageId, playAtMs } = cue;
+    const { messageId, playAfterMs } = cue;
     let cancelled = false;
     const ac = new AbortController();
     let objectUrl: string | null = null;
-    const delayMs = Math.max(0, playAtMs - Date.now());
+    const delayMs = Math.min(Math.max(playAfterMs, 0), 120_000);
 
     const playBlob = (blob: Blob) => {
       if (cancelled) return;

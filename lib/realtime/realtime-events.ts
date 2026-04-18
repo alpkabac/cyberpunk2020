@@ -8,7 +8,7 @@
  * - roll_request (suggested formula / UX hints)
  * - typing (chat composition)
  * - token_drag_preview (optional smooth drag before commit)
- * - session_narration_tts (Cartesia playback cue: message id + wall-clock `playAtMs`)
+ * - session_narration_tts (Cartesia playback cue: message id + `playAfterMs` from receipt; legacy `playAtMs`)
  * - presence_ping (optional heartbeat; use Presence API if you need member lists)
  *
  * Never duplicate the same semantic update on both postgres_changes and broadcast for the same
@@ -26,7 +26,7 @@ export const BROADCAST_EVENTS = {
   SESSION_VOICE_STOP_ALL: 'session_voice_stop_all',
   /** Someone pressed Mic in Session mode — peers with mic pre-authorized can start together. */
   SESSION_VOICE_PEER_START: 'session_voice_peer_start',
-  /** Room narration TTS: same wall-clock start (`playAtMs`) for all clients (best-effort). */
+  /** Room narration TTS: `playAfterMs` ms after each client receives the broadcast (avoids clock skew). */
   SESSION_NARRATION_TTS: 'session_narration_tts',
 } as const;
 

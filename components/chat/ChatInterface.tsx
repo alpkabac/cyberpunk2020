@@ -1189,7 +1189,7 @@ export function ChatInterface({
                           unlockHtmlAudioFromUserGesture();
                           void broadcastSessionNarrationTtsPlay({
                             messageId: m.id,
-                            playAtMs: Date.now() + 500,
+                            playAfterMs: 500,
                           });
                         }}
                       >
