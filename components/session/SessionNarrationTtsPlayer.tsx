@@ -56,7 +56,7 @@ export function SessionNarrationTtsPlayer({ sessionId }: { sessionId: string }) 
     const audio = audioRef.current;
     if (!audio) return;
 
-    const { messageId, playAfterMs, audioUrl: cueAudioUrl } = cue;
+    const { messageId, playAfterMs } = cue;
     let cancelled = false;
     const ac = new AbortController();
     let objectUrl: string | null = null;
@@ -64,6 +64,7 @@ export function SessionNarrationTtsPlayer({ sessionId }: { sessionId: string }) 
 
     const playBlob = (blob: Blob) => {
       if (cancelled) return;
+      unlockHtmlAudioFromUserGesture();
       objectUrl = URL.createObjectURL(blob);
       audio.volume = useGameStore.getState().ui.audioNarrationVolume;
       audio.src = objectUrl;
@@ -77,29 +78,8 @@ export function SessionNarrationTtsPlayer({ sessionId }: { sessionId: string }) 
       });
     };
 
-    const playFromSignedUrl = (url: string) => {
-      if (cancelled) return;
-      unlockHtmlAudioFromUserGesture();
-      audio.volume = useGameStore.getState().ui.audioNarrationVolume;
-      audio.src = url;
-      audio.load();
-      void audio.play().catch((e) => {
-        if (typeof console !== 'undefined') {
-          console.warn(
-            '[narration-tts] play() failed (often autoplay: tap the page or Speak button once)',
-            e,
-          );
-        }
-      });
-    };
-
     const run = async () => {
       if (cancelled) return;
-
-      if (cueAudioUrl && cueAudioUrl.length > 0) {
-        playFromSignedUrl(cueAudioUrl);
-        return;
-      }
 
       const configFp = narrationTtsConfigFingerprint(
         mergeNarrationTtsClientConfig(useGameStore.getState().session.settings.narrationTts),
@@ -118,7 +98,12 @@ export function SessionNarrationTtsPlayer({ sessionId }: { sessionId: string }) 
       }
 
       const token = await getAccessTokenForApi(supabase);
-      if (!token || cancelled) return;
+      if (!token || cancelled) {
+        if (typeof console !== 'undefined' && !cancelled) {
+          console.warn('[narration-tts] no auth token; cannot fetch TTS. Sign in again or refresh the page.');
+        }
+        return;
+      }
       const q = new URLSearchParams({ sessionId, messageId });
       const res = await fetch(`/api/session/narration-tts?${q}`, {
         headers: { Authorization: `Bearer ${token}` },

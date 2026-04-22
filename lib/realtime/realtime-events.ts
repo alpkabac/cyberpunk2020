@@ -9,7 +9,7 @@
  * - typing (chat composition)
  * - token_drag_preview (optional smooth drag before commit)
  * - session_narration_tts (narration TTS cue: `messageId`, `playAfterMs`; optional `skipNarrationTtsForUserId`,
- *   `respectTtsSetting` for auto-stream TTS; legacy `playAtMs`)
+ *   `respectTtsSetting` for auto-stream TTS; legacy `playAtMs`; clients then GET /api/session/narration-tts)
  * - presence_ping (optional heartbeat; use Presence API if you need member lists)
  *
  * Never duplicate the same semantic update on both postgres_changes and broadcast for the same

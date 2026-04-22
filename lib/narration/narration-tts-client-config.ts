@@ -63,11 +63,6 @@ const omnivoiceSchema = z
     duration: z.number().min(0.1).max(60).optional(),
     /** If omnivoice-server uses --auth, paste the same token here (stored in session settings). */
     apiKey: z.string().max(512).optional(),
-    /**
-     * For your own reference: directory on the host that runs omnivoice-server (OMNIVOICE_PROFILE_DIR).
-     * The app does not send this to the TTS process; set the env var when you start the server.
-     */
-    serverProfileDir: z.string().max(1024).optional(),
   })
   .strict();
 
@@ -132,12 +127,15 @@ export function mergeNarrationTtsClientConfig(partial: unknown): NarrationTtsCli
       ...base.kokoro,
       ...(typeof p.kokoro === 'object' && p.kokoro !== null ? (p.kokoro as Record<string, unknown>) : {}),
     },
-    omnivoice: {
-      ...base.omnivoice,
-      ...(typeof p.omnivoice === 'object' && p.omnivoice !== null
-        ? (p.omnivoice as Record<string, unknown>)
-        : {}),
-    },
+    omnivoice: (() => {
+      const o =
+        typeof p.omnivoice === 'object' && p.omnivoice !== null
+          ? { ...(p.omnivoice as Record<string, unknown>) }
+          : {};
+      // Legacy: serverProfileDir was a note field only; drop so .strict() parse succeeds
+      delete o.serverProfileDir;
+      return { ...base.omnivoice, ...o };
+    })(),
   };
   const parsed = narrationTtsClientConfigSchema.safeParse(merged);
   if (parsed.success) return parsed.data;

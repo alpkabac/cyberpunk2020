@@ -755,27 +755,9 @@ export function NarrationTtsSettingsPopout({
               </a>
               : <code className="text-zinc-400">POST /v1/audio/speech</code>. Clone profiles:{' '}
               <code className="text-zinc-400">clone:your_profile_id</code>. Put reference WAVs under the host&apos;s
-              profile directory (set <code className="text-zinc-400">OMNIVOICE_PROFILE_DIR</code> when starting the
-              server — not in this web app).
+              profile directory (set <code className="text-zinc-400">OMNIVOICE_PROFILE_DIR</code> on the machine that
+              runs the TTS process).
             </p>
-            <div>
-              <span className={labelCls}>Profile directory on TTS host (notes only)</span>
-              <input
-                className={inputCls}
-                placeholder="e.g. D:\voice\profiles — reminder for your omnivoice-server machine"
-                value={draft.omnivoice?.serverProfileDir ?? ''}
-                onChange={(e) =>
-                  setDraft((d) => ({
-                    ...d,
-                    omnivoice: {
-                      ...DEFAULT_NARRATION_TTS_CLIENT_CONFIG.omnivoice,
-                      ...d.omnivoice,
-                      serverProfileDir: e.target.value || undefined,
-                    },
-                  }))
-                }
-              />
-            </div>
             <div>
               <span className={labelCls}>Bearer API key (optional)</span>
               <input

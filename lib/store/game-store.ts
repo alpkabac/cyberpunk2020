@@ -195,8 +195,6 @@ interface GameState {
       seq: number;
       messageId: string;
       playAfterMs: number;
-      /** Signed Storage URL from POST /api/session/narration-tts/prepare (same audio for everyone). */
-      audioUrl: string | null;
     } | null;
   };
 
@@ -388,8 +386,6 @@ interface GameActions {
     skipNarrationTtsForUserId?: string;
     /** When true, clients with session `ttsEnabled` off ignore the cue (manual “read aloud” stays forced). */
     respectTtsSetting?: boolean;
-    /** Signed URL after server-side prepare (single synthesis for the room). */
-    audioUrl?: string | null;
   }) => Promise<void>;
   applySessionNarrationTtsFromBroadcast: (payload: unknown) => void;
 
@@ -1884,7 +1880,6 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     playAfterMs,
     skipNarrationTtsForUserId,
     respectTtsSetting,
-    audioUrl,
   }) => {
     const send = get().sessionBroadcastSend;
     if (!send) return;
@@ -1898,9 +1893,6 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     }
     if (respectTtsSetting === true) {
       payload.respectTtsSetting = true;
-    }
-    if (typeof audioUrl === 'string' && audioUrl.length > 0) {
-      payload.audioUrl = audioUrl;
     }
     await send(BROADCAST_EVENTS.SESSION_NARRATION_TTS, payload);
   },
@@ -1937,10 +1929,6 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     }
     playAfterMs = Math.min(Math.max(playAfterMs, 0), 120_000);
 
-    const audioUrlRaw = o.audioUrl;
-    const cueAudioUrl =
-      typeof audioUrlRaw === 'string' && audioUrlRaw.length > 0 ? audioUrlRaw : null;
-
     set((state) => ({
       ui: {
         ...state.ui,
@@ -1948,7 +1936,6 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
           seq: (state.ui.narrationTtsCue?.seq ?? 0) + 1,
           messageId,
           playAfterMs,
-          audioUrl: cueAudioUrl,
         },
       },
     }));

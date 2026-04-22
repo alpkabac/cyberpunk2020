@@ -491,8 +491,8 @@ export type GmSessionLanguage = 'en' | 'tr';
 export interface SessionSettings {
   ttsEnabled: boolean;
   /**
-   * Room-wide narration TTS engine + params (Cartesia / Chatterbox / Kokoro).
-   * Synced via `sessions.settings` so every client uses the same voice and one server prepare per line.
+   * Room-wide narration TTS engine + params (Cartesia / Chatterbox / Kokoro / OmniVoice).
+   * Synced via `sessions.settings` so every client uses the same engine and fetches the same way per message.
    */
   narrationTts: NarrationTtsClientConfig;
   ttsVoice: string;

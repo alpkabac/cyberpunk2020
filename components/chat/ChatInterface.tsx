@@ -319,50 +319,17 @@ export function ChatInterface({
     };
   }, [sessionId]);
 
-  /** One server synthesis + Storage URL, then broadcast so everyone plays the same file on receive. */
-  const prepareAndBroadcastNarrationTts = useCallback(
-    async (args: {
+  /** Ephemeral broadcast: each client fetches TTS from the app API (GET /api/session/narration-tts) when the cue is applied. */
+  const broadcastNarrationTtsCue = useCallback(
+    (args: {
       messageId: string;
       playAfterMs?: number;
       skipNarrationTtsForUserId?: string;
       respectTtsSetting?: boolean;
     }) => {
-      const token = await getAccessTokenForApi(supabase);
-      if (!token) {
-        await useGameStore.getState().broadcastSessionNarrationTtsPlay(args);
-        return;
-      }
-      const res = await fetch('/api/session/narration-tts/prepare', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ sessionId, messageId: args.messageId }),
-      });
-      const data = (await res.json().catch(() => ({}))) as {
-        audioUrl?: string;
-        error?: string;
-        detail?: string;
-      };
-      if (res.ok && typeof data.audioUrl === 'string' && data.audioUrl.length > 0) {
-        await useGameStore.getState().broadcastSessionNarrationTtsPlay({
-          ...args,
-          audioUrl: data.audioUrl,
-        });
-        return;
-      }
-      if (typeof console !== 'undefined') {
-        const hint = [data.detail, data.error].filter((s): s is string => typeof s === 'string' && s.length > 0);
-        console.warn(
-          '[narration-tts] prepare failed, falling back to per-client fetch',
-          res.status,
-          hint.length > 0 ? `— ${hint.join(' · ')}` : '',
-        );
-      }
-      await useGameStore.getState().broadcastSessionNarrationTtsPlay(args);
+      void useGameStore.getState().broadcastSessionNarrationTtsPlay(args);
     },
-    [sessionId, supabase],
+    [],
   );
 
   const consumeGmStreamBody = useCallback(async (res: Response, onStreamError: (message: string) => void) => {
@@ -406,9 +373,9 @@ export function ChatInterface({
             if (messageId && useGameStore.getState().sessionBroadcastSend) {
               const { data: authData } = await supabase.auth.getSession();
               const uid = authData.session?.user?.id;
-              await prepareAndBroadcastNarrationTts({
+              broadcastNarrationTtsCue({
                 messageId,
-                playAfterMs: 900,
+                playAfterMs: 200,
                 ...(uid ? { skipNarrationTtsForUserId: uid } : {}),
                 respectTtsSetting: true,
               });
@@ -428,7 +395,7 @@ export function ChatInterface({
     } finally {
       setStreamingGmText(null);
     }
-  }, [prepareAndBroadcastNarrationTts, supabase]);
+  }, [broadcastNarrationTtsCue, supabase]);
 
   const submitSessionVoiceFragment = useCallback(
     async (turnId: string, blob: Blob, recordingStartedAtMs: number | undefined) => {
@@ -1294,15 +1261,12 @@ export function ChatInterface({
                       <button
                         type="button"
                         className="shrink-0 p-0.5 rounded normal-case text-violet-300/85 hover:text-violet-200 hover:bg-violet-950/40 disabled:opacity-35 transition-colors"
-                        title="Read aloud for everyone (replays from cache after first fetch)"
+                        title="Read aloud for everyone (each client fetches from the TTS server; IDB cache on repeat)"
                         disabled={!enabled || isLoading || !sessionBroadcastReady}
                         aria-label="Read narration aloud for everyone"
                         onClick={() => {
                           unlockHtmlAudioFromUserGesture();
-                          void prepareAndBroadcastNarrationTts({
-                            messageId: m.id,
-                            playAfterMs: 500,
-                          });
+                          broadcastNarrationTtsCue({ messageId: m.id, playAfterMs: 0 });
                         }}
                       >
                         <SpeakerNarrateIcon />
