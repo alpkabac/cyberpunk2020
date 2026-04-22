@@ -63,7 +63,7 @@ export async function narrationTtsCachedConfig(
 }
 
 /**
- * Config + Chatterbox list-order memory (invalidated when `chatterboxNpcVoiceMemory` is written).
+ * Config + in-process Chatterbox list-order memory (per server instance; not persisted in settings).
  */
 export async function narrationTtsCachedSynthesisContext(
   supabase: SupabaseClient,
@@ -75,7 +75,7 @@ export async function narrationTtsCachedSynthesisContext(
   const settings = await fetchSessionSettings(supabase, sessionId);
   const v: NarrationTtsSynthesisContext = {
     config: mergeNarrationTtsClientConfig(settings.narrationTts),
-    memory: { ...settings.chatterboxNpcVoiceMemory },
+    memory: hit?.v.memory ?? {},
   };
   synthesisBySession.set(sessionId, { v, exp: now + CONFIG_TTL_MS });
   pruneOldest(synthesisBySession);
