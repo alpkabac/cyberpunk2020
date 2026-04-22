@@ -14,6 +14,7 @@ import { unlockHtmlAudioFromUserGesture } from '@/lib/audio/unlock-html-audio';
 import { getAccessTokenForApi } from '@/lib/auth/client-access-token';
 import { voiceBlobToGmPlayerMessage } from '@/lib/voice/voice-blob-to-player-message';
 import { requestSessionVoiceTurnMerge } from '@/lib/voice/request-session-voice-turn-merge';
+import { mergePendingRollsWithPlayerText } from '@/lib/dice-roll-send-to-gm';
 import { supabase } from '@/lib/supabase';
 import { persistSessionLanguageSettings } from '@/lib/session/persist-session-language-settings';
 import { persistSessionScenarioSettings } from '@/lib/session/persist-session-scenario-settings';
@@ -31,6 +32,17 @@ import {
 } from '@/lib/gm/gm-openrouter-models';
 import { writeGmOpenRouterClientChoice } from '@/lib/gm/client-gm-openrouter-model';
 import { NarrationTtsSettingsPopout } from '@/components/chat/NarrationTtsSettingsPopout';
+
+/** Auto-open the dice UI only for the client whose focused character matches the request (GM must set `character_id`). */
+function rollRequestTargetsFocusedCharacter(m: ChatMessage, focusCharacterId: string | null): boolean {
+  const meta = m.metadata as Record<string, unknown> | undefined;
+  if (!meta || meta.kind !== 'roll_request') return false;
+  const rid =
+    typeof meta.characterId === 'string' && meta.characterId.trim() ? meta.characterId.trim() : null;
+  if (!rid) return false;
+  if (!focusCharacterId || !focusCharacterId.trim()) return false;
+  return rid === focusCharacterId.trim();
+}
 
 function formatGmStreamClientError(e: unknown): string {
   const base = e instanceof Error ? e.message : String(e);
@@ -534,14 +546,18 @@ export function ChatInterface({
       setPending(null);
       return;
     }
+    const requestedCid =
+      typeof meta.characterId === 'string' && meta.characterId.trim() ? meta.characterId.trim() : null;
+    if (!requestedCid || !focusCharacterId || focusCharacterId.trim() !== requestedCid) {
+      setPending(null);
+      return;
+    }
     if (m.id === useGameStore.getState().ui.lastAnsweredGmAttackRequestMessageId) {
       setPending(null);
       return;
     }
     const input = rollRequestMetadataToInput(meta);
-    const cid =
-      (typeof meta.characterId === 'string' && meta.characterId) || focusCharacterId || null;
-    const char = cid ? charactersById[cid] ?? npcsById[cid] : null;
+    const char = charactersById[requestedCid] ?? npcsById[requestedCid] ?? null;
     const r = resolveGmRequestRoll(char, input, {
       includeSpecialAbilityInSkillRolls,
     });
@@ -619,6 +635,7 @@ export function ChatInterface({
 
   useEffect(() => {
     if (!lastRollRequest || !enabled) return;
+    if (!rollRequestTargetsFocusedCharacter(lastRollRequest, focusCharacterId)) return;
     const id = lastRollRequest.id;
     if (!rollAutoOpenPrimedRef.current) {
       rollAutoOpenPrimedRef.current = true;
@@ -628,7 +645,7 @@ export function ChatInterface({
     if (lastSeenRollRequestIdRef.current === id) return;
     lastSeenRollRequestIdRef.current = id;
     openGmRollFromMessage(lastRollRequest);
-  }, [lastRollRequest, enabled, openGmRollFromMessage]);
+  }, [lastRollRequest, enabled, openGmRollFromMessage, focusCharacterId]);
 
   /** Remote (or local) switch to push-to-talk while a session take is active: stop without STT. */
   useEffect(() => {
@@ -751,6 +768,15 @@ export function ChatInterface({
         setSendError('Not signed in');
         return;
       }
+      const pr = useGameStore
+        .getState()
+        .ui.pendingRollsForVoice.filter((r) => r.sessionId === sessionId)
+        .map((r) => ({ rolledAtMs: r.rolledAtMs, playerMessage: r.playerMessage }));
+      const merged = mergePendingRollsWithPlayerText({
+        playerMessage: text,
+        messageAnchorMs: Date.now(),
+        rolls: pr,
+      });
       const res = await fetch('/api/gm/stream', {
         method: 'POST',
         headers: {
@@ -759,9 +785,10 @@ export function ChatInterface({
         },
         body: JSON.stringify({
           sessionId,
-          playerMessage: text,
+          playerMessage: merged.playerMessage,
           speakerName,
           openRouterModel: gmOpenRouterModel,
+          ...(merged.playerMessageMetadata ? { playerMessageMetadata: merged.playerMessageMetadata } : {}),
         }),
       });
       if (!res.ok) {
@@ -795,11 +822,7 @@ export function ChatInterface({
     if (!voiceRecording) {
       setVoiceError(null);
       recordingStartedInSessionModeRef.current = voiceInputMode === 'session';
-      if (voiceInputMode === 'session') {
-        sessionRecordingStartMsRef.current = Date.now();
-      } else {
-        sessionRecordingStartMsRef.current = null;
-      }
+      sessionRecordingStartMsRef.current = Date.now();
       await startVoice();
       setVoiceRecordingStore(true);
       if (voiceInputMode === 'session') {
@@ -857,6 +880,16 @@ export function ChatInterface({
         setVoiceError(textResult.error);
         return;
       }
+      const pr = useGameStore
+        .getState()
+        .ui.pendingRollsForVoice.filter((r) => r.sessionId === sessionId)
+        .map((r) => ({ rolledAtMs: r.rolledAtMs, playerMessage: r.playerMessage }));
+      const ptMerged = mergePendingRollsWithPlayerText({
+        playerMessage: textResult.playerMessage,
+        messageAnchorMs: sessionRecordingStartMsRef.current ?? Date.now(),
+        rolls: pr,
+        playerMessageMetadata: textResult.playerMessageMetadata,
+      });
       const gmRes = await fetch('/api/gm/stream', {
         method: 'POST',
         headers: {
@@ -865,9 +898,13 @@ export function ChatInterface({
         },
         body: JSON.stringify({
           sessionId,
-          playerMessage: textResult.playerMessage,
+          playerMessage: ptMerged.playerMessage,
           speakerName,
-          playerMessageMetadata: textResult.playerMessageMetadata,
+          ...(ptMerged.playerMessageMetadata
+            ? { playerMessageMetadata: ptMerged.playerMessageMetadata }
+            : textResult.playerMessageMetadata
+              ? { playerMessageMetadata: textResult.playerMessageMetadata }
+              : {}),
           openRouterModel: gmOpenRouterModel,
         }),
       });
@@ -1355,7 +1392,7 @@ export function ChatInterface({
         {rollsForSession.length > 0 && (
           <div className="rounded border border-amber-800/50 bg-amber-950/25 px-2 py-2 space-y-2">
             <p className="text-[10px] uppercase tracking-wide text-amber-200/90">
-              Saved for voice ({rollsForSession.length})
+              Saved rolls — merge on send ({rollsForSession.length})
             </p>
             <ul className="space-y-2">
               {rollsForSession.map((entry) => (
@@ -1554,8 +1591,9 @@ export function ChatInterface({
             ))}
           </select>
           <span className="text-zinc-600 normal-case tracking-normal max-w-md">
-            Synced for everyone in this session (Postgres + Realtime). DeepSeek V3.2 uses OpenRouter{' '}
-            <span className="font-mono">reasoning</span>.
+            Synced for everyone in this session (Postgres + Realtime). GLM 5.1 and DeepSeek V3.2 use OpenAI-compatible{' '}
+            <span className="font-mono">reasoning</span>. For NanoGPT, set <span className="font-mono">CP2020_NANOGPT_API_KEY</span>{' '}
+            (optional <span className="font-mono">CP2020_PREFER_NANOGPT_LLM=1</span> if both keys exist).
           </span>
         </div>
         {enabled && (

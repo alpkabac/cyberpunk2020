@@ -4,6 +4,7 @@
 
 import type { OpenRouterChatMessage, OpenRouterToolCall } from './context-builder';
 import { GM_TOOL_DEFINITIONS } from './tool-definitions';
+import { getGmLlmConfig } from './openrouter-env';
 /** Mirrors {@link OpenRouterCompletionResult} — kept local to avoid circular imports. */
 interface StreamedCompletionResult {
   content: string | null;
@@ -15,8 +16,8 @@ function sleep(ms: number): Promise<void> {
 }
 
 function isRetriableOpenRouterFailure(message: string): boolean {
-  if (/OpenRouter error (\d+)/.test(message)) {
-    const m = /OpenRouter error (\d+)/.exec(message);
+  if (/(?:LLM|OpenRouter) error (\d+):/.test(message)) {
+    const m = /(?:LLM|OpenRouter) error (\d+):/.exec(message);
     const status = m ? parseInt(m[1]!, 10) : 0;
     return status === 429 || status === 502 || status === 503 || status === 504;
   }
@@ -116,17 +117,26 @@ export async function callOpenRouterChatStreamOnce(params: {
     body.tool_choice = 'auto';
   }
 
+  const llm = getGmLlmConfig();
+  if (!llm) {
+    throw new Error(
+      'LLM is not configured: set CP2020_OPENROUTER_API_KEY (or legacy OPENROUTER_API_KEY), or CP2020_NANOGPT_API_KEY.',
+    );
+  }
+
   const headers: Record<string, string> = {
     Authorization: `Bearer ${params.apiKey}`,
     'Content-Type': 'application/json',
   };
-  const referer = process.env.OPENROUTER_HTTP_REFERER?.trim();
-  if (referer) {
-    headers['HTTP-Referer'] = referer;
-    headers['X-Title'] = process.env.OPENROUTER_APP_TITLE?.trim() || 'Cyberpunk 2020 AI GM';
+  if (llm.kind === 'openrouter') {
+    const referer = process.env.OPENROUTER_HTTP_REFERER?.trim();
+    if (referer) {
+      headers['HTTP-Referer'] = referer;
+      headers['X-Title'] = process.env.OPENROUTER_APP_TITLE?.trim() || 'Cyberpunk 2020 AI GM';
+    }
   }
 
-  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+  const res = await fetch(llm.chatCompletionsUrl, {
     method: 'POST',
     headers,
     body: JSON.stringify(body),
@@ -142,16 +152,17 @@ export async function callOpenRouterChatStreamOnce(params: {
     }
     const detail = formatOpenRouterErrorBody(raw, text);
     if (res.status === 401) {
-      throw new Error(
-        `OpenRouter 401 (auth failed): ${detail}. ` +
-          `Set CP2020_OPENROUTER_API_KEY in app/.env.local (see .env.local.example), restart dev server.`,
-      );
+      const keyHint =
+        llm.kind === 'nanogpt'
+          ? 'Set CP2020_NANOGPT_API_KEY in app/.env.local, restart the dev server.'
+          : 'Set CP2020_OPENROUTER_API_KEY in app/.env.local, restart the dev server.';
+      throw new Error(`LLM 401 (auth failed): ${detail}. ${keyHint}`);
     }
-    throw new Error(`OpenRouter error ${res.status}: ${detail}`);
+    throw new Error(`LLM error ${res.status}: ${detail}`);
   }
 
   if (!res.body) {
-    throw new Error('OpenRouter stream: empty response body');
+    throw new Error('LLM stream: empty response body');
   }
 
   const reader = res.body.getReader();

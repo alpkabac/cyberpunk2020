@@ -23,7 +23,7 @@ interface DiceRollEntry {
   formula: string;
   result: RollResult;
   timestamp: number;
-  /** Intent at roll time (before flat saves clear the store) — used for Save for voice / reroll. */
+  /** Intent at roll time (before flat saves clear the store) — used for Save / reroll. */
   intentSnapshot: DiceRollIntent | null;
   /** Captured when the roll completes so "Send to GM" still works after stun/death clears intent. */
   sendToGm?: {
@@ -383,7 +383,7 @@ export function DiceRoller() {
 
   const saveRollForNextVoice = useCallback(() => {
     if (!lastRoll?.sendToGm) {
-      setSheetSendError('Join a session (or select a character with a session) to save rolls for voice.');
+      setSheetSendError('Join a session (or select a character with a session) to save rolls for send.');
       return;
     }
     setSheetSendError(null);
@@ -674,7 +674,7 @@ export function DiceRoller() {
                       disabled={sheetSending}
                       className="border-2 border-black bg-[#d4d4b8] text-black py-2 font-bold uppercase text-xs hover:bg-[#c8c8a8] disabled:opacity-50"
                     >
-                      Save for voice
+                      Save
                     </button>
                   </div>
                   <p className="text-[10px] text-black font-mono wrap-break-word">
@@ -682,7 +682,7 @@ export function DiceRoller() {
                   </p>
                   {saveForVoiceHint && (
                     <p className="text-xs text-green-900 border border-green-800 bg-green-100 p-1 font-bold">
-                      Saved — appears under Session chat → Saved for voice.
+                      Saved — sent with your next text or voice to the AI-GM.
                     </p>
                   )}
                   {sheetSendError && (

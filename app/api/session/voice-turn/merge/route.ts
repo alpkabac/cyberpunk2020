@@ -8,7 +8,7 @@ import { runGmCompletionAfterPlayerInsert } from '@/lib/gm/run-gm-completion-aft
 import { chatRowToMessage } from '@/lib/realtime/db-mapper';
 import { fetchSessionSnapshot } from '@/lib/realtime/session-load';
 import { getServiceRoleClient } from '@/lib/supabase';
-import { getOpenRouterApiKeyFromEnv } from '@/lib/gm/openrouter-env';
+import { getGmLlmConfig, getGmLlmKeyMissingError } from '@/lib/gm/openrouter-env';
 import { defaultGmOpenRouterEnvModel, resolveGmOpenRouterCall } from '@/lib/gm/gm-openrouter-models';
 import { mergeSessionVoiceTurnFragmentsForGm } from '@/lib/voice/merge-session-voice-fragments';
 
@@ -20,16 +20,11 @@ export async function POST(request: Request) {
   const auth = await requireAuthFromRequest(request);
   if (!auth.ok) return auth.response;
 
-  const apiKey = getOpenRouterApiKeyFromEnv();
-  if (!apiKey) {
-    return NextResponse.json(
-      {
-        error:
-          'Set CP2020_OPENROUTER_API_KEY in app/.env.local (recommended). Legacy: OPENROUTER_API_KEY or OPENROUTER_KEY.',
-      },
-      { status: 503 },
-    );
+  const llm = getGmLlmConfig();
+  if (!llm) {
+    return NextResponse.json({ error: getGmLlmKeyMissingError() }, { status: 503 });
   }
+  const apiKey = llm.apiKey;
 
   const rawBody = await readJsonBody(request);
   if (!rawBody.ok) return rawBody.response;

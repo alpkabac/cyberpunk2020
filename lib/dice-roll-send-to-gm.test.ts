@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildGmDiceRollMessage,
+  mergePendingRollsWithPlayerText,
   mergeVoiceAndQueuedRollsChronologically,
   sheetRollContext,
 } from './dice-roll-send-to-gm';
@@ -100,6 +101,31 @@ describe('buildGmDiceRollMessage', () => {
     );
     expect(miss).not.toBeNull();
     expect(miss!.playerMessage).toContain('**MISS**');
+  });
+});
+
+describe('mergePendingRollsWithPlayerText', () => {
+  it('merges like voice+rolls and passes STT metadata into merged output', () => {
+    const t0 = 1_000;
+    const t1 = 5_000;
+    const m = mergePendingRollsWithPlayerText({
+      playerMessage: 'I shoot.',
+      messageAnchorMs: t1,
+      rolls: [{ rolledAtMs: t0, playerMessage: '[Roll] 1d10+8 = 15' }],
+      playerMessageMetadata: { stt: true },
+    });
+    expect(m.playerMessage).toContain('[Roll]');
+    expect(m.playerMessage).toContain('I shoot');
+    expect(m.playerMessageMetadata?.chronological).toBe(true);
+  });
+
+  it('returns plain text when no rolls', () => {
+    const m = mergePendingRollsWithPlayerText({
+      playerMessage: 'Hi',
+      messageAnchorMs: 1,
+      rolls: [],
+    });
+    expect(m).toEqual({ playerMessage: 'Hi' });
   });
 });
 

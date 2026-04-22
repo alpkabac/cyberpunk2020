@@ -3,6 +3,10 @@
  * - Markdown bold/italic markers, images
  * - Em/en dashes → short pauses (comma)
  * - Ordered list markers like "1." → "1," so engines don’t treat "." as sentence end oddly
+ * - Paragraph breaks: if the line already ends with . ! ? we only insert a space between
+ *   blocks; otherwise we add ". " after a letter/digit/) so TTS gets a sentence boundary.
+ *   We never strip normal sentence periods — the old `\\s+`→space step was folding *all*
+ *   newlines into spaces, which removed pauses.
  */
 
 function stripMarkdownImages(raw: string): string {
@@ -42,11 +46,22 @@ function normalizeOrderedListMarkers(raw: string): string {
   return s;
 }
 
+function normalizeBlankLinesForTts(s: string): string {
+  let t = s.replace(/\r\n/g, '\n');
+  t = t.replace(/([.!?])\n{2,}/g, '$1 '); // "First line.\n\nNext" → "First line. Next" (keep the dot)
+  t = t.replace(/([A-Za-z0-9)])\n{2,}/g, '$1. '); // "Intro\n\n2." → "Intro. 2."
+  t = t.replace(/\n{2,}/g, ' '); // e.g. after comma, still merge paragraph
+  t = t.replace(/\n/g, ' ');
+  t = t.replace(/(\.\s+){2,}/g, '. '); // rare ". . " from merges
+  t = t.replace(/[ \t]+/g, ' ');
+  return t.trim();
+}
+
 export function plainTextForNarrationTts(raw: string): string {
   let s = stripMarkdownImages(raw);
   s = stripMarkdownEmphasis(s);
   s = normalizeDashes(s);
   s = stripMarkdownHeadings(s);
   s = normalizeOrderedListMarkers(s);
-  return s.replace(/\s+/g, ' ').trim();
+  return normalizeBlankLinesForTts(s);
 }

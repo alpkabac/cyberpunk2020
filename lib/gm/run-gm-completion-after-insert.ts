@@ -7,8 +7,8 @@ const FALLBACK_GM_LINE =
   '*(The AI Game Master is temporarily unavailable — please try sending your message again in a moment.)*';
 
 function isRetriableCompletionError(message: string): boolean {
-  if (/OpenRouter error (\d+)/.test(message)) {
-    const m = /OpenRouter error (\d+)/.exec(message);
+  if (/(?:LLM|OpenRouter) error (\d+):/.test(message)) {
+    const m = /(?:LLM|OpenRouter) error (\d+):/.exec(message);
     const status = m ? parseInt(m[1]!, 10) : 0;
     return status === 429 || status === 502 || status === 503 || status === 504;
   }

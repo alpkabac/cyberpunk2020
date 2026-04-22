@@ -129,7 +129,7 @@ export const GM_TOOL_DEFINITIONS = [
     function: {
       name: 'request_roll',
       description:
-        'Ask the table to roll dice (guidance only). For FNFF ranged/melee attacks use roll_kind attack with weapon_id + difficulty_value (DV) from range/cover/situation; the app builds 1d10+REF+skill+weapon accuracy + optional ranged_modifier_total. Otherwise use skill/stat ids or raw_formula.',
+        'Ask the table to roll dice (guidance only). Always set `character_id` to the **player** whose sheet this roll is for so only that client auto-opens the dice—omit only for anonymous table rolls. For FNFF ranged/melee attacks use roll_kind attack with weapon_id + difficulty_value (DV) from range/cover/situation; the app builds 1d10+REF+skill+weapon accuracy + optional ranged_modifier_total. Otherwise use skill/stat ids or raw_formula.',
       parameters: {
         type: 'object',
         properties: {

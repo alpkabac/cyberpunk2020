@@ -1,9 +1,12 @@
 /**
- * AI-GM OpenRouter models exposed in the client selector (official `model` ids only).
- * DeepSeek V3.2 “thinking” mode uses the same id with OpenRouter `reasoning` on the request body.
+ * AI-GM `model` ids (OpenRouter or NanoGPT; both use the same OpenAI chat/completions contract).
+ * - Z.AI: OpenRouter uses `z-ai/…` slugs; NanoGPT / HuggingFace often use `zai-org/…:thinking` names.
+ * - “Thinking” for GLM 5.1 and DeepSeek V3.2: same id + `reasoning` on the request body.
  */
 
 export const GM_SELECTABLE_OPENROUTER_MODEL_IDS = [
+  'zai-org/glm-5.1:thinking',
+  'z-ai/glm-5.1',
   'z-ai/glm-4.6',
   'z-ai/glm-4.7',
   'z-ai/glm-5',
@@ -41,7 +44,7 @@ export function resolveGmOpenRouterCall(
   const trimmed = clientModel?.trim();
   const model =
     trimmed && isGmSelectableOpenRouterModelId(trimmed) ? trimmed : fallback;
-  if (model === 'deepseek/deepseek-v3.2') {
+  if (model === 'deepseek/deepseek-v3.2' || model === 'z-ai/glm-5.1' || model === 'zai-org/glm-5.1:thinking') {
     return { model, reasoning: { effort: 'high' } };
   }
   return { model };

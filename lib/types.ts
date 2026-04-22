@@ -704,8 +704,8 @@ export type DiceRollIntent =
     };
 
 /**
- * Roll saved from the dice roller ("Save for voice") to merge when sending session voice.
- * `rolledAtMs` orders the block with voice (`recordingStartedAtMs` on pending voice).
+ * Roll saved from the dice roller ("Save") to merge when sending chat text, push-to-talk, or session voice.
+ * `rolledAtMs` orders the block with the message (`recordingStartedAtMs` / send time).
  */
 export interface PendingRollForVoice {
   id: string;

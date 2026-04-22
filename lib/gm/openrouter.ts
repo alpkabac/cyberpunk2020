@@ -6,8 +6,14 @@ import type { OpenRouterChatMessage, OpenRouterToolCall } from './context-builde
 import { GM_TOOL_DEFINITIONS } from './tool-definitions';
 import type { ToolExecutorContext, ToolExecutionResult } from './tool-executor';
 import { executeGmToolCallFromModel } from './tool-executor';
+import {
+  REQUEST_ROLL_FOLLOWUP_USER_MESSAGE,
+  collectPlayerCharacterIdsFromRequestRollCalls,
+  shouldSuppressRollDiceAfterRequestRoll,
+} from './request-roll-tool-batch';
 import { sanitizeGmNarrationText } from './sanitize-gm-narration';
 import { callOpenRouterChatStream } from './openrouter-stream';
+import { getGmLlmConfig } from './openrouter-env';
 
 /** NPC sheet tools — must run before `start_combat` so initiative includes new combatants. */
 const GM_SPAWN_TOOL_NAMES = new Set(['spawn_npc', 'spawn_random_npc', 'spawn_unique_npc']);
@@ -58,8 +64,8 @@ function sleep(ms: number): Promise<void> {
 }
 
 function isRetriableOpenRouterFailure(message: string): boolean {
-  if (/OpenRouter error (\d+)/.test(message)) {
-    const m = /OpenRouter error (\d+)/.exec(message);
+  if (/(?:LLM|OpenRouter) error (\d+):/.test(message)) {
+    const m = /(?:LLM|OpenRouter) error (\d+):/.exec(message);
     const status = m ? parseInt(m[1]!, 10) : 0;
     return status === 429 || status === 502 || status === 503 || status === 504;
   }
@@ -89,17 +95,26 @@ async function callOpenRouterChatOnce(params: {
     body.tool_choice = 'auto';
   }
 
+  const llm = getGmLlmConfig();
+  if (!llm) {
+    throw new Error(
+      'LLM is not configured: set CP2020_OPENROUTER_API_KEY (or legacy OPENROUTER_API_KEY), or CP2020_NANOGPT_API_KEY.',
+    );
+  }
+
   const headers: Record<string, string> = {
     Authorization: `Bearer ${params.apiKey}`,
     'Content-Type': 'application/json',
   };
-  const referer = process.env.OPENROUTER_HTTP_REFERER?.trim();
-  if (referer) {
-    headers['HTTP-Referer'] = referer;
-    headers['X-Title'] = process.env.OPENROUTER_APP_TITLE?.trim() || 'Cyberpunk 2020 AI GM';
+  if (llm.kind === 'openrouter') {
+    const referer = process.env.OPENROUTER_HTTP_REFERER?.trim();
+    if (referer) {
+      headers['HTTP-Referer'] = referer;
+      headers['X-Title'] = process.env.OPENROUTER_APP_TITLE?.trim() || 'Cyberpunk 2020 AI GM';
+    }
   }
 
-  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+  const res = await fetch(llm.chatCompletionsUrl, {
     method: 'POST',
     headers,
     body: JSON.stringify(body),
@@ -116,13 +131,14 @@ async function callOpenRouterChatOnce(params: {
   if (!res.ok) {
     const detail = formatOpenRouterErrorBody(raw, text);
     if (res.status === 401) {
-      throw new Error(
-        `OpenRouter 401 (auth failed): ${detail}. ` +
-          `Set CP2020_OPENROUTER_API_KEY in app/.env.local (see .env.local.example), restart dev server. ` +
-          `If you exposed the key, revoke it at openrouter.ai/keys and create a new one.`,
-      );
+      const keyHint =
+        llm.kind === 'nanogpt'
+          ? 'Set CP2020_NANOGPT_API_KEY in app/.env.local, restart the dev server.'
+          : 'Set CP2020_OPENROUTER_API_KEY in app/.env.local, restart the dev server. ' +
+            'If you exposed the key, revoke it at openrouter.ai/keys and create a new one.';
+      throw new Error(`LLM 401 (auth failed): ${detail}. ${keyHint}`);
     }
-    throw new Error(`OpenRouter error ${res.status}: ${detail}`);
+    throw new Error(`LLM error ${res.status}: ${detail}`);
   }
 
   const content = extractAssistantContent(raw);
@@ -213,6 +229,10 @@ export async function runGmCompletionWithTools(params: {
     }
 
     const orderedToolCalls = sortGmToolCallsForExecution(toolCalls);
+    const requestRollPcIds = collectPlayerCharacterIdsFromRequestRollCalls(
+      orderedToolCalls,
+      params.toolContext.charactersById,
+    );
 
     const assistantMsg: OpenRouterChatMessage = {
       role: 'assistant',
@@ -221,12 +241,30 @@ export async function runGmCompletionWithTools(params: {
     };
     messages.push(assistantMsg);
 
+    let hadSuccessfulRequestRoll = false;
     for (const tc of orderedToolCalls) {
       const name = tc.function?.name ?? '';
       const args = tc.function?.arguments ?? '{}';
-      const exec = await executeGmToolCallFromModel(name, args, params.toolContext);
+      let exec: ToolExecutionResult;
+      if (
+        name === 'roll_dice' &&
+        shouldSuppressRollDiceAfterRequestRoll(args, requestRollPcIds)
+      ) {
+        exec = {
+          ok: true,
+          name: 'roll_dice',
+          result: {
+            skipped: true,
+            reason:
+              'request_roll was issued for this character; the player rolls in the app—no server roll.',
+          },
+        };
+      } else {
+        exec = await executeGmToolCallFromModel(name, args, params.toolContext);
+      }
       toolLog.push(exec);
       params.onToolResult?.(exec);
+      if (exec.ok && name === 'request_roll') hadSuccessfulRequestRoll = true;
 
       const payload = exec.ok
         ? { ok: true, result: exec.result }
@@ -237,6 +275,9 @@ export async function runGmCompletionWithTools(params: {
         tool_call_id: tc.id,
         name: tc.function?.name,
       });
+    }
+    if (hadSuccessfulRequestRoll) {
+      messages.push({ role: 'user', content: REQUEST_ROLL_FOLLOWUP_USER_MESSAGE });
     }
   }
 
@@ -297,6 +338,10 @@ export async function runGmCompletionWithToolsStreaming(params: {
     }
 
     const orderedToolCalls = sortGmToolCallsForExecution(toolCalls);
+    const requestRollPcIds = collectPlayerCharacterIdsFromRequestRollCalls(
+      orderedToolCalls,
+      params.toolContext.charactersById,
+    );
 
     const assistantMsg: OpenRouterChatMessage = {
       role: 'assistant',
@@ -305,12 +350,30 @@ export async function runGmCompletionWithToolsStreaming(params: {
     };
     messages.push(assistantMsg);
 
+    let hadSuccessfulRequestRoll = false;
     for (const tc of orderedToolCalls) {
       const name = tc.function?.name ?? '';
       const args = tc.function?.arguments ?? '{}';
-      const exec = await executeGmToolCallFromModel(name, args, params.toolContext);
+      let exec: ToolExecutionResult;
+      if (
+        name === 'roll_dice' &&
+        shouldSuppressRollDiceAfterRequestRoll(args, requestRollPcIds)
+      ) {
+        exec = {
+          ok: true,
+          name: 'roll_dice',
+          result: {
+            skipped: true,
+            reason:
+              'request_roll was issued for this character; the player rolls in the app—no server roll.',
+          },
+        };
+      } else {
+        exec = await executeGmToolCallFromModel(name, args, params.toolContext);
+      }
       toolLog.push(exec);
       params.onToolResult?.(exec);
+      if (exec.ok && name === 'request_roll') hadSuccessfulRequestRoll = true;
 
       const payload = exec.ok
         ? { ok: true, result: exec.result }
@@ -321,6 +384,9 @@ export async function runGmCompletionWithToolsStreaming(params: {
         tool_call_id: tc.id,
         name: tc.function?.name,
       });
+    }
+    if (hadSuccessfulRequestRoll) {
+      messages.push({ role: 'user', content: REQUEST_ROLL_FOLLOWUP_USER_MESSAGE });
     }
   }
 

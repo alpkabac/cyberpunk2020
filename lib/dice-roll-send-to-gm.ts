@@ -221,3 +221,32 @@ export function mergeVoiceWithSingleRollForGm(
     rolls: [{ rolledAtMs, playerMessage: rollPlayerMessage }],
   });
 }
+
+/**
+ * Merges saved dice lines with a typed or STT player message (same ordering as session voice + rolls).
+ * Use `messageAnchorMs` ≈ mic press time for push-to-talk so rolls before speech sort correctly.
+ */
+export function mergePendingRollsWithPlayerText(params: {
+  playerMessage: string;
+  messageAnchorMs: number;
+  rolls: Array<{ rolledAtMs: number; playerMessage: string }>;
+  playerMessageMetadata?: Record<string, unknown>;
+}): { playerMessage: string; playerMessageMetadata?: Record<string, unknown> } {
+  const { playerMessage, messageAnchorMs, rolls, playerMessageMetadata } = params;
+  if (!rolls.length) {
+    return playerMessageMetadata
+      ? { playerMessage, playerMessageMetadata }
+      : { playerMessage };
+  }
+  return mergeVoiceAndQueuedRollsChronologically({
+    voice: {
+      sessionId: '',
+      speakerName: '',
+      playerMessage,
+      recordingStartedAtMs: messageAnchorMs,
+      sttCompletedAtMs: messageAnchorMs,
+      playerMessageMetadata,
+    },
+    rolls,
+  });
+}
