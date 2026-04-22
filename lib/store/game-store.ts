@@ -390,6 +390,11 @@ interface GameActions {
     respectTtsSetting?: boolean;
     /** Signed URL after server-side prepare (single synthesis for the room). */
     audioUrl?: string | null;
+    /**
+     * `messageAuto` = auto speaker for new post (deduped if another cue for same message just played).
+     * `streamEnd` = full-message TTS after GM stream. `manualClick` = speaker button (never deduped here).
+     */
+    narrationTtsSource?: 'messageAuto' | 'streamEnd' | 'manualClick';
   }) => Promise<void>;
   applySessionNarrationTtsFromBroadcast: (payload: unknown) => void;
 
@@ -491,6 +496,26 @@ function appendAutoSaveChatMessage(
 // Initial State
 // ============================================================================
 
+/** Avoids double full-message TTS when “stream end” and “auto message” both fire for the same post. */
+const NARRATION_TTS_DEDUPE_MS = 5500;
+const recentNarrationTtsCueAt = new Map<string, number>();
+
+function shouldDropDuplicateNarrationTts(messageId: string): boolean {
+  const t = recentNarrationTtsCueAt.get(messageId);
+  if (t === undefined) return false;
+  return Date.now() - t < NARRATION_TTS_DEDUPE_MS;
+}
+
+function recordNarrationTtsCueTime(messageId: string): void {
+  recentNarrationTtsCueAt.set(messageId, Date.now());
+  if (recentNarrationTtsCueAt.size > 300) {
+    const now = Date.now();
+    for (const [id, at] of recentNarrationTtsCueAt) {
+      if (now - at > 90_000) recentNarrationTtsCueAt.delete(id);
+    }
+  }
+}
+
 const initialState: GameState = {
   session: {
     id: null,
@@ -500,6 +525,8 @@ const initialState: GameState = {
     activeScene: null,
     settings: {
       ttsEnabled: true,
+      autoMessageNarrationTts: false,
+      chatterboxNpcVoiceMemory: {},
       narrationTts: DEFAULT_NARRATION_TTS_CLIENT_CONFIG,
       ttsVoice: 'default',
       autoRollDamage: true,
@@ -1885,6 +1912,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     skipNarrationTtsForUserId,
     respectTtsSetting,
     audioUrl,
+    narrationTtsSource,
   }) => {
     const send = get().sessionBroadcastSend;
     if (!send) return;
@@ -1901,6 +1929,9 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     }
     if (typeof audioUrl === 'string' && audioUrl.length > 0) {
       payload.audioUrl = audioUrl;
+    }
+    if (narrationTtsSource === 'messageAuto' || narrationTtsSource === 'streamEnd' || narrationTtsSource === 'manualClick') {
+      payload.narrationTtsSource = narrationTtsSource;
     }
     await send(BROADCAST_EVENTS.SESSION_NARRATION_TTS, payload);
   },
@@ -1925,6 +1956,14 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
       return;
     }
 
+    const src = o.narrationTtsSource;
+    if (
+      (src === 'messageAuto' || src === 'streamEnd') &&
+      shouldDropDuplicateNarrationTts(messageId)
+    ) {
+      return;
+    }
+
     const playAfterRaw = o.playAfterMs;
     const playAtRaw = o.playAtMs;
     let playAfterMs: number;
@@ -1940,6 +1979,8 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     const audioUrlRaw = o.audioUrl;
     const cueAudioUrl =
       typeof audioUrlRaw === 'string' && audioUrlRaw.length > 0 ? audioUrlRaw : null;
+
+    recordNarrationTtsCueTime(messageId);
 
     set((state) => ({
       ui: {

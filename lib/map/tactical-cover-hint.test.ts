@@ -18,6 +18,8 @@ describe('tactical-cover-hint', () => {
   it('buildTacticalCoverHints prefers cells that block more enemies', () => {
     const settings: SessionSettings = {
       ttsEnabled: false,
+      autoMessageNarrationTts: false,
+      chatterboxNpcVoiceMemory: {},
       narrationTts: DEFAULT_NARRATION_TTS_CLIENT_CONFIG,
       ttsVoice: 'default',
       autoRollDamage: true,
