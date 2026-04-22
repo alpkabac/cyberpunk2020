@@ -1,6 +1,7 @@
 import { synthesizeCartesiaNarrationWav } from './cartesia-tts';
 import { synthesizeChatterboxNarration } from './chatterbox-tts';
 import { synthesizeKokoroNarration } from './kokoro-tts';
+import { synthesizeOmnivoiceNarration } from './omnivoice-tts';
 import { type NarrationTtsClientConfig, effectiveNarrationProvider } from './narration-tts-client-config';
 
 export type NarrationAudioSynthResult =
@@ -17,7 +18,8 @@ export async function synthesizeNarrationAudio(
     return {
       ok: false,
       status: 400,
-      error: 'Cartesia cloud TTS is disabled. Pick Chatterbox or Kokoro and set the local server URL.',
+      error:
+        'Cartesia cloud TTS is disabled. Pick Chatterbox, Kokoro, or OmniVoice and set the local server URL.',
     };
   }
 
@@ -31,6 +33,8 @@ export async function synthesizeNarrationAudio(
       return synthesizeChatterboxNarration(transcript, config, logContext);
     case 'kokoro':
       return synthesizeKokoroNarration(transcript, config, logContext);
+    case 'omnivoice':
+      return synthesizeOmnivoiceNarration(transcript, config, logContext);
     default:
       return { ok: false, status: 500, error: 'Unknown TTS provider' };
   }

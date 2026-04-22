@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const NARRATION_TTS_PROVIDER_IDS = ['cartesia', 'chatterbox', 'kokoro'] as const;
+export const NARRATION_TTS_PROVIDER_IDS = ['cartesia', 'chatterbox', 'kokoro', 'omnivoice'] as const;
 export type NarrationTtsProviderId = (typeof NARRATION_TTS_PROVIDER_IDS)[number];
 
 const chatterboxSchema = z
@@ -43,15 +43,44 @@ const kokoroSchema = z
   })
   .strict();
 
+/** omnivoice-server: OpenAI-compatible /v1/audio/speech. */
+const omnivoiceSchema = z
+  .object({
+    model: z.string().max(64).optional(),
+    voice: z.string().max(256).optional(),
+    speaker: z.string().max(256).optional(),
+    instructions: z.string().max(2000).optional(),
+    /** BCP-47 or omnivoice-server code (e.g. tr, en). Default tr for Turkish table games. */
+    language: z.string().max(32).optional(),
+    responseFormat: z.enum(['wav', 'pcm']).optional(),
+    speed: z.number().min(0.25).max(4).optional(),
+    numStep: z.number().int().min(1).max(64).optional(),
+    guidanceScale: z.number().min(0).max(10).optional(),
+    positionTemperature: z.number().min(0).max(10).optional(),
+    classTemperature: z.number().min(0).max(2).optional(),
+    denoise: z.boolean().optional(),
+    tShift: z.number().min(0).max(2).optional(),
+    duration: z.number().min(0.1).max(60).optional(),
+    /** If omnivoice-server uses --auth, paste the same token here (stored in session settings). */
+    apiKey: z.string().max(512).optional(),
+    /**
+     * For your own reference: directory on the host that runs omnivoice-server (OMNIVOICE_PROFILE_DIR).
+     * The app does not send this to the TTS process; set the env var when you start the server.
+     */
+    serverProfileDir: z.string().max(1024).optional(),
+  })
+  .strict();
+
 export const narrationTtsClientConfigSchema = z
   .object({
     provider: z.enum(NARRATION_TTS_PROVIDER_IDS),
     /** When false, Cartesia is not used even if `provider` is `cartesia`. */
     useCartesiaCloud: z.boolean().optional(),
-    /** Base URL for Chatterbox / Kokoro (e.g. http://127.0.0.1:8004). No trailing slash required. */
+    /** Base URL for Chatterbox / Kokoro / omnivoice-server (e.g. http://127.0.0.1:8880). No trailing slash. */
     localBaseUrl: z.string().max(2048).optional(),
     chatterbox: chatterboxSchema.optional(),
     kokoro: kokoroSchema.optional(),
+    omnivoice: omnivoiceSchema.optional(),
   })
   .strict();
 
@@ -76,6 +105,14 @@ export const DEFAULT_NARRATION_TTS_CLIENT_CONFIG: NarrationTtsClientConfig = {
     speed: 1,
     stream: false,
   },
+  omnivoice: {
+    model: 'omnivoice',
+    voice: 'alloy',
+    language: 'tr',
+    responseFormat: 'wav',
+    speed: 1,
+    positionTemperature: 0,
+  },
 };
 
 export function mergeNarrationTtsClientConfig(partial: unknown): NarrationTtsClientConfig {
@@ -94,6 +131,12 @@ export function mergeNarrationTtsClientConfig(partial: unknown): NarrationTtsCli
     kokoro: {
       ...base.kokoro,
       ...(typeof p.kokoro === 'object' && p.kokoro !== null ? (p.kokoro as Record<string, unknown>) : {}),
+    },
+    omnivoice: {
+      ...base.omnivoice,
+      ...(typeof p.omnivoice === 'object' && p.omnivoice !== null
+        ? (p.omnivoice as Record<string, unknown>)
+        : {}),
     },
   };
   const parsed = narrationTtsClientConfigSchema.safeParse(merged);

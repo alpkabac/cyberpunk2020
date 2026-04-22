@@ -19,6 +19,7 @@ const PROVIDERS: { id: NarrationTtsProviderId; label: string }[] = [
   { id: 'cartesia', label: 'Cartesia (cloud)' },
   { id: 'chatterbox', label: 'Chatterbox (local server)' },
   { id: 'kokoro', label: 'Kokoro (local server)' },
+  { id: 'omnivoice', label: 'OmniVoice (omnivoice-server)' },
 ];
 
 export function NarrationTtsSettingsPopout({
@@ -44,6 +45,10 @@ export function NarrationTtsSettingsPopout({
   const [chatterboxReferenceFiles, setChatterboxReferenceFiles] = useState<string[]>([]);
   const [chatterboxVoicesLoading, setChatterboxVoicesLoading] = useState(false);
   const [chatterboxVoicesError, setChatterboxVoicesError] = useState<string | null>(null);
+
+  const [omnivoiceVoiceIds, setOmnivoiceVoiceIds] = useState<string[]>([]);
+  const [omnivoiceVoicesLoading, setOmnivoiceVoicesLoading] = useState(false);
+  const [omnivoiceVoicesError, setOmnivoiceVoicesError] = useState<string | null>(null);
 
   function sanitizeFilenameList(raw: unknown): string[] {
     if (!Array.isArray(raw)) return [];
@@ -108,6 +113,59 @@ export function NarrationTtsSettingsPopout({
     [sessionId, supabase],
   );
 
+  const loadOmnivoiceVoices = useCallback(
+    async (baseUrl: string, signal?: AbortSignal) => {
+      const base = baseUrl.trim();
+      if (!base) {
+        setOmnivoiceVoicesError('Set local server base URL first.');
+        return;
+      }
+      setOmnivoiceVoicesLoading(true);
+      setOmnivoiceVoicesError(null);
+      try {
+        const token = await getAccessTokenForApi(supabase);
+        if (!token) {
+          setOmnivoiceVoicesError('Not signed in');
+          return;
+        }
+        const q = new URLSearchParams({ sessionId, baseUrl: base });
+        const res = await fetch(`/api/session/narration-tts/omnivoice-voices?${q}`, {
+          headers: { Authorization: `Bearer ${token}` },
+          signal,
+        });
+        const data = (await res.json().catch(() => ({}))) as {
+          voices?: unknown;
+          error?: string;
+          detail?: string;
+        };
+        if (!res.ok) {
+          setOmnivoiceVoiceIds([]);
+          setOmnivoiceVoicesError(data.detail ?? data.error ?? res.statusText ?? 'Failed to load voices');
+          return;
+        }
+        const raw = data.voices;
+        const ids: string[] = [];
+        if (Array.isArray(raw)) {
+          for (const v of raw) {
+            if (v && typeof v === 'object' && 'id' in v && typeof (v as { id: unknown }).id === 'string') {
+              ids.push((v as { id: string }).id);
+            }
+          }
+        }
+        ids.sort((a, b) => a.localeCompare(b));
+        setOmnivoiceVoiceIds(ids);
+      } catch (e) {
+        if (e instanceof DOMException && e.name === 'AbortError') return;
+        if (e instanceof Error && e.name === 'AbortError') return;
+        setOmnivoiceVoiceIds([]);
+        setOmnivoiceVoicesError(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (!signal?.aborted) setOmnivoiceVoicesLoading(false);
+      }
+    },
+    [sessionId, supabase],
+  );
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -150,6 +208,30 @@ export function NarrationTtsSettingsPopout({
       chatterboxListAbortRef.current?.abort();
     };
   }, [open, draft.provider, draft.localBaseUrl, loadChatterboxVoices]);
+
+  const omnivoiceListDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const omnivoiceListAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (!open || draft.provider !== 'omnivoice') return;
+    const b = draft.localBaseUrl?.trim();
+    if (!b) {
+      setOmnivoiceVoiceIds([]);
+      return;
+    }
+    if (omnivoiceListDebounceRef.current) clearTimeout(omnivoiceListDebounceRef.current);
+    omnivoiceListAbortRef.current?.abort();
+    omnivoiceListDebounceRef.current = setTimeout(() => {
+      omnivoiceListDebounceRef.current = null;
+      const ac = new AbortController();
+      omnivoiceListAbortRef.current = ac;
+      void loadOmnivoiceVoices(b, ac.signal);
+    }, 450);
+    return () => {
+      if (omnivoiceListDebounceRef.current) clearTimeout(omnivoiceListDebounceRef.current);
+      omnivoiceListAbortRef.current?.abort();
+    };
+  }, [open, draft.provider, draft.localBaseUrl, loadOmnivoiceVoices]);
 
   if (!open) return null;
 
@@ -242,12 +324,12 @@ export function NarrationTtsSettingsPopout({
           </label>
         )}
 
-        {(draft.provider === 'chatterbox' || draft.provider === 'kokoro') && (
+        {(draft.provider === 'chatterbox' || draft.provider === 'kokoro' || draft.provider === 'omnivoice') && (
           <div>
             <span className={labelCls}>Local server base URL</span>
             <input
               className={inputCls}
-              placeholder="http://127.0.0.1:8004"
+              placeholder={draft.provider === 'omnivoice' ? 'http://127.0.0.1:8880' : 'http://127.0.0.1:8004'}
               value={draft.localBaseUrl ?? ''}
               onChange={(e) => setDraft((d) => ({ ...d, localBaseUrl: e.target.value }))}
             />
@@ -640,6 +722,273 @@ export function NarrationTtsSettingsPopout({
                 />
               </div>
             </div>
+          </div>
+        )}
+
+        {draft.provider === 'omnivoice' && (
+          <div className="space-y-2 border border-zinc-700/80 rounded p-2 bg-zinc-950/40">
+            <p className="text-[10px] text-zinc-500">
+              <a
+                className="text-cyan-600/90 hover:underline"
+                href="https://github.com/maemreyo/omnivoice-server"
+                target="_blank"
+                rel="noreferrer"
+              >
+                omnivoice-server
+              </a>
+              : <code className="text-zinc-400">POST /v1/audio/speech</code>. Clone profiles:{' '}
+              <code className="text-zinc-400">clone:your_profile_id</code>. Put reference WAVs under the host&apos;s
+              profile directory (set <code className="text-zinc-400">OMNIVOICE_PROFILE_DIR</code> when starting the
+              server — not in this web app).
+            </p>
+            <div>
+              <span className={labelCls}>Profile directory on TTS host (notes only)</span>
+              <input
+                className={inputCls}
+                placeholder="e.g. D:\voice\profiles — reminder for your omnivoice-server machine"
+                value={draft.omnivoice?.serverProfileDir ?? ''}
+                onChange={(e) =>
+                  setDraft((d) => ({
+                    ...d,
+                    omnivoice: {
+                      ...DEFAULT_NARRATION_TTS_CLIENT_CONFIG.omnivoice,
+                      ...d.omnivoice,
+                      serverProfileDir: e.target.value || undefined,
+                    },
+                  }))
+                }
+              />
+            </div>
+            <div>
+              <span className={labelCls}>Bearer API key (optional)</span>
+              <input
+                className={inputCls}
+                type="password"
+                autoComplete="off"
+                placeholder="If omnivoice-server is started with auth"
+                value={draft.omnivoice?.apiKey ?? ''}
+                onChange={(e) =>
+                  setDraft((d) => ({
+                    ...d,
+                    omnivoice: {
+                      ...DEFAULT_NARRATION_TTS_CLIENT_CONFIG.omnivoice,
+                      ...d.omnivoice,
+                      apiKey: e.target.value || undefined,
+                    },
+                  }))
+                }
+              />
+            </div>
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="flex-1 min-w-[12rem]">
+                <span className={labelCls}>Voice (preset, design, or clone:…)</span>
+                <input
+                  className={inputCls}
+                  list="cp2020-omnivoice-voices"
+                  placeholder="alloy, design:…, or clone:my_profile"
+                  value={draft.omnivoice?.voice ?? 'alloy'}
+                  onChange={(e) =>
+                    setDraft((d) => ({
+                      ...d,
+                      omnivoice: {
+                        ...DEFAULT_NARRATION_TTS_CLIENT_CONFIG.omnivoice,
+                        ...d.omnivoice,
+                        voice: e.target.value,
+                      },
+                    }))
+                  }
+                />
+                <datalist id="cp2020-omnivoice-voices">
+                  {omnivoiceVoiceIds.map((id) => (
+                    <option key={id} value={id} />
+                  ))}
+                </datalist>
+              </div>
+              <button
+                type="button"
+                disabled={omnivoiceVoicesLoading || !draft.localBaseUrl?.trim()}
+                className="shrink-0 rounded border border-zinc-600 bg-zinc-950 px-2 py-1 text-[10px] uppercase tracking-wide text-zinc-400 hover:bg-zinc-800 disabled:opacity-40"
+                onClick={() => void loadOmnivoiceVoices(draft.localBaseUrl?.trim() ?? '')}
+              >
+                {omnivoiceVoicesLoading ? 'Loading…' : 'Refresh voices'}
+              </button>
+            </div>
+            {omnivoiceVoicesError && <p className="text-[10px] text-amber-500/90">{omnivoiceVoicesError}</p>}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div>
+                <span className={labelCls}>Language (pronunciation / multilingual)</span>
+                <input
+                  className={inputCls}
+                  title="omnivoice-server: language for Turkish, English, etc."
+                  placeholder="tr"
+                  value={draft.omnivoice?.language ?? 'tr'}
+                  onChange={(e) =>
+                    setDraft((d) => ({
+                      ...d,
+                      omnivoice: {
+                        ...DEFAULT_NARRATION_TTS_CLIENT_CONFIG.omnivoice,
+                        ...d.omnivoice,
+                        language: e.target.value.trim() || 'tr',
+                      },
+                    }))
+                  }
+                />
+              </div>
+              <div>
+                <span className={labelCls}>Model</span>
+                <input
+                  className={inputCls}
+                  value={draft.omnivoice?.model ?? 'omnivoice'}
+                  onChange={(e) =>
+                    setDraft((d) => ({
+                      ...d,
+                      omnivoice: {
+                        ...DEFAULT_NARRATION_TTS_CLIENT_CONFIG.omnivoice,
+                        ...d.omnivoice,
+                        model: e.target.value,
+                      },
+                    }))
+                  }
+                />
+              </div>
+            </div>
+            <div>
+              <span className={labelCls}>Extra instructions (optional, overrides design)</span>
+              <input
+                className={inputCls}
+                placeholder="e.g. female, american accent (when not using a clone profile)"
+                value={draft.omnivoice?.instructions ?? ''}
+                onChange={(e) =>
+                  setDraft((d) => ({
+                    ...d,
+                    omnivoice: {
+                      ...DEFAULT_NARRATION_TTS_CLIENT_CONFIG.omnivoice,
+                      ...d.omnivoice,
+                      instructions: e.target.value || undefined,
+                    },
+                  }))
+                }
+              />
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <div>
+                <span className={labelCls}>Speed</span>
+                <input
+                  type="number"
+                  step="0.05"
+                  min={0.25}
+                  max={4}
+                  className={inputCls}
+                  value={draft.omnivoice?.speed ?? 1}
+                  onChange={(e) =>
+                    setDraft((d) => ({
+                      ...d,
+                      omnivoice: {
+                        ...DEFAULT_NARRATION_TTS_CLIENT_CONFIG.omnivoice,
+                        ...d.omnivoice,
+                        speed: parseFloat(e.target.value) || 1,
+                      },
+                    }))
+                  }
+                />
+              </div>
+              <div>
+                <span className={labelCls}>Pos. temp. (0 = stable)</span>
+                <input
+                  type="number"
+                  step="0.1"
+                  min={0}
+                  max={10}
+                  className={inputCls}
+                  title="Use 0 for consistent timbre (recommended for long lines)"
+                  value={draft.omnivoice?.positionTemperature ?? 0}
+                  onChange={(e) =>
+                    setDraft((d) => ({
+                      ...d,
+                      omnivoice: {
+                        ...DEFAULT_NARRATION_TTS_CLIENT_CONFIG.omnivoice,
+                        ...d.omnivoice,
+                        positionTemperature: parseFloat(e.target.value) || 0,
+                      },
+                    }))
+                  }
+                />
+              </div>
+              <div>
+                <span className={labelCls}>num_step</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={64}
+                  className={inputCls}
+                  placeholder="default"
+                  value={
+                    typeof draft.omnivoice?.numStep === 'number' ? draft.omnivoice.numStep : ''
+                  }
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setDraft((d) => ({
+                      ...d,
+                      omnivoice: {
+                        ...DEFAULT_NARRATION_TTS_CLIENT_CONFIG.omnivoice,
+                        ...d.omnivoice,
+                        numStep: v === '' ? undefined : parseInt(v, 10) || undefined,
+                      },
+                    }));
+                  }}
+                />
+              </div>
+              <div>
+                <span className={labelCls}>guidance_scale</span>
+                <input
+                  type="number"
+                  step="0.1"
+                  min={0}
+                  max={10}
+                  className={inputCls}
+                  placeholder="default"
+                  value={
+                    typeof draft.omnivoice?.guidanceScale === 'number' ? draft.omnivoice.guidanceScale : ''
+                  }
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setDraft((d) => ({
+                      ...d,
+                      omnivoice: {
+                        ...DEFAULT_NARRATION_TTS_CLIENT_CONFIG.omnivoice,
+                        ...d.omnivoice,
+                        guidanceScale: v === '' ? undefined : parseFloat(v) || undefined,
+                      },
+                    }));
+                  }}
+                />
+              </div>
+            </div>
+            <div>
+              <span className={labelCls}>Output</span>
+              <select
+                className={inputCls}
+                value={draft.omnivoice?.responseFormat ?? 'wav'}
+                onChange={(e) =>
+                  setDraft((d) => ({
+                    ...d,
+                    omnivoice: {
+                      ...DEFAULT_NARRATION_TTS_CLIENT_CONFIG.omnivoice,
+                      ...d.omnivoice,
+                      responseFormat: e.target.value as 'wav' | 'pcm',
+                    },
+                  }))
+                }
+              >
+                <option value="wav">wav</option>
+                <option value="pcm">pcm (raw)</option>
+              </select>
+            </div>
+            <p className="text-[10px] text-amber-600/80">
+              Turkish: keep <code className="text-zinc-400">language=tr</code> (default here). A bare{' '}
+              <code className="text-zinc-400">curl -d &quot;{'{'}&quot;…</code> in Windows CMD often breaks JSON and
+              returns 422 — use a file body or PowerShell here-strings, or this app, which always sends valid JSON.
+            </p>
           </div>
         )}
 
