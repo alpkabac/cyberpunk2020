@@ -235,6 +235,16 @@ export function NarrationTtsSettingsPopout({
 
   if (!open) return null;
 
+  const isHostedApp =
+    typeof window !== 'undefined' &&
+    window.location.hostname !== 'localhost' &&
+    window.location.hostname !== '127.0.0.1';
+  const localTtsBase = draft.localBaseUrl?.toLowerCase() ?? '';
+  const ttsBaseLooksLocal =
+    localTtsBase.includes('127.0.0.1') ||
+    localTtsBase.includes('localhost') ||
+    localTtsBase.startsWith('http://0.0.0.0');
+
   const save = async () => {
     const merged = mergeNarrationTtsClientConfig(draft);
     const r = await persistSessionNarrationTts(supabase, sessionId, merged);
@@ -333,6 +343,13 @@ export function NarrationTtsSettingsPopout({
               value={draft.localBaseUrl ?? ''}
               onChange={(e) => setDraft((d) => ({ ...d, localBaseUrl: e.target.value }))}
             />
+            {isHostedApp && ttsBaseLooksLocal && (
+              <p className="text-[10px] text-amber-600/90 mt-1 leading-snug">
+                This app runs on a remote host, but that URL points at <em>the server&apos;s</em> loopback, not your PC. For
+                hosted games, the TTS box must be reachable at a public or VPN URL (tunnel, static IP, etc.); otherwise
+                synthesis will time out or return 502/504.
+              </p>
+            )}
           </div>
         )}
 

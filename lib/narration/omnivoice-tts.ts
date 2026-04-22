@@ -1,5 +1,6 @@
 import { reportServerError } from '@/lib/logging/server-report';
 import type { NarrationTtsClientConfig } from './narration-tts-client-config';
+import { concatWavBuffers, splitTextForOmnivoiceChunks } from './concat-wav-buffers';
 
 function normalizeBaseUrl(raw: string): string {
   return raw.trim().replace(/\/+$/, '');
@@ -19,11 +20,15 @@ function assertHttpUrl(base: string): URL {
   return u;
 }
 
-const SYNTH_TIMEOUT_MS = 110_000;
+/** Below maxDuration (120s) on Vercel/Render; single long requests often time out first. */
+const SYNTH_TIMEOUT_MS = 115_000;
+
+/** Long narration: multiple non-streaming calls, then concat WAV (same engine format). */
+const OMNIVOICE_SPLIT_AT_CHARS = 1600;
 
 /**
  * omnivoice-server: POST /v1/audio/speech (OpenAI-style).
- * Use `language` (e.g. tr) for multilingual pronunciation; set `stream: false` for a single WAV blob.
+ * Use `language` (e.g. tr) for multilingual pronunciation; `stream: false` returns a single WAV blob.
  */
 export async function synthesizeOmnivoiceNarration(
   transcript: string,
@@ -44,8 +49,37 @@ export async function synthesizeOmnivoiceNarration(
   }
 
   const o = config.omnivoice ?? {};
-  const voice = o.voice?.trim() || 'alloy';
   const responseFormat = o.responseFormat === 'pcm' ? 'pcm' : 'wav';
+  const parts =
+    responseFormat === 'wav' && transcript.length > OMNIVOICE_SPLIT_AT_CHARS
+      ? splitTextForOmnivoiceChunks(transcript, OMNIVOICE_SPLIT_AT_CHARS)
+      : [transcript];
+
+  if (parts.length === 1) {
+    return synthOnePart(base, o, parts[0]!, responseFormat, logContext);
+  }
+
+  const buffers: Buffer[] = [];
+  for (const part of parts) {
+    const r = await synthOnePart(base, o, part, responseFormat, logContext);
+    if (!r.ok) return r;
+    buffers.push(r.buffer);
+  }
+  const merged = concatWavBuffers(buffers);
+  if (merged.length < 32) {
+    return { ok: false, status: 502, error: 'OmniVoice returned empty audio after merge' };
+  }
+  return { ok: true, buffer: merged, mimeType: 'audio/wav' };
+}
+
+async function synthOnePart(
+  base: string,
+  o: NonNullable<NarrationTtsClientConfig['omnivoice']>,
+  transcript: string,
+  responseFormat: 'wav' | 'pcm',
+  logContext?: { sessionId?: string; label?: string },
+): Promise<{ ok: true; buffer: Buffer; mimeType: string } | { ok: false; status: number; error: string; detail?: string }> {
+  const voice = o.voice?.trim() || 'alloy';
   const model = o.model?.trim() || 'omnivoice';
 
   const body: Record<string, unknown> = {
@@ -55,7 +89,6 @@ export async function synthesizeOmnivoiceNarration(
     response_format: responseFormat,
     stream: false,
     speed: typeof o.speed === 'number' && Number.isFinite(o.speed) ? o.speed : 1,
-    /** Upstream uses this for multilingual pronunciation; default tr for this project. */
     language: o.language?.trim() || 'tr',
   };
 

@@ -33,11 +33,16 @@ export function unlockHtmlAudioFromUserGesture(): void {
   }
 
   try {
-    const silent =
-      'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAIlYAAESsAAACABAAZGF0YQAAAAA=';
-    const a = new Audio(silent);
-    a.volume = 0.001;
-    void a.play().catch(() => {});
+    if (ctx) {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      g.gain.value = 0;
+      o.frequency.value = 440;
+      o.connect(g);
+      g.connect(ctx.destination);
+      o.start();
+      o.stop(ctx.currentTime + 0.03);
+    }
   } catch {
     /* ignore */
   }
