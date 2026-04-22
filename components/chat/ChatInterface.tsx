@@ -225,7 +225,6 @@ export function ChatInterface({
   const activeScenarioId = useGameStore((s) => s.session.settings.activeScenarioId);
   const gmOpenRouterModel = useGameStore((s) => s.session.settings.gmOpenRouterModel);
   const ttsEnabled = useGameStore((s) => s.session.settings.ttsEnabled);
-  const autoMessageNarrationTts = useGameStore((s) => s.session.settings.autoMessageNarrationTts);
   const voiceInputMode = useGameStore((s) => s.ui.voiceInputMode);
   const sessionRecordingGroupActive = useGameStore((s) => s.ui.sessionRecordingGroupActive);
   const sessionRecordingStartedBy = useGameStore((s) => s.ui.sessionRecordingStartedBy);
@@ -297,12 +296,6 @@ export function ChatInterface({
   );
 
   const ttsQueueRef = useRef<GmStreamTtsQueue | null>(null);
-  /** Initialized on first render with last message id so we do not auto-play history. */
-  const prevNewestChatMessageIdRef = useRef<string | null>(null);
-  useEffect(() => {
-    prevNewestChatMessageIdRef.current = null;
-  }, [sessionId]);
-
   useEffect(() => {
     ttsQueueRef.current = new GmStreamTtsQueue({
       sessionId,
@@ -321,7 +314,6 @@ export function ChatInterface({
       playAfterMs?: number;
       skipNarrationTtsForUserId?: string;
       respectTtsSetting?: boolean;
-      narrationTtsSource?: 'messageAuto' | 'streamEnd' | 'manualClick';
     }) => {
       const token = await getAccessTokenForApi(supabase);
       if (!token) {
@@ -360,31 +352,6 @@ export function ChatInterface({
     },
     [sessionId, supabase],
   );
-
-  useEffect(() => {
-    if (!autoMessageNarrationTts || !sessionBroadcastReady || !enabled) return;
-    const last = messages[messages.length - 1];
-    if (!last || last.type !== 'narration') return;
-    if (prevNewestChatMessageIdRef.current === null) {
-      prevNewestChatMessageIdRef.current = last.id;
-      return;
-    }
-    if (last.id === prevNewestChatMessageIdRef.current) return;
-    prevNewestChatMessageIdRef.current = last.id;
-    void prepareAndBroadcastNarrationTts({
-      messageId: last.id,
-      playAfterMs: 500,
-      respectTtsSetting: true,
-      narrationTtsSource: 'messageAuto',
-    });
-  }, [
-    autoMessageNarrationTts,
-    enabled,
-    lastMessageId,
-    messages,
-    prepareAndBroadcastNarrationTts,
-    sessionBroadcastReady,
-  ]);
 
   const consumeGmStreamBody = useCallback(async (res: Response, onStreamError: (message: string) => void) => {
     let sentenceCarry = '';
@@ -432,7 +399,6 @@ export function ChatInterface({
                 playAfterMs: 900,
                 ...(uid ? { skipNarrationTtsForUserId: uid } : {}),
                 respectTtsSetting: true,
-                narrationTtsSource: 'streamEnd',
               });
             }
           }
@@ -1207,24 +1173,6 @@ export function ChatInterface({
             />
             Auto TTS
           </label>
-          <label className="inline-flex items-center gap-1.5 cursor-pointer text-[9px] uppercase tracking-wide text-zinc-500 select-none">
-            <input
-              type="checkbox"
-              className="accent-amber-600 scale-90"
-              checked={autoMessageNarrationTts}
-              disabled={!enabled || isLoading}
-              title="When a new narration line appears, play full-message TTS (same as the speaker button) for everyone. Independent of “Auto TTS” stream."
-              onChange={(e) => {
-                const on = e.target.checked;
-                void persistSessionTtsEnabled(supabase, sessionId, { autoMessageNarrationTts: on }).then((r) => {
-                  if (r.error && typeof console !== 'undefined') {
-                    console.warn('[session] auto message TTS persist failed', r.error);
-                  }
-                });
-              }}
-            />
-            Auto speak
-          </label>
           {!showToolLog && hiddenMessageCount > 0 && (
             <span className="text-[9px] text-zinc-600 font-mono normal-case">
               {hiddenMessageCount} hidden
@@ -1317,7 +1265,6 @@ export function ChatInterface({
                           void prepareAndBroadcastNarrationTts({
                             messageId: m.id,
                             playAfterMs: 500,
-                            narrationTtsSource: 'manualClick',
                           });
                         }}
                       >

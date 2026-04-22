@@ -87,12 +87,14 @@ export async function synthesizeChatterboxNarration(
     }
 
     const url = new URL('/tts', `${base}/`);
+    const rawChunk = typeof cb.chunkSize === 'number' && Number.isFinite(cb.chunkSize) ? cb.chunkSize : 120;
+    const chunkSize = Math.min(500, Math.max(50, Math.round(rawChunk)));
     const body: Record<string, unknown> = {
       text: transcript,
       voice_mode: cb.voiceMode === 'clone' ? 'clone' : 'predefined',
       output_format: cb.outputFormat === 'opus' ? 'opus' : 'wav',
       split_text: cb.splitText !== false,
-      chunk_size: typeof cb.chunkSize === 'number' ? cb.chunkSize : 120,
+      chunk_size: chunkSize,
     };
     if (cb.voiceMode === 'clone' && cb.referenceAudioFilename?.trim()) {
       body.reference_audio_filename = cb.referenceAudioFilename.trim();

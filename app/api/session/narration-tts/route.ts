@@ -3,15 +3,12 @@ import { NextResponse } from 'next/server';
 import { requireAuthFromRequest } from '@/lib/auth/require-auth';
 import { plainTextForNarrationTts } from '@/lib/narration/plain-text-for-tts';
 import { chunkTtsCacheKey, getCachedChunkWav, setCachedChunkWav } from '@/lib/narration/cartesia-tts';
-import { chatterboxVoiceMemoryFingerprint } from '@/lib/narration/chatterbox-npc-voice-memory';
 import { narrationTtsConfigFingerprint } from '@/lib/narration/narration-tts-client-config';
 import { synthesizeNarrationAudio } from '@/lib/narration/synthesize-narration-audio';
 import {
   narrationTtsCachedAccess,
   narrationTtsCachedConfig,
-  narrationTtsCachedSynthesisContext,
 } from '@/lib/narration/narration-tts-request-cache';
-import { persistChatterboxNpcVoiceMemoryIfChanged } from '@/lib/session/persist-chatterbox-npc-voice-memory';
 import { reportServerError } from '@/lib/logging/server-report';
 import { getServiceRoleClient } from '@/lib/supabase';
 import { readJsonBody, validationErrorResponse } from '@/lib/api/validation';
@@ -60,7 +57,7 @@ export async function GET(request: Request) {
 
   const { data: row, error: fetchErr } = await supabase
     .from('chat_messages')
-    .select('id, session_id, text, type, speaker')
+    .select('id, session_id, text, type')
     .eq('id', messageId)
     .eq('session_id', sessionId)
     .maybeSingle();
@@ -74,7 +71,6 @@ export async function GET(request: Request) {
   }
 
   const rawText = String((row as { text?: string }).text ?? '');
-  const messageSpeaker = String((row as { speaker?: string }).speaker ?? 'Game Master');
   const transcript = plainTextForNarrationTts(rawText);
   if (!transcript) {
     return NextResponse.json({ error: 'Nothing to speak after stripping markup' }, { status: 400 });
@@ -83,11 +79,10 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Narration too long for TTS' }, { status: 400 });
   }
 
-  const { config: ttsConfig, memory: voiceMemIn } = await narrationTtsCachedSynthesisContext(supabase, sessionId);
+  const ttsConfig = await narrationTtsCachedConfig(supabase, sessionId);
   const configFp = narrationTtsConfigFingerprint(ttsConfig);
-  const memFp = chatterboxVoiceMemoryFingerprint(voiceMemIn);
   const textHash = createHash('sha256').update(transcript, 'utf8').digest('hex').slice(0, 24);
-  const cacheKey = `${messageId}:${configFp}:${memFp}:${textHash}`;
+  const cacheKey = `${messageId}:${configFp}:${textHash}`;
   const cached = ttsCache.get(cacheKey);
   if (cached) {
     return new NextResponse(new Uint8Array(cached.buffer), {
@@ -99,30 +94,12 @@ export async function GET(request: Request) {
     });
   }
 
-  const synth = await synthesizeNarrationAudio(
-    transcript,
-    ttsConfig,
-    {
-      sessionId,
-      label: 'message-tts',
-      messageSpeaker,
-    },
-    { chatterboxVoiceMemory: voiceMemIn },
-  );
+  const synth = await synthesizeNarrationAudio(transcript, ttsConfig, { sessionId, label: 'message-tts' });
   if (!synth.ok) {
     return NextResponse.json(
       synth.detail ? { error: synth.error, detail: synth.detail } : { error: synth.error },
       { status: synth.status },
     );
-  }
-  if (synth.chatterboxVoiceMemoryOut) {
-    try {
-      await persistChatterboxNpcVoiceMemoryIfChanged(supabase, sessionId, synth.chatterboxVoiceMemoryOut);
-    } catch (e) {
-      reportServerError('api/session/narration-tts:memory', e instanceof Error ? e : new Error(String(e)), {
-        sessionId,
-      });
-    }
   }
   cacheSet(cacheKey, { buffer: synth.buffer, mimeType: synth.mimeType });
 

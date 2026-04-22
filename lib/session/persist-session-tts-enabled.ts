@@ -5,7 +5,7 @@ import { useGameStore } from '../store/game-store';
 export async function persistSessionTtsEnabled(
   client: SupabaseClient,
   sessionId: string,
-  patch: Partial<Pick<SessionSettings, 'ttsEnabled' | 'autoMessageNarrationTts'>>,
+  patch: Pick<SessionSettings, 'ttsEnabled'>,
 ): Promise<{ error: Error | null }> {
   const prev = useGameStore.getState().session.settings;
   const merged: SessionSettings = { ...prev, ...patch };

@@ -300,8 +300,6 @@ const DEFAULT_SCENE: Scene = {
 
 const DEFAULT_SETTINGS: SessionSettings = {
   ttsEnabled: true,
-  autoMessageNarrationTts: false,
-  chatterboxNpcVoiceMemory: {},
   narrationTts: DEFAULT_NARRATION_TTS_CLIENT_CONFIG,
   ttsVoice: 'default',
   autoRollDamage: true,
@@ -330,19 +328,6 @@ export function parseSceneJson(v: unknown): Scene {
   };
 }
 
-function parseChatterboxNpcVoiceMemory(v: unknown): Record<string, number> {
-  if (!v || typeof v !== 'object' || Array.isArray(v)) return {};
-  const o = v as Record<string, unknown>;
-  const out: Record<string, number> = {};
-  for (const [k, val] of Object.entries(o)) {
-    if (typeof k !== 'string' || k.length > 200) continue;
-    if (typeof val === 'number' && Number.isInteger(val) && val >= 0 && val < 10_000) {
-      out[k] = val;
-    }
-  }
-  return out;
-}
-
 export function parseSessionSettingsJson(v: unknown): SessionSettings {
   if (!v || typeof v !== 'object') return { ...DEFAULT_SETTINGS };
   const o = v as Record<string, unknown>;
@@ -368,11 +353,6 @@ export function parseSessionSettingsJson(v: unknown): SessionSettings {
 
   return {
     ttsEnabled: typeof o.ttsEnabled === 'boolean' ? o.ttsEnabled : DEFAULT_SETTINGS.ttsEnabled,
-    autoMessageNarrationTts:
-      typeof o.autoMessageNarrationTts === 'boolean'
-        ? o.autoMessageNarrationTts
-        : DEFAULT_SETTINGS.autoMessageNarrationTts,
-    chatterboxNpcVoiceMemory: parseChatterboxNpcVoiceMemory(o.chatterboxNpcVoiceMemory),
     narrationTts: mergeNarrationTtsClientConfig(
       o.narrationTts !== undefined ? o.narrationTts : DEFAULT_SETTINGS.narrationTts,
     ),

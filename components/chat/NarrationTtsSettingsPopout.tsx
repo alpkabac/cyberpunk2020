@@ -6,11 +6,10 @@ import { useShallow } from 'zustand/react/shallow';
 import { getAccessTokenForApi } from '@/lib/auth/client-access-token';
 import { persistSessionTtsEnabled } from '@/lib/session/persist-session-tts-enabled';
 import { persistSessionNarrationTts } from '@/lib/session/persist-session-narration-tts';
+import { CHATTERBOX_TTS_LANGUAGES } from '@/lib/narration/chatterbox-tts-languages';
 import {
   DEFAULT_NARRATION_TTS_CLIENT_CONFIG,
   mergeNarrationTtsClientConfig,
-  type ChatterboxNpcVoiceMode,
-  type ChatterboxNpcVoiceRule,
   type NarrationTtsClientConfig,
   type NarrationTtsProviderId,
 } from '@/lib/narration/narration-tts-client-config';
@@ -117,6 +116,11 @@ export function NarrationTtsSettingsPopout({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
+
+  useEffect(() => {
+    if (!open) return;
+    setDraft(mergeNarrationTtsClientConfig(useGameStore.getState().session.settings.narrationTts));
+  }, [open]);
 
   const chatterboxListDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const chatterboxListAbortRef = useRef<AbortController | null>(null);
@@ -402,6 +406,87 @@ export function NarrationTtsSettingsPopout({
                 </datalist>
               </div>
             </div>
+            {!draft.chatterbox?.useOpenAiEndpoint && (
+              <div className="space-y-2 border border-zinc-700/50 rounded p-2 bg-zinc-950/20">
+                <p className="text-[10px] text-zinc-500">
+                  Custom <code className="text-zinc-400">/tts</code> — long text is split at sentence boundaries (Chatterbox
+                  50–500 chars per chunk).
+                </p>
+                <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    className="accent-cyan-600 scale-90"
+                    checked={draft.chatterbox?.splitText !== false}
+                    onChange={(e) =>
+                      setDraft((d) => ({
+                        ...d,
+                        chatterbox: {
+                          ...DEFAULT_NARRATION_TTS_CLIENT_CONFIG.chatterbox,
+                          ...d.chatterbox,
+                          splitText: e.target.checked,
+                        },
+                      }))
+                    }
+                  />
+                  <span className="text-[10px] uppercase tracking-wide text-zinc-400">Split long text into chunks</span>
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <span className={labelCls}>Chunk size (chars)</span>
+                    <input
+                      type="number"
+                      min={50}
+                      max={500}
+                      step={10}
+                      className={inputCls}
+                      title="Chatterbox /tts: 50–500"
+                      value={draft.chatterbox?.chunkSize ?? 120}
+                      onChange={(e) => {
+                        const n = parseInt(e.target.value, 10);
+                        setDraft((d) => ({
+                          ...d,
+                          chatterbox: {
+                            ...DEFAULT_NARRATION_TTS_CLIENT_CONFIG.chatterbox,
+                            ...d.chatterbox,
+                            chunkSize: Number.isFinite(n) ? n : 120,
+                          },
+                        }));
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <span className={labelCls}>Language</span>
+                    <select
+                      className={inputCls}
+                      value={draft.chatterbox?.language ?? ''}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setDraft((d) => ({
+                          ...d,
+                          chatterbox: {
+                            ...DEFAULT_NARRATION_TTS_CLIENT_CONFIG.chatterbox,
+                            ...d.chatterbox,
+                            language: v === '' ? undefined : v,
+                          },
+                        }));
+                      }}
+                    >
+                      {CHATTERBOX_TTS_LANGUAGES.map((l) => (
+                        <option key={l.code || '__default__'} value={l.code}>
+                          {l.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
+            {draft.chatterbox?.useOpenAiEndpoint && (
+              <p className="text-[10px] text-zinc-500">
+                OpenAI-compatible route: this app does not send chunking or language; use the Chatterbox server UI or API
+                for that path.
+              </p>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <div>
                 <span className={labelCls}>Speed</span>
@@ -475,215 +560,6 @@ export function NarrationTtsSettingsPopout({
                   }}
                 />
               </div>
-            </div>
-
-            <div className="space-y-2 border border-violet-900/40 rounded p-2 bg-violet-950/20">
-              <div>
-                <span className={labelCls}>How this list is used</span>
-                <select
-                  className={inputCls}
-                  value={draft.chatterboxNpcVoiceMode ?? 'byName'}
-                  onChange={(e) => {
-                    const m = e.target.value as ChatterboxNpcVoiceMode;
-                    setDraft((d) => ({ ...d, chatterboxNpcVoiceMode: m }));
-                  }}
-                >
-                  <option value="byName">Match by name (per-row match key)</option>
-                  <option value="byListOrder">List order only — 1st NPC in the message = row 1, 2nd = row 2, then repeat</option>
-                </select>
-              </div>
-              {draft.chatterboxNpcVoiceMode === 'byListOrder' ? (
-                <p className="text-[10px] text-zinc-500 leading-snug">
-                  <span className="text-zinc-400">List order</span> — you only pick voices top-to-bottom. The{' '}
-                  <strong>first</strong> distinct <code className="text-zinc-400">Whoever:</code> or{' '}
-                  <code className="text-zinc-400">**Name**:</code> line uses row 1, the <strong>second</strong> new
-                  character uses row 2, and so on (wraps to row 1 if you run out). The actual names the AI invents
-                  do not matter. Single-NPC lines (chat speaker not &quot;Game Master&quot;) use row 1. Continuation
-                  lines stay on the last voice. Multi-voice output is WAV. Streamed GM TTS still uses the default
-                  engine voice until the turn is saved. Names are remembered for the whole session (stored on the
-                  room) so the same label keeps the same row in later messages — unless you clear it below.
-                </p>
-              ) : (
-                <p className="text-[10px] text-zinc-500 leading-snug">
-                  <span className="text-zinc-400">Name match</span> — set a <strong>match key</strong> per row. Lines like{' '}
-                  <code className="text-zinc-400">Name:</code> or <code className="text-zinc-400">**Name**:</code> pick the
-                  row whose key matches; 3+ characters for broad matching. Single-NPC messages can match the chat{' '}
-                  <strong>speaker</strong> if it is not &quot;Game Master&quot;.                   Multi-voice output is WAV.
-                </p>
-              )}
-              {draft.provider === 'chatterbox' && draft.chatterboxNpcVoiceMode === 'byListOrder' && (
-                <button
-                  type="button"
-                  className="text-[10px] rounded border border-zinc-600 bg-zinc-950 px-2 py-1 text-zinc-500 hover:text-amber-200 hover:border-amber-900/50"
-                  onClick={async () => {
-                    const prev = useGameStore.getState().session.settings;
-                    const merged = { ...prev, chatterboxNpcVoiceMemory: {} };
-                    const { error } = await supabase.from('sessions').update({ settings: merged }).eq('id', sessionId);
-                    if (error && typeof console !== 'undefined') {
-                      console.warn('[session] clear NPC voice memory failed', error);
-                    }
-                    useGameStore.getState().updateSessionSettings({ chatterboxNpcVoiceMemory: {} });
-                  }}
-                >
-                  Clear remembered NPC → row map
-                </button>
-              )}
-              <button
-                type="button"
-                className="text-[10px] uppercase tracking-wide text-violet-400/90 hover:text-violet-200"
-                onClick={() =>
-                  setDraft((d) => ({
-                    ...d,
-                    chatterboxNpcVoices: [
-                      ...(d.chatterboxNpcVoices ?? []),
-                      {
-                        label: d.chatterboxNpcVoiceMode === 'byName' ? 'Bartender' : undefined,
-                        voiceMode: (d.chatterbox?.voiceMode as 'predefined' | 'clone' | undefined) ?? 'predefined',
-                        predefinedVoiceId: d.chatterbox?.predefinedVoiceId?.trim() || '',
-                      } satisfies ChatterboxNpcVoiceRule,
-                    ],
-                  }))
-                }
-              >
-                + Add voice
-              </button>
-              {(draft.chatterboxNpcVoices ?? []).map((row, i) => (
-                <div
-                  key={i}
-                  className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end border-b border-zinc-800/60 pb-2 last:border-0"
-                >
-                  {draft.chatterboxNpcVoiceMode === 'byListOrder' && (
-                    <div className="sm:col-span-1 min-w-0">
-                      <span className={labelCls}>#</span>
-                      <div className="px-1 py-1.5 text-[11px] text-violet-300 tabular-nums text-center">
-                        {i + 1}
-                      </div>
-                    </div>
-                  )}
-                  {draft.chatterboxNpcVoiceMode === 'byName' && (
-                    <div className="sm:col-span-3">
-                      <span className={labelCls}>Name (match key)</span>
-                      <input
-                        className={inputCls}
-                        placeholder="bartender, fixer, …"
-                        value={row.label ?? ''}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setDraft((d) => {
-                            const list = [...(d.chatterboxNpcVoices ?? [])];
-                            list[i] = { ...list[i]!, label: v };
-                            return { ...d, chatterboxNpcVoices: list };
-                          });
-                        }}
-                      />
-                    </div>
-                  )}
-                  <div className="sm:col-span-2">
-                    <span className={labelCls}>Mode</span>
-                    <select
-                      className={inputCls}
-                      value={row.voiceMode ?? 'predefined'}
-                      onChange={(e) => {
-                        const v = e.target.value as 'predefined' | 'clone';
-                        setDraft((d) => {
-                          const list = [...(d.chatterboxNpcVoices ?? [])];
-                          list[i] = { ...list[i]!, voiceMode: v };
-                          return { ...d, chatterboxNpcVoices: list };
-                        });
-                      }}
-                    >
-                      <option value="predefined">Predefined</option>
-                      <option value="clone">Clone (reference)</option>
-                    </select>
-                  </div>
-                  <div className="sm:col-span-3">
-                    <span className={labelCls}>Predefined voice</span>
-                    <input
-                      className={inputCls}
-                      list="cp2020-chatterbox-predefined-voices"
-                      disabled={(row.voiceMode ?? 'predefined') === 'clone'}
-                      placeholder="filename.wav, S1, …"
-                      value={row.predefinedVoiceId ?? ''}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setDraft((d) => {
-                          const list = [...(d.chatterboxNpcVoices ?? [])];
-                          list[i] = { ...list[i]!, predefinedVoiceId: v };
-                          return { ...d, chatterboxNpcVoices: list };
-                        });
-                      }}
-                    />
-                  </div>
-                  <div className="sm:col-span-3">
-                    <span className={labelCls}>Reference (clone)</span>
-                    <input
-                      className={inputCls}
-                      list="cp2020-chatterbox-reference-audio"
-                      disabled={(row.voiceMode ?? 'predefined') !== 'clone'}
-                      value={row.referenceAudioFilename ?? ''}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setDraft((d) => {
-                          const list = [...(d.chatterboxNpcVoices ?? [])];
-                          list[i] = { ...list[i]!, referenceAudioFilename: v };
-                          return { ...d, chatterboxNpcVoices: list };
-                        });
-                      }}
-                    />
-                  </div>
-                  <div className="sm:col-span-1 flex flex-col gap-1">
-                    <span className={labelCls}>OAI /tts</span>
-                    <label className="inline-flex items-center gap-1.5 text-[10px] text-zinc-400">
-                      <input
-                        type="checkbox"
-                        className="accent-violet-600 scale-90"
-                        checked={row.useOpenAiEndpoint === true}
-                        onChange={(e) => {
-                          const on = e.target.checked;
-                          setDraft((d) => {
-                            const list = [...(d.chatterboxNpcVoices ?? [])];
-                            list[i] = { ...list[i]!, useOpenAiEndpoint: on ? true : false };
-                            return { ...d, chatterboxNpcVoices: list };
-                          });
-                        }}
-                      />
-                      OpenAI
-                    </label>
-                  </div>
-                  <div className="sm:col-span-3">
-                    <span className={labelCls}>OpenAI voice</span>
-                    <input
-                      className={inputCls}
-                      list="cp2020-chatterbox-openai-voices"
-                      disabled={row.useOpenAiEndpoint !== true}
-                      placeholder="S1, dialogue, …"
-                      value={row.openAiVoice ?? ''}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setDraft((d) => {
-                          const list = [...(d.chatterboxNpcVoices ?? [])];
-                          list[i] = { ...list[i]!, openAiVoice: v };
-                          return { ...d, chatterboxNpcVoices: list };
-                        });
-                      }}
-                    />
-                  </div>
-                  <div className="sm:col-span-1 flex items-end">
-                    <button
-                      type="button"
-                      className="w-full rounded border border-zinc-600 bg-zinc-950 px-1 py-1 text-[10px] text-zinc-500 hover:text-rose-300 hover:border-rose-800"
-                      onClick={() =>
-                        setDraft((d) => ({
-                          ...d,
-                          chatterboxNpcVoices: (d.chatterboxNpcVoices ?? []).filter((_, j) => j !== i),
-                        }))
-                      }
-                    >
-                      Remove
-                    </button>
-                  </div>
-                </div>
-              ))}
             </div>
           </div>
         )}

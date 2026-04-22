@@ -3,9 +3,6 @@ import { z } from 'zod';
 export const NARRATION_TTS_PROVIDER_IDS = ['cartesia', 'chatterbox', 'kokoro'] as const;
 export type NarrationTtsProviderId = (typeof NARRATION_TTS_PROVIDER_IDS)[number];
 
-export const CHATTERBOX_NPC_VOICE_MODES = ['byName', 'byListOrder'] as const;
-export type ChatterboxNpcVoiceMode = (typeof CHATTERBOX_NPC_VOICE_MODES)[number];
-
 const chatterboxSchema = z
   .object({
     useOpenAiEndpoint: z.boolean().optional(),
@@ -14,7 +11,15 @@ const chatterboxSchema = z
     referenceAudioFilename: z.string().optional(),
     outputFormat: z.enum(['wav', 'opus']).optional(),
     splitText: z.boolean().optional(),
-    chunkSize: z.number().int().min(20).max(2000).optional(),
+    /** Chatterbox /tts API accepts 50–500; legacy values are clamped in preprocess. */
+    chunkSize: z.preprocess(
+      (v) => {
+        if (v === undefined || v === null) return undefined;
+        if (typeof v !== 'number' || !Number.isFinite(v)) return undefined;
+        return Math.min(500, Math.max(50, Math.round(v)));
+      },
+      z.number().int().min(50).max(500).optional(),
+    ),
     temperature: z.number().min(0).max(2).optional(),
     exaggeration: z.number().min(0).max(2).optional(),
     cfgWeight: z.number().min(0).max(2).optional(),
@@ -38,24 +43,6 @@ const kokoroSchema = z
   })
   .strict();
 
-/**
- * Chatterbox NPC voice row: in **byName** mode, `label` matches text/speaker; in **byListOrder** mode, list order
- * only (row 1 = first NPC in the message, etc.) and `label` is ignored.
- */
-export const chatterboxNpcVoiceRuleSchema = z
-  .object({
-    label: z.string().max(120).optional(),
-    /** If set, overrides session Chatterbox OpenAI /tts mode for this NPC only. */
-    useOpenAiEndpoint: z.boolean().optional(),
-    voiceMode: z.enum(['predefined', 'clone']).optional(),
-    predefinedVoiceId: z.string().max(256).optional(),
-    referenceAudioFilename: z.string().max(512).optional(),
-    openAiVoice: z.string().max(256).optional(),
-  })
-  .strict();
-
-export type ChatterboxNpcVoiceRule = z.infer<typeof chatterboxNpcVoiceRuleSchema>;
-
 export const narrationTtsClientConfigSchema = z
   .object({
     provider: z.enum(NARRATION_TTS_PROVIDER_IDS),
@@ -65,12 +52,6 @@ export const narrationTtsClientConfigSchema = z
     localBaseUrl: z.string().max(2048).optional(),
     chatterbox: chatterboxSchema.optional(),
     kokoro: kokoroSchema.optional(),
-    /**
-     * Chatterbox only: per-NPC voice list. `byName` = match `label` to speaker / `Name:` lines. `byListOrder` = 1st
-     * distinct NPC in reading order uses row 0, 2nd uses row 1, then wrap; names are not configured.
-     */
-    chatterboxNpcVoices: z.array(chatterboxNpcVoiceRuleSchema).max(48).optional(),
-    chatterboxNpcVoiceMode: z.enum(CHATTERBOX_NPC_VOICE_MODES).optional(),
   })
   .strict();
 
@@ -95,8 +76,6 @@ export const DEFAULT_NARRATION_TTS_CLIENT_CONFIG: NarrationTtsClientConfig = {
     speed: 1,
     stream: false,
   },
-  chatterboxNpcVoices: [],
-  chatterboxNpcVoiceMode: 'byName',
 };
 
 export function mergeNarrationTtsClientConfig(partial: unknown): NarrationTtsClientConfig {
@@ -116,11 +95,6 @@ export function mergeNarrationTtsClientConfig(partial: unknown): NarrationTtsCli
       ...base.kokoro,
       ...(typeof p.kokoro === 'object' && p.kokoro !== null ? (p.kokoro as Record<string, unknown>) : {}),
     },
-    chatterboxNpcVoices: Array.isArray(p.chatterboxNpcVoices) ? p.chatterboxNpcVoices : base.chatterboxNpcVoices,
-    chatterboxNpcVoiceMode:
-      p.chatterboxNpcVoiceMode === 'byListOrder' || p.chatterboxNpcVoiceMode === 'byName'
-        ? p.chatterboxNpcVoiceMode
-        : base.chatterboxNpcVoiceMode,
   };
   const parsed = narrationTtsClientConfigSchema.safeParse(merged);
   if (parsed.success) return parsed.data;

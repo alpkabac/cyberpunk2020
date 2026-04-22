@@ -491,16 +491,6 @@ export type GmSessionLanguage = 'en' | 'tr';
 export interface SessionSettings {
   ttsEnabled: boolean;
   /**
-   * When true, the newest narration message automatically runs the same path as the speaker
-   * button (prepare + room broadcast) — not the same as “Auto TTS” (sentence TTS on GM stream).
-   */
-  autoMessageNarrationTts: boolean;
-  /**
-   * Chatterbox **list order** only: maps normalized speaker / `Name:` label → row index in `narrationTts.chatterboxNpcVoices`
-   * so the same NPC keeps the same row across different chat messages. Capped in code (see `CHATTERBOX_NPC_VOICE_MEMORY_MAX_KEYS`).
-   */
-  chatterboxNpcVoiceMemory: Record<string, number>;
-  /**
    * Room-wide narration TTS engine + params (Cartesia / Chatterbox / Kokoro).
    * Synced via `sessions.settings` so every client uses the same voice and one server prepare per line.
    */
