@@ -14,6 +14,19 @@ import {
   publicSoundtrackObjectUrl,
   resolveSoundtrackPlaybackUrl,
 } from '@/lib/session/soundtrack-state';
+import {
+  uploadSoundtrackFile,
+  validateSoundtrackFile,
+  type SoundtrackUploadMode,
+} from '@/lib/storage/soundtrack-upload';
+
+type UploadQueueItem = {
+  id: string;
+  file: File;
+  mode: SoundtrackUploadMode;
+  status: 'pending' | 'uploading' | 'done' | 'error';
+  errMsg?: string;
+};
 
 function sessionInCombat(combatState: { entries: { length: number } } | null | undefined): boolean {
   return combatState != null && combatState.entries.length > 0;
@@ -36,6 +49,9 @@ export function SessionSoundtrackPlayer({ sessionId, supabase }: SessionSoundtra
 
   const [ambientFiles, setAmbientFiles] = useState<{ name: string }[]>([]);
   const [combatFiles, setCombatFiles] = useState<{ name: string }[]>([]);
+  const [uploadQueue, setUploadQueue] = useState<UploadQueueItem[]>([]);
+  const [uploadTargetMode, setUploadTargetMode] = useState<SoundtrackUploadMode>('ambient');
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [listErr, setListErr] = useState<string | null>(null);
   const [playbackErr, setPlaybackErr] = useState<string | null>(null);
   const [persistErr, setPersistErr] = useState<string | null>(null);
@@ -55,31 +71,63 @@ export function SessionSoundtrackPlayer({ sessionId, supabase }: SessionSoundtra
   const loadGenRef = useRef(0);
   const scrubbingRef = useRef(false);
 
+  const reloadTrackLists = useCallback(async () => {
+    const [a, c] = await Promise.all([
+      supabase.storage.from(SOUNDTRACK_BUCKET).list('ambient', {
+        limit: 200,
+        sortBy: { column: 'name', order: 'asc' },
+      }),
+      supabase.storage.from(SOUNDTRACK_BUCKET).list('combat', {
+        limit: 200,
+        sortBy: { column: 'name', order: 'asc' },
+      }),
+    ]);
+    if (a.error || c.error) {
+      setListErr(a.error?.message ?? c.error?.message ?? 'Could not list soundtrack bucket');
+      return;
+    }
+    setListErr(null);
+    setAmbientFiles((a.data ?? []).filter((f) => isSoundtrackAudioFileName(f.name)));
+    setCombatFiles((c.data ?? []).filter((f) => isSoundtrackAudioFileName(f.name)));
+  }, [supabase]);
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const [a, c] = await Promise.all([
-        supabase.storage.from(SOUNDTRACK_BUCKET).list('ambient', {
-          limit: 200,
-          sortBy: { column: 'name', order: 'asc' },
-        }),
-        supabase.storage.from(SOUNDTRACK_BUCKET).list('combat', {
-          limit: 200,
-          sortBy: { column: 'name', order: 'asc' },
-        }),
-      ]);
+      await reloadTrackLists();
       if (cancelled) return;
-      if (a.error || c.error) {
-        setListErr(a.error?.message ?? c.error?.message ?? 'Could not list soundtrack bucket');
-        return;
-      }
-      setAmbientFiles((a.data ?? []).filter((f) => isSoundtrackAudioFileName(f.name)));
-      setCombatFiles((c.data ?? []).filter((f) => isSoundtrackAudioFileName(f.name)));
     })();
     return () => {
       cancelled = true;
     };
-  }, [supabase]);
+  }, [reloadTrackLists]);
+
+  useEffect(() => {
+    if (uploadQueue.some((i) => i.status === 'uploading')) return;
+    const next = uploadQueue.find((i) => i.status === 'pending');
+    if (!next) return;
+    setUploadQueue((q) => q.map((i) => (i.id === next.id ? { ...i, status: 'uploading' } : i)));
+    void (async () => {
+      const { error } = await uploadSoundtrackFile(supabase, { mode: next.mode, file: next.file });
+      setUploadQueue((q) =>
+        q.map((i) =>
+          i.id === next.id
+            ? {
+                ...i,
+                status: error ? 'error' : 'done',
+                errMsg: error?.message,
+              }
+            : i,
+        ),
+      );
+      if (!error) {
+        await reloadTrackLists();
+        window.setTimeout(() => {
+          setUploadQueue((q) => q.filter((i) => i.id !== next.id));
+        }, 2200);
+      }
+    })();
+  }, [uploadQueue, supabase, reloadTrackLists]);
 
   /** play() after async signed-URL + decode is often blocked unless audio was unlocked from a gesture. */
   useEffect(() => {
@@ -475,12 +523,109 @@ export function SessionSoundtrackPlayer({ sessionId, supabase }: SessionSoundtra
         </select>
       </div>
 
+      <div className="space-y-1.5 border-t border-zinc-800 pt-2">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[9px] uppercase text-zinc-500 tracking-wide">Upload to</span>
+          {(['ambient', 'combat'] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setUploadTargetMode(m)}
+              className={`text-[10px] px-1.5 py-0.5 rounded border ${
+                uploadTargetMode === m
+                  ? 'border-cyan-700/60 bg-cyan-950/30 text-cyan-100'
+                  : 'border-zinc-700 text-zinc-400 hover:bg-zinc-800/50'
+              }`}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-1.5">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="audio/*,.mp3,.ogg,.opus,.wav,.m4a,.flac"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              const { files } = e.target;
+              if (!files?.length) return;
+              setUploadQueue((q) => [
+                ...q,
+                ...Array.from(files).map((file) => {
+                  const pre = validateSoundtrackFile(file);
+                  if (pre) {
+                    return {
+                      id: crypto.randomUUID(),
+                      file,
+                      mode: uploadTargetMode,
+                      status: 'error' as const,
+                      errMsg: pre,
+                    };
+                  }
+                  return {
+                    id: crypto.randomUUID(),
+                    file,
+                    mode: uploadTargetMode,
+                    status: 'pending' as const,
+                  };
+                }),
+              ]);
+              e.target.value = '';
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="flex-1 text-[11px] py-1 rounded border border-zinc-600 text-zinc-200 hover:bg-zinc-800/80"
+          >
+            Add files to queue…
+          </button>
+          {uploadQueue.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setUploadQueue([])}
+              className="shrink-0 text-[10px] px-2 py-1 rounded border border-zinc-700 text-zinc-500 hover:text-zinc-300"
+            >
+              Clear queue
+            </button>
+          )}
+        </div>
+        {uploadQueue.length > 0 && (
+          <ul className="text-[10px] space-y-0.5 max-h-24 overflow-y-auto pr-0.5">
+            {uploadQueue.map((it) => (
+              <li
+                key={it.id}
+                className="flex items-start justify-between gap-1 font-mono text-zinc-400 leading-tight"
+              >
+                <span className="min-w-0 truncate" title={it.file.name}>
+                  <span className="text-zinc-600">{it.mode}/</span>
+                  {it.file.name}
+                </span>
+                <span className="shrink-0">
+                  {it.status === 'pending' && <span className="text-zinc-500">queued</span>}
+                  {it.status === 'uploading' && <span className="text-amber-300/90">…</span>}
+                  {it.status === 'done' && <span className="text-emerald-400/90">ok</span>}
+                  {it.status === 'error' && (
+                    <span className="text-rose-400/90" title={it.errMsg ?? ''}>
+                      fail
+                    </span>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
       {listErr && <p className="text-[10px] text-amber-400/90">{listErr}</p>}
       {persistErr && <p className="text-[10px] text-red-400">{persistErr}</p>}
       {!listErr && !canUse && (
         <p className="text-[10px] text-zinc-500">
-          Upload audio under <span className="font-mono text-zinc-400">soundtrack/ambient</span> and{' '}
-          <span className="font-mono text-zinc-400">soundtrack/combat</span> in Supabase Storage.
+          Add audio with the uploader (signed-in players), or add files under{' '}
+          <span className="font-mono text-zinc-400">soundtrack/ambient</span> and{' '}
+          <span className="font-mono text-zinc-400">soundtrack/combat</span> in the Supabase dashboard.
         </p>
       )}
     </div>
