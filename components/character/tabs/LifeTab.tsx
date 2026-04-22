@@ -4,6 +4,7 @@ import React from 'react';
 import { Character, Lifepath, LifeEvent } from '@/lib/types';
 import { useGameStore } from '@/lib/store/game-store';
 import {
+  EMPTY_LIFEPATH,
   LIFEPATH_CLOTHES,
   LIFEPATH_HAIR,
   LIFEPATH_AFFECTATIONS,
@@ -26,23 +27,6 @@ interface LifeTabProps {
   character: Character;
   editable: boolean;
 }
-
-const EMPTY_LIFEPATH: Lifepath = {
-  style: { clothes: '', hair: '', affectations: '' },
-  ethnicity: '',
-  language: '',
-  familyBackground: '',
-  siblings: '',
-  motivations: {
-    traits: '',
-    valuedPerson: '',
-    valueMost: '',
-    feelAboutPeople: '',
-    valuedPossession: '',
-  },
-  lifeEvents: [],
-  notes: '',
-};
 
 /** Merge partial DB / JSON lifepath with defaults so nested fields are never undefined. */
 function ensureLifepath(character: Character): Lifepath {

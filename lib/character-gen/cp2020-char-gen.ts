@@ -1,10 +1,10 @@
 /**
  * CP2020 character generation (VIEW FROM THE EDGE): Character Points, stats 2–10,
  * Career Skill package (40 pts + special ability), Pickup Skills (REF+INT),
- * starting funds from Occupation Table × months (1D6/3) with unemployment check.
+ * starting funds from Occupation Table × (1D6÷3) with unemployment check.
  */
 
-import type { Character, RoleType, Skill, Stats } from '@/lib/types';
+import type { Character, CharacterItem, Lifepath, RoleType, Skill, Stats } from '@/lib/types';
 import { ROLE_SPECIAL_ABILITIES, createStatBlock } from '@/lib/types';
 import { recalcCharacterForGm } from '@/lib/gm/character-mutations';
 
@@ -441,13 +441,13 @@ export function monthlySalaryEb(role: RoleType, specialAbilityLevel: number): nu
 }
 
 /**
- * Starting cash: monthly × (1D6/3) months employed, then if D6>4 you are unemployed (p.58).
- * Uses book rounding (down) for the fractional months step.
+ * Starting cash: monthly salary × (1D6÷3) for length of employment, then a second D6 — on 5+ you are
+ * unemployed and lose half your stake (View from the Edge p.58).
  */
 export function rollStartingEurobucks(role: RoleType, specialAbilityLevel: number, rng: Cp2020Rng): number {
   const monthly = monthlySalaryEb(role, specialAbilityLevel);
-  const months = Math.max(1, Math.floor(rollD6(rng) / 3));
-  let total = monthly * months;
+  const employmentMonths = rollD6(rng) / 3;
+  let total = Math.floor(monthly * employmentMonths);
   if (rollD6(rng) > 4) {
     total = Math.floor(total / 2);
   }
@@ -578,6 +578,10 @@ export interface Cp2020ChargenBuildInput {
   /** Pickup skills not in career; each 0–10; total points ≤ REF+INT (bases). */
   pickup: { name: string; value: number }[];
   eurobucks: number;
+  /** Optional Life tab / lifepath from View from the Edge. */
+  lifepath?: Lifepath | null;
+  /** Starting armor, weapons, cyberware from chargen tables (default none). */
+  items?: CharacterItem[];
 }
 
 const PICKUP_NAME_SET = new Set(CP2020_PICKUP_POOL);
@@ -752,10 +756,10 @@ export function buildCp2020CharacterFromChargen(input: Cp2020ChargenBuildInput):
       current: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },
     },
     eurobucks: Math.floor(input.eurobucks),
-    items: [],
+    items: input.items ? [...input.items] : [],
     combatModifiers: { initiative: 0, stunSave: 0 },
     netrunDeck: null,
-    lifepath: null,
+    lifepath: input.lifepath ?? null,
   };
 
   return recalcCharacterForGm(raw);

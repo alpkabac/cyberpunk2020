@@ -21,6 +21,7 @@ import { persistSessionVoiceSettings } from '@/lib/session/persist-session-voice
 import { persistSessionGmOpenRouterModel } from '@/lib/session/persist-session-gm-openrouter-model';
 import { persistSessionTtsEnabled } from '@/lib/session/persist-session-tts-enabled';
 import { parseGmSseResponse } from '@/lib/gm/consume-gm-sse-stream';
+import { plainTextForNarrationTts } from '@/lib/narration/plain-text-for-tts';
 import { pullCompleteSentences } from '@/lib/narration/pull-complete-sentences';
 import { GmStreamTtsQueue } from '@/lib/audio/gm-stream-tts-queue';
 import { SCENARIO_CATALOG } from '@/lib/scenarios/catalog';
@@ -29,6 +30,7 @@ import {
   isGmSelectableOpenRouterModelId,
 } from '@/lib/gm/gm-openrouter-models';
 import { writeGmOpenRouterClientChoice } from '@/lib/gm/client-gm-openrouter-model';
+import { NarrationTtsSettingsPopout } from '@/components/chat/NarrationTtsSettingsPopout';
 
 function formatGmStreamClientError(e: unknown): string {
   const base = e instanceof Error ? e.message : String(e);
@@ -245,7 +247,6 @@ export function ChatInterface({
   const removeChatMessagesByIds = useGameStore((s) => s.removeChatMessagesByIds);
   const mergeRemoteChatMessage = useGameStore((s) => s.mergeRemoteChatMessage);
   const setGmNarrationPending = useGameStore((s) => s.setGmNarrationPending);
-  const broadcastSessionNarrationTtsPlay = useGameStore((s) => s.broadcastSessionNarrationTtsPlay);
   const sessionBroadcastReady = useGameStore((s) => s.sessionBroadcastSend != null);
 
   const [draft, setDraft] = useState('');
@@ -253,6 +254,8 @@ export function ChatInterface({
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [chatActionError, setChatActionError] = useState<string | null>(null);
   const [showToolLog, setShowToolLog] = useState(false);
+  const [ttsSettingsOpen, setTtsSettingsOpen] = useState(false);
+  const [ttsSettingsMountKey, setTtsSettingsMountKey] = useState(0);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingDraft, setEditingDraft] = useState('');
   /** Live AI-GM narration from POST /api/gm/stream; `null` when idle. */
@@ -304,6 +307,52 @@ export function ChatInterface({
     };
   }, [sessionId]);
 
+  /** One server synthesis + Storage URL, then broadcast so everyone plays the same file on receive. */
+  const prepareAndBroadcastNarrationTts = useCallback(
+    async (args: {
+      messageId: string;
+      playAfterMs?: number;
+      skipNarrationTtsForUserId?: string;
+      respectTtsSetting?: boolean;
+    }) => {
+      const token = await getAccessTokenForApi(supabase);
+      if (!token) {
+        await useGameStore.getState().broadcastSessionNarrationTtsPlay(args);
+        return;
+      }
+      const res = await fetch('/api/session/narration-tts/prepare', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ sessionId, messageId: args.messageId }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        audioUrl?: string;
+        error?: string;
+        detail?: string;
+      };
+      if (res.ok && typeof data.audioUrl === 'string' && data.audioUrl.length > 0) {
+        await useGameStore.getState().broadcastSessionNarrationTtsPlay({
+          ...args,
+          audioUrl: data.audioUrl,
+        });
+        return;
+      }
+      if (typeof console !== 'undefined') {
+        const hint = [data.detail, data.error].filter((s): s is string => typeof s === 'string' && s.length > 0);
+        console.warn(
+          '[narration-tts] prepare failed, falling back to per-client fetch',
+          res.status,
+          hint.length > 0 ? `— ${hint.join(' · ')}` : '',
+        );
+      }
+      await useGameStore.getState().broadcastSessionNarrationTtsPlay(args);
+    },
+    [sessionId, supabase],
+  );
+
   const consumeGmStreamBody = useCallback(async (res: Response, onStreamError: (message: string) => void) => {
     let sentenceCarry = '';
     setStreamingGmText('');
@@ -322,7 +371,10 @@ export function ChatInterface({
             if (useGameStore.getState().session.settings.ttsEnabled) {
               const { sentences, carry } = pullCompleteSentences(sentenceCarry, text);
               sentenceCarry = carry;
-              for (const s of sentences) ttsQueueRef.current?.enqueue(s);
+              for (const s of sentences) {
+                const t = plainTextForNarrationTts(s);
+                if (t.length >= 2) ttsQueueRef.current?.enqueue(t);
+              }
             }
           }
           continue;
@@ -336,13 +388,13 @@ export function ChatInterface({
         }
         if (event === 'done') {
           if (useGameStore.getState().session.settings.ttsEnabled) {
-            const tail = sentenceCarry.trim();
+            const tail = plainTextForNarrationTts(sentenceCarry.trim());
             if (tail.length >= 2) ttsQueueRef.current?.enqueue(tail);
             const messageId = typeof data.messageId === 'string' ? data.messageId : null;
             if (messageId && useGameStore.getState().sessionBroadcastSend) {
               const { data: authData } = await supabase.auth.getSession();
               const uid = authData.session?.user?.id;
-              await useGameStore.getState().broadcastSessionNarrationTtsPlay({
+              await prepareAndBroadcastNarrationTts({
                 messageId,
                 playAfterMs: 900,
                 ...(uid ? { skipNarrationTtsForUserId: uid } : {}),
@@ -364,7 +416,7 @@ export function ChatInterface({
     } finally {
       setStreamingGmText(null);
     }
-  }, []);
+  }, [prepareAndBroadcastNarrationTts, supabase]);
 
   const submitSessionVoiceFragment = useCallback(
     async (turnId: string, blob: Blob, recordingStartedAtMs: number | undefined) => {
@@ -1082,6 +1134,18 @@ export function ChatInterface({
       <header className="shrink-0 border-b border-zinc-700 px-3 py-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
         <h2 className="text-[10px] uppercase tracking-widest text-zinc-400">Session chat</h2>
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <button
+            type="button"
+            className="text-[9px] uppercase tracking-wide text-zinc-500 hover:text-zinc-300 px-1.5 py-0.5 rounded border border-zinc-700 bg-zinc-950/60"
+            title="Narration TTS engine, local server URL, Cartesia toggle"
+            disabled={!enabled || isLoading}
+            onClick={() => {
+              setTtsSettingsMountKey((k) => k + 1);
+              setTtsSettingsOpen(true);
+            }}
+          >
+            TTS
+          </button>
           <label className="inline-flex items-center gap-1.5 cursor-pointer text-[9px] uppercase tracking-wide text-zinc-500 select-none">
             <input
               type="checkbox"
@@ -1097,7 +1161,7 @@ export function ChatInterface({
               className="accent-violet-600 scale-90"
               checked={ttsEnabled}
               disabled={!enabled || isLoading}
-              title="Speak each sentence as the AI-GM streams (Cartesia)"
+              title="Speak each sentence as the AI-GM streams (engine in TTS settings)"
               onChange={(e) => {
                 const on = e.target.checked;
                 void persistSessionTtsEnabled(supabase, sessionId, { ttsEnabled: on }).then((r) => {
@@ -1198,7 +1262,7 @@ export function ChatInterface({
                         aria-label="Read narration aloud for everyone"
                         onClick={() => {
                           unlockHtmlAudioFromUserGesture();
-                          void broadcastSessionNarrationTtsPlay({
+                          void prepareAndBroadcastNarrationTts({
                             messageId: m.id,
                             playAfterMs: 500,
                           });
@@ -1574,6 +1638,13 @@ export function ChatInterface({
           <p className="text-xs text-red-400">{voiceError ?? voiceHookError}</p>
         )}
       </footer>
+      <NarrationTtsSettingsPopout
+        key={ttsSettingsMountKey}
+        open={ttsSettingsOpen}
+        onClose={() => setTtsSettingsOpen(false)}
+        sessionId={sessionId}
+        supabase={supabase}
+      />
     </section>
   );
 }

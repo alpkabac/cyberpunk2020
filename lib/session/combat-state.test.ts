@@ -77,7 +77,7 @@ describe('combat-state JSON', () => {
         total: 15,
       },
     ];
-    const state = { round: 2, activeTurnIndex: 0, entries };
+    const state = { round: 2, activeTurnIndex: 0, entries, actionsThisTurn: 0 };
     const json = combatStateToJson(state);
     const back = parseCombatStateJson(json);
     expect(back).toEqual(state);
@@ -106,6 +106,7 @@ describe('combat-state JSON', () => {
       round: 1,
       activeTurnIndex: 0,
       entries,
+      actionsThisTurn: 0,
       startOfTurnSavesPendingFor: 'pc1',
     };
     const json = combatStateToJson(state);

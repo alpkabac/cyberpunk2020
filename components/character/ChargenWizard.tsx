@@ -21,11 +21,40 @@ import {
   rollStartingEurobucks,
   validateCp2020Chargen,
 } from '@/lib/character-gen/cp2020-char-gen';
+import {
+  rollChargenStartingGear,
+  type ChargenStartingGearResult,
+} from '@/lib/character-gen/cp2020-chargen-starting-gear';
+import {
+  rollLifepathAgeFromBook,
+  rollLifepathEthnicityFromBook,
+  rollLifepathFamilyAndSiblingsFromBook,
+  rollLifepathLifeEventsFromBook,
+  rollLifepathMotivationsFromBook,
+  rollLifepathSections1to3FromBook,
+  rollLifepathStyleFromBook,
+} from '@/lib/character-gen/cp2020-lifepath-rolls';
 import { serializeCharacterForDb } from '@/lib/db/character-serialize';
-import type { RoleType, Stats } from '@/lib/types';
+import {
+  EMPTY_LIFEPATH,
+  LIFEPATH_AFFECTATIONS,
+  LIFEPATH_CHILDHOOD,
+  LIFEPATH_CLOTHES,
+  LIFEPATH_ETHNICITY,
+  LIFEPATH_FAMILY_RANKING,
+  LIFEPATH_FEEL_ABOUT_PEOPLE,
+  LIFEPATH_HAIR,
+  LIFEPATH_LANGUAGE,
+  LIFEPATH_SIBLINGS_PRESET,
+  LIFEPATH_TRAITS,
+  LIFEPATH_VALUED_PERSON,
+  LIFEPATH_VALUED_POSSESSION,
+  LIFEPATH_VALUE_MOST,
+} from '@/lib/data/lifepath-options';
+import type { CharacterItem, Lifepath, RoleType, Stats } from '@/lib/types';
 import { ROLE_SPECIAL_ABILITIES } from '@/lib/types';
 
-const STEPS = ['Profile', 'Stats', 'Career', 'Pickup', 'Funds', 'Review'] as const;
+const STEPS = ['Profile', 'Stats', 'Career', 'Pickup', 'Life', 'Gear', 'Funds', 'Review'] as const;
 
 function WizardTip({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -46,8 +75,40 @@ type Draft = {
   statBases: Record<keyof Stats, number>;
   careerValues: Record<string, number>;
   pickup: { name: string; value: number }[];
+  lifepath: Lifepath;
+  startingItems: CharacterItem[];
+  /** Last armor/weapon table roll (p.30); same D10+mod picks both armor and weapon row. */
+  gearTableRoll: ChargenStartingGearResult['armorWeaponTable'];
   eurobucks: number;
 };
+
+function itemTypeLabel(t: CharacterItem['type']): string {
+  switch (t) {
+    case 'armor':
+      return 'Armor';
+    case 'weapon':
+      return 'Weapon';
+    case 'cyberware':
+      return 'Cyberware';
+    case 'vehicle':
+      return 'Vehicle';
+    case 'program':
+      return 'Program';
+    case 'misc':
+      return 'Gear';
+    default:
+      return t;
+  }
+}
+
+function freshLifepath(): Lifepath {
+  return {
+    ...EMPTY_LIFEPATH,
+    style: { ...EMPTY_LIFEPATH.style },
+    motivations: { ...EMPTY_LIFEPATH.motivations },
+    lifeEvents: [],
+  };
+}
 
 function basesFromAllocated(stats: Stats): Record<keyof Stats, number> {
   const o = {} as Record<keyof Stats, number>;
@@ -68,6 +129,7 @@ function rollFreshDraft(suggestedName: string): Draft {
   const pickupSkills = distributePickupSkills(careerNames, statBases.ref, statBases.int, rng);
   const pickup = pickupSkills.map((s) => ({ name: s.name, value: s.value }));
   const spec = career.find((s) => s.isSpecialAbility)?.value ?? 1;
+  const gear = rollChargenStartingGear(role, rng);
   return {
     name: suggestedName.trim() || 'New runner',
     role,
@@ -78,6 +140,9 @@ function rollFreshDraft(suggestedName: string): Draft {
     statBases,
     careerValues,
     pickup,
+    lifepath: freshLifepath(),
+    startingItems: gear.items,
+    gearTableRoll: gear.armorWeaponTable,
     eurobucks: rollStartingEurobucks(role, spec, rng),
   };
 }
@@ -193,11 +258,21 @@ export function ChargenWizard({
     });
   }, []);
 
+  const rollStartingGear = useCallback(() => {
+    setDraft((d) => {
+      if (!d) return d;
+      const rng = createCryptoRng();
+      const gear = rollChargenStartingGear(d.role, rng);
+      return { ...d, startingItems: gear.items, gearTableRoll: gear.armorWeaponTable };
+    });
+  }, []);
+
   const changeRole = useCallback((role: RoleType) => {
     const rng = createCryptoRng();
     const { skills } = distributeCareerSkills(role, rng);
     const careerValues = Object.fromEntries(skills.map((s) => [s.name, s.value]));
     const careerSet = new Set(skills.map((s) => s.name));
+    const gear = rollChargenStartingGear(role, rng);
     setDraft((d) => {
       if (!d) return d;
       const pickup = d.pickup.filter((p) => !careerSet.has(p.name));
@@ -207,6 +282,8 @@ export function ChargenWizard({
         role,
         careerValues,
         pickup,
+        startingItems: gear.items,
+        gearTableRoll: gear.armorWeaponTable,
         eurobucks: rollStartingEurobucks(role, spec, rng),
       };
     });
@@ -225,6 +302,8 @@ export function ChargenWizard({
       careerValuesByName: draft.careerValues,
       pickup: draft.pickup.filter((p) => p.value > 0),
       eurobucks: draft.eurobucks,
+      lifepath: draft.lifepath,
+      items: draft.startingItems,
     };
   }, [draft, sessionId, userId]);
 
@@ -242,8 +321,10 @@ export function ChargenWizard({
       return c40 === 40 && sp >= 1 && sp <= 10;
     }
     if (step === 3) return spentPickup <= pickupPool;
-    if (step === 4) return draft.eurobucks >= 0;
-    if (step === 5) return reviewErrors.length === 0;
+    if (step === 4) return true;
+    if (step === 5) return true;
+    if (step === 6) return draft.eurobucks >= 0;
+    if (step === 7) return reviewErrors.length === 0;
     return true;
   }, [draft, step, statSum, c40, specialName, spentPickup, pickupPool, reviewErrors.length]);
 
@@ -306,9 +387,8 @@ export function ChargenWizard({
               New character
             </h2>
             <p className="text-[10px] text-zinc-500 mt-0.5 leading-snug">
-              View from the Edge-style chargen: split Character Points across nine stats, spend 40 points on your
-              role&apos;s fixed career package (special ability included), add pickup skills from the book pool using
-              REF+INT, then set starting eurobucks.
+              View from the Edge flow: stats & skills, Lifepath, starting gear (p.30 tables), then occupation-table cash
+              (p.58). Totals are validated before save.
             </p>
           </div>
           <button
@@ -751,12 +831,640 @@ export function ChargenWizard({
 
           {step === 4 && (
             <div className="space-y-3 text-xs">
+              <WizardTip title="Lifepath (View from the Edge pp.34–39)">
+                <p>
+                  Buttons follow the book: <span className="text-zinc-300">§1</span> dress (3×D10) and ethnic origins
+                  (D10); <span className="text-zinc-300">§2</span> family ranking → parents → status/tragedy →
+                  childhood → siblings (with sex/age/feeling per sibling); <span className="text-zinc-300">§3</span>{' '}
+                  motivations (five D10); <span className="text-zinc-300">§4</span> for each year{' '}
+                  <span className="text-zinc-300">after 16</span>, main D10 (wins/romance/friends/nothing) then nested
+                  rolls in subsections. Set age first (Profile or <span className="text-zinc-300">2D6+16</span> here),
+                  then roll life events through that age.
+                </p>
+              </WizardTip>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  className="text-[10px] uppercase px-2 py-1.5 rounded border border-violet-800/60 text-violet-200 hover:bg-violet-950/30"
+                  onClick={() => {
+                    const rng = createCryptoRng();
+                    setDraft((d) =>
+                      d
+                        ? {
+                            ...d,
+                            lifepath: { ...d.lifepath, style: rollLifepathStyleFromBook(rng) },
+                          }
+                        : d,
+                    );
+                  }}
+                >
+                  §1 Roll style (3×D10)
+                </button>
+                <button
+                  type="button"
+                  className="text-[10px] uppercase px-2 py-1.5 rounded border border-violet-800/60 text-violet-200 hover:bg-violet-950/30"
+                  onClick={() => {
+                    const rng = createCryptoRng();
+                    setDraft((d) => {
+                      if (!d) return d;
+                      const { ethnicity, language } = rollLifepathEthnicityFromBook(rng);
+                      return { ...d, lifepath: { ...d.lifepath, ethnicity, language } };
+                    });
+                  }}
+                >
+                  §1 Roll ethnic origins
+                </button>
+                <button
+                  type="button"
+                  className="text-[10px] uppercase px-2 py-1.5 rounded border border-amber-800/50 text-amber-200 hover:bg-amber-950/25"
+                  onClick={() => {
+                    const rng = createCryptoRng();
+                    setDraft((d) => {
+                      if (!d) return d;
+                      const { familyBackground, siblings } = rollLifepathFamilyAndSiblingsFromBook(rng);
+                      return { ...d, lifepath: { ...d.lifepath, familyBackground, siblings } };
+                    });
+                  }}
+                >
+                  §2 Family + siblings
+                </button>
+                <button
+                  type="button"
+                  className="text-[10px] uppercase px-2 py-1.5 rounded border border-emerald-800/50 text-emerald-200 hover:bg-emerald-950/20"
+                  onClick={() => {
+                    const rng = createCryptoRng();
+                    setDraft((d) =>
+                      d
+                        ? {
+                            ...d,
+                            lifepath: { ...d.lifepath, motivations: rollLifepathMotivationsFromBook(rng) },
+                          }
+                        : d,
+                    );
+                  }}
+                >
+                  §3 Motivations (5×D10)
+                </button>
+                <button
+                  type="button"
+                  className="text-[10px] uppercase px-2 py-1.5 rounded border border-cyan-800/50 text-cyan-200 hover:bg-cyan-950/25"
+                  onClick={() => {
+                    const rng = createCryptoRng();
+                    setDraft((d) => {
+                      if (!d) return d;
+                      const block = rollLifepathSections1to3FromBook(rng);
+                      return {
+                        ...d,
+                        lifepath: {
+                          ...d.lifepath,
+                          style: block.style,
+                          ethnicity: block.ethnicity,
+                          language: block.language,
+                          familyBackground: block.familyBackground,
+                          siblings: block.siblings,
+                          motivations: block.motivations,
+                        },
+                      };
+                    });
+                  }}
+                >
+                  §1–3 All at once
+                </button>
+                <button
+                  type="button"
+                  className="text-[10px] uppercase px-2 py-1.5 rounded border border-zinc-600 text-zinc-300 hover:bg-zinc-900"
+                  onClick={() => {
+                    const rng = createCryptoRng();
+                    setDraft((d) =>
+                      d
+                        ? {
+                            ...d,
+                            age: rollLifepathAgeFromBook(rng),
+                          }
+                        : d,
+                    );
+                  }}
+                >
+                  Age = 2D6+16
+                </button>
+                <button
+                  type="button"
+                  className="text-[10px] uppercase px-2 py-1.5 rounded border border-rose-800/50 text-rose-200 hover:bg-rose-950/20 col-span-2 sm:col-span-3"
+                  onClick={() => {
+                    const rng = createCryptoRng();
+                    setDraft((d) => {
+                      if (!d) return d;
+                      const lifeEvents = rollLifepathLifeEventsFromBook(d.age, rng);
+                      return { ...d, lifepath: { ...d.lifepath, lifeEvents } };
+                    });
+                  }}
+                >
+                  §4 Roll life events (age 17 → {draft.age})
+                </button>
+                <button
+                  type="button"
+                  className="text-[10px] uppercase px-2 py-1.5 rounded border border-zinc-700 text-zinc-500 hover:bg-zinc-900 col-span-2 sm:col-span-3"
+                  onClick={() =>
+                    setDraft((d) =>
+                      d ? { ...d, lifepath: { ...d.lifepath, lifeEvents: [] } } : d,
+                    )
+                  }
+                >
+                  Clear life events
+                </button>
+              </div>
+              <div className="grid grid-cols-1 gap-2">
+                <label className="space-y-0.5">
+                  <span className="text-[10px] uppercase text-zinc-500">Clothes</span>
+                  <select
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1"
+                    value={draft.lifepath.style.clothes}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        lifepath: {
+                          ...draft.lifepath,
+                          style: { ...draft.lifepath.style, clothes: e.target.value },
+                        },
+                      })
+                    }
+                  >
+                    <option value="">—</option>
+                    {LIFEPATH_CLOTHES.map((o) => (
+                      <option key={o} value={o}>
+                        {o}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="space-y-0.5">
+                  <span className="text-[10px] uppercase text-zinc-500">Hair</span>
+                  <select
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1"
+                    value={draft.lifepath.style.hair}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        lifepath: {
+                          ...draft.lifepath,
+                          style: { ...draft.lifepath.style, hair: e.target.value },
+                        },
+                      })
+                    }
+                  >
+                    <option value="">—</option>
+                    {LIFEPATH_HAIR.map((o) => (
+                      <option key={o} value={o}>
+                        {o}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="space-y-0.5">
+                  <span className="text-[10px] uppercase text-zinc-500">Affectations</span>
+                  <select
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1"
+                    value={draft.lifepath.style.affectations}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        lifepath: {
+                          ...draft.lifepath,
+                          style: { ...draft.lifepath.style, affectations: e.target.value },
+                        },
+                      })
+                    }
+                  >
+                    <option value="">—</option>
+                    {LIFEPATH_AFFECTATIONS.map((o) => (
+                      <option key={o} value={o}>
+                        {o}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="space-y-0.5">
+                  <span className="text-[10px] uppercase text-zinc-500">Ethnicity / origin</span>
+                  <select
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1"
+                    value={draft.lifepath.ethnicity}
+                    onChange={(e) =>
+                      setDraft({ ...draft, lifepath: { ...draft.lifepath, ethnicity: e.target.value } })
+                    }
+                  >
+                    <option value="">—</option>
+                    {LIFEPATH_ETHNICITY.map((o) => (
+                      <option key={o} value={o}>
+                        {o}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="space-y-0.5">
+                  <span className="text-[10px] uppercase text-zinc-500">Language</span>
+                  <select
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1"
+                    value={draft.lifepath.language}
+                    onChange={(e) =>
+                      setDraft({ ...draft, lifepath: { ...draft.lifepath, language: e.target.value } })
+                    }
+                  >
+                    <option value="">—</option>
+                    {LIFEPATH_LANGUAGE.map((o) => (
+                      <option key={o} value={o}>
+                        {o}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="space-y-0.5">
+                    <span className="text-[10px] uppercase text-zinc-500">Family ranking</span>
+                    <select
+                      className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-[11px]"
+                      value=""
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (!v) return;
+                        e.target.value = '';
+                        setDraft((d) =>
+                          d
+                            ? {
+                                ...d,
+                                lifepath: {
+                                  ...d.lifepath,
+                                  familyBackground: v,
+                                },
+                              }
+                            : d,
+                        );
+                      }}
+                    >
+                      <option value="">Insert preset…</option>
+                      {LIFEPATH_FAMILY_RANKING.map((o) => (
+                        <option key={o} value={o}>
+                          {o}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="space-y-0.5">
+                    <span className="text-[10px] uppercase text-zinc-500">Childhood env.</span>
+                    <select
+                      className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-[11px]"
+                      value=""
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (!v) return;
+                        e.target.value = '';
+                        setDraft((d) =>
+                          d
+                            ? {
+                                ...d,
+                                lifepath: {
+                                  ...d.lifepath,
+                                  familyBackground: d.lifepath.familyBackground
+                                    ? `${d.lifepath.familyBackground}; ${v}`
+                                    : v,
+                                },
+                              }
+                            : d,
+                        );
+                      }}
+                    >
+                      <option value="">Append preset…</option>
+                      {LIFEPATH_CHILDHOOD.map((o) => (
+                        <option key={o} value={o}>
+                          {o}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <label className="space-y-0.5">
+                  <span className="text-[10px] uppercase text-zinc-500">Family & childhood (free text)</span>
+                  <textarea
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1 min-h-[52px]"
+                    value={draft.lifepath.familyBackground}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        lifepath: { ...draft.lifepath, familyBackground: e.target.value },
+                      })
+                    }
+                  />
+                </label>
+                <label className="space-y-0.5">
+                  <span className="text-[10px] uppercase text-zinc-500">Siblings</span>
+                  <select
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1"
+                    value={
+                      LIFEPATH_SIBLINGS_PRESET.includes(draft.lifepath.siblings as (typeof LIFEPATH_SIBLINGS_PRESET)[number])
+                        ? draft.lifepath.siblings
+                        : '__custom__'
+                    }
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setDraft({
+                        ...draft,
+                        lifepath: {
+                          ...draft.lifepath,
+                          siblings: v === '__custom__' ? '' : v,
+                        },
+                      });
+                    }}
+                  >
+                    <option value="">—</option>
+                    {LIFEPATH_SIBLINGS_PRESET.map((o) => (
+                      <option key={o} value={o}>
+                        {o}
+                      </option>
+                    ))}
+                    <option value="__custom__">Custom (edit below)</option>
+                  </select>
+                  <input
+                    className="w-full mt-1 bg-zinc-900 border border-zinc-700 rounded px-2 py-1"
+                    placeholder="Custom siblings note"
+                    value={
+                      LIFEPATH_SIBLINGS_PRESET.includes(
+                        draft.lifepath.siblings as (typeof LIFEPATH_SIBLINGS_PRESET)[number],
+                      )
+                        ? ''
+                        : draft.lifepath.siblings
+                    }
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        lifepath: { ...draft.lifepath, siblings: e.target.value },
+                      })
+                    }
+                  />
+                </label>
+                <label className="space-y-0.5">
+                  <span className="text-[10px] uppercase text-zinc-500">Personality traits</span>
+                  <select
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1"
+                    value={draft.lifepath.motivations.traits}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        lifepath: {
+                          ...draft.lifepath,
+                          motivations: { ...draft.lifepath.motivations, traits: e.target.value },
+                        },
+                      })
+                    }
+                  >
+                    <option value="">—</option>
+                    {LIFEPATH_TRAITS.map((o) => (
+                      <option key={o} value={o}>
+                        {o}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="space-y-0.5">
+                  <span className="text-[10px] uppercase text-zinc-500">Valued person</span>
+                  <select
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1"
+                    value={draft.lifepath.motivations.valuedPerson}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        lifepath: {
+                          ...draft.lifepath,
+                          motivations: { ...draft.lifepath.motivations, valuedPerson: e.target.value },
+                        },
+                      })
+                    }
+                  >
+                    <option value="">—</option>
+                    {LIFEPATH_VALUED_PERSON.map((o) => (
+                      <option key={o} value={o}>
+                        {o}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="space-y-0.5">
+                  <span className="text-[10px] uppercase text-zinc-500">Value most</span>
+                  <select
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1"
+                    value={draft.lifepath.motivations.valueMost}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        lifepath: {
+                          ...draft.lifepath,
+                          motivations: { ...draft.lifepath.motivations, valueMost: e.target.value },
+                        },
+                      })
+                    }
+                  >
+                    <option value="">—</option>
+                    {LIFEPATH_VALUE_MOST.map((o) => (
+                      <option key={o} value={o}>
+                        {o}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="space-y-0.5">
+                  <span className="text-[10px] uppercase text-zinc-500">Feel about people</span>
+                  <select
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1"
+                    value={draft.lifepath.motivations.feelAboutPeople}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        lifepath: {
+                          ...draft.lifepath,
+                          motivations: { ...draft.lifepath.motivations, feelAboutPeople: e.target.value },
+                        },
+                      })
+                    }
+                  >
+                    <option value="">—</option>
+                    {LIFEPATH_FEEL_ABOUT_PEOPLE.map((o) => (
+                      <option key={o} value={o}>
+                        {o}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="space-y-0.5">
+                  <span className="text-[10px] uppercase text-zinc-500">Valued possession</span>
+                  <select
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1"
+                    value={draft.lifepath.motivations.valuedPossession}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        lifepath: {
+                          ...draft.lifepath,
+                          motivations: { ...draft.lifepath.motivations, valuedPossession: e.target.value },
+                        },
+                      })
+                    }
+                  >
+                    <option value="">—</option>
+                    {LIFEPATH_VALUED_POSSESSION.map((o) => (
+                      <option key={o} value={o}>
+                        {o}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div className="space-y-1">
+                <div className="flex justify-between items-center">
+                  <span className="text-[10px] uppercase text-zinc-500">Life events (optional)</span>
+                  <button
+                    type="button"
+                    className="text-[10px] uppercase text-cyan-600 hover:text-cyan-400"
+                    onClick={() =>
+                      setDraft((d) => {
+                        if (!d) return d;
+                        const ev = d.lifepath.lifeEvents;
+                        const nextAge =
+                          ev.length > 0 ? Math.max(...ev.map((e) => e.age)) + 1 : Math.max(17, Math.min(d.age, 99));
+                        return {
+                          ...d,
+                          lifepath: {
+                            ...d.lifepath,
+                            lifeEvents: [...ev, { age: nextAge, event: '' }],
+                          },
+                        };
+                      })
+                    }
+                  >
+                    + Add row
+                  </button>
+                </div>
+                {draft.lifepath.lifeEvents.length === 0 ? (
+                  <p className="text-[10px] text-zinc-600">No events — fine for a quick chargen.</p>
+                ) : (
+                  <ul className="space-y-1 max-h-36 overflow-y-auto">
+                    {draft.lifepath.lifeEvents.map((ev, index) => (
+                      <li key={index} className="flex gap-1 items-center">
+                        <input
+                          type="number"
+                          min={16}
+                          max={99}
+                          className="w-14 bg-zinc-900 border border-zinc-700 rounded px-1 py-0.5 font-mono text-[11px]"
+                          value={ev.age}
+                          onChange={(e) => {
+                            const age = Number.parseInt(e.target.value, 10) || 16;
+                            setDraft((d) => {
+                              if (!d) return d;
+                              const copy = [...d.lifepath.lifeEvents];
+                              copy[index] = { ...copy[index]!, age };
+                              return { ...d, lifepath: { ...d.lifepath, lifeEvents: copy } };
+                            });
+                          }}
+                        />
+                        <input
+                          className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-2 py-0.5 text-[11px]"
+                          value={ev.event}
+                          placeholder="What happened?"
+                          onChange={(e) => {
+                            const event = e.target.value;
+                            setDraft((d) => {
+                              if (!d) return d;
+                              const copy = [...d.lifepath.lifeEvents];
+                              copy[index] = { ...copy[index]!, event };
+                              return { ...d, lifepath: { ...d.lifepath, lifeEvents: copy } };
+                            });
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="text-red-400/90 text-[10px] uppercase shrink-0"
+                          onClick={() =>
+                            setDraft((d) => {
+                              if (!d) return d;
+                              return {
+                                ...d,
+                                lifepath: {
+                                  ...d.lifepath,
+                                  lifeEvents: d.lifepath.lifeEvents.filter((_, i) => i !== index),
+                                },
+                              };
+                            })
+                          }
+                        >
+                          ×
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <label className="space-y-0.5 block">
+                <span className="text-[10px] uppercase text-zinc-500">Notes</span>
+                <textarea
+                  className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1 min-h-[48px]"
+                  value={draft.lifepath.notes}
+                  onChange={(e) =>
+                    setDraft({ ...draft, lifepath: { ...draft.lifepath, notes: e.target.value } })
+                  }
+                />
+              </label>
+            </div>
+          )}
+
+          {step === 5 && (
+            <div className="space-y-3 text-xs">
+              <WizardTip title="Starting armor, weapon & cyber">
+                <p>
+                  Uses the <span className="text-zinc-300">Fast Character System</span> tables (core book p.30):{' '}
+                  <span className="text-zinc-300">1D10 + role modifier</span> for armor and matching weapon row, plus{' '}
+                  <span className="text-zinc-300">1D10</span> cyber picks — Solos get six rolls, everyone else three, with
+                  duplicate results re-rolled. Subsystems (optics, cyberarm gun, audio) use the book&apos;s D6 charts.
+                </p>
+                <p>
+                  <span className="text-zinc-300">Role modifier</span> is not a bug:{' '}
+                  <span className="text-zinc-300">Solo +3</span>, <span className="text-zinc-300">Cop & Nomad +2</span>,{' '}
+                  other roles <span className="text-zinc-300">+0</span>. The total is capped 1–10, so a Solo{' '}
+                  <span className="text-zinc-300">never</span> uses rows 1–3 (no Knife / Heavy Leather on a natural 1 — minimum
+                  row is 4). Netrunner, Techie, Media, etc. can roll the full table.
+                </p>
+              </WizardTip>
+              {draft.gearTableRoll && (
+                <p className="text-[11px] text-amber-200/95 font-mono bg-amber-950/20 border border-amber-900/40 rounded px-2 py-1.5">
+                  Armor/weapon row: D10={draft.gearTableRoll.d10} + {draft.gearTableRoll.modifier} ({draft.role}) →{' '}
+                  <span className="text-amber-100">table {draft.gearTableRoll.tableIndex}</span>
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={rollStartingGear}
+                className="w-full text-[10px] uppercase py-2 rounded border border-amber-800/60 text-amber-200 hover:bg-amber-950/25"
+              >
+                Roll / re-roll starting gear
+              </button>
+              <ul className="space-y-1.5 text-[11px] bg-zinc-900/40 border border-zinc-800 rounded px-2 py-2 max-h-48 overflow-y-auto">
+                {draft.startingItems.map((it) => (
+                  <li key={it.id} className="flex gap-2 items-baseline">
+                    <span className="text-zinc-500 shrink-0 min-w-[4.75rem] tabular-nums">
+                      {itemTypeLabel(it.type)}
+                    </span>
+                    <span className="text-zinc-400 shrink-0">·</span>
+                    <span className="text-zinc-200 text-right flex-1">{it.name}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {step === 6 && (
+            <div className="space-y-3 text-xs">
               <WizardTip title="Occupation table and starting cash">
                 <p>
                   Monthly salary comes from the Occupation Table, keyed off your{' '}
-                  <span className="text-zinc-300">special ability level</span> from the Career step. Starting eurobucks
-                  use the book procedure: employed for a fractional number of months, then a check that can cut the
-                  total in half if you are considered unemployed—your ref has the final say.
+                  <span className="text-zinc-300">special ability level</span> from the Career step. Multiply by{' '}
+                  <span className="text-zinc-300">1D6÷3</span> for how many months of that salary you banked, then roll
+                  again — on <span className="text-zinc-300">5+</span> you are unemployed and lose half (p.58).
                 </p>
                 <p>
                   Roll here to randomize, or type an amount everyone at the table agrees on for a cinematic start.
@@ -786,12 +1494,12 @@ export function ChargenWizard({
                 onClick={rollFunds}
                 className="w-full text-[10px] uppercase py-2 rounded border border-emerald-800/60 text-emerald-200 hover:bg-emerald-950/25"
               >
-                Roll starting funds (book: months × salary, unemployment check)
+                Roll starting funds (book: salary × D6÷3, unemployment check)
               </button>
             </div>
           )}
 
-          {step === 5 && (
+          {step === 7 && (
             <div className="space-y-2 text-[11px] text-zinc-300">
               <WizardTip title="Before you save">
                 <p>
@@ -812,6 +1520,22 @@ export function ChargenWizard({
               <p className="text-zinc-500">Stats: {CP2020_STAT_KEYS.map((k) => `${k.toUpperCase()} ${draft.statBases[k]}`).join(', ')}</p>
               <p className="text-zinc-500">
                 Career {c40}/40 · Pickup {spentPickup}/{pickupPool}
+              </p>
+              <p className="text-zinc-500">
+                <span className="text-zinc-500">Starting gear:</span>{' '}
+                {draft.startingItems.length === 0
+                  ? '—'
+                  : draft.startingItems.map((i) => `${itemTypeLabel(i.type)}: ${i.name}`).join('; ')}
+              </p>
+              {draft.gearTableRoll && (
+                <p className="text-zinc-500">
+                  <span className="text-zinc-500">Armor/weapon table:</span> D10 {draft.gearTableRoll.d10} +{' '}
+                  {draft.gearTableRoll.modifier} → row {draft.gearTableRoll.tableIndex}
+                </p>
+              )}
+              <p className="text-zinc-500">
+                <span className="text-zinc-500">Life tab:</span>{' '}
+                {[draft.lifepath.style.clothes, draft.lifepath.ethnicity].filter(Boolean).join(' · ') || '—'}
               </p>
               {reviewErrors.length > 0 && (
                 <ul className="text-amber-400 text-xs list-disc pl-4 space-y-0.5">

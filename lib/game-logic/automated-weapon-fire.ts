@@ -70,6 +70,8 @@ function applyHit(
 
 export function runAutomatedWeaponFire(input: {
   shooterName: string;
+  /** Session character id (for successive-action tracking). */
+  shooterCharacterId: string;
   weapon: Weapon;
   mode: 'ThreeRoundBurst' | 'FullAuto';
   /** REF + skill + WA */
@@ -78,20 +80,28 @@ export function runAutomatedWeaponFire(input: {
   situationalModSumByTarget: (targetId: string) => number;
   /** Extra delta from stripping incompatible checklist toggles (typically negative). */
   modStrip: number;
+  /** CP2020 multi-action penalty (0 or −3) applied to each to-hit roll this burst/FA. */
+  multiActionPenalty?: number;
   targets: AutomatedFireTarget[];
   /** Map cover for damage pipeline (per victim). */
   coverByTargetId: Record<string, { stackedSp: number; regionIds: string[] } | undefined>;
 }): void {
   const {
     shooterName,
+    shooterCharacterId,
     weapon,
     mode,
     attackSkillTotal,
     situationalModSumByTarget,
     modStrip,
+    multiActionPenalty = 0,
     targets,
     coverByTargetId,
   } = input;
+
+  const bumpCombatActionCount = () => {
+    void useGameStore.getState().recordCombatActionCommitted(shooterCharacterId);
+  };
 
   if (weapon.weaponType === 'Melee' || targets.length === 0) return;
 
@@ -105,10 +115,11 @@ export function runAutomatedWeaponFire(input: {
     const t = targets[0];
     const dv = rangeBrackets[t.bracket].dc;
     const sit = situationalModSumByTarget(t.characterId) + modStrip;
-    const staticBonus = attackSkillTotal + sit + 3;
+    const staticBonus = attackSkillTotal + sit + 3 + multiActionPenalty;
     const atk = rollDice(`1d10+${staticBonus}`);
     if (!atk) {
       postRollLine(shooterName, lines.join('\n') + '\n(roll error)');
+      bumpCombatActionCount();
       return;
     }
     const hit = fnffAttackTotalMeetsDv(atk.total, dv);
@@ -124,6 +135,7 @@ export function runAutomatedWeaponFire(input: {
     // FNFF: resolve jam / mishap on natural 1 even if modifiers push total ≥ DV.
     if (!hit || atk.firstD10Face === 1) {
       postRollLine(shooterName, lines.join('\n'));
+      bumpCombatActionCount();
       return;
     }
 
@@ -142,6 +154,7 @@ export function runAutomatedWeaponFire(input: {
     }
 
     postRollLine(shooterName, lines.join('\n'));
+    bumpCombatActionCount();
     return;
   }
 
@@ -153,7 +166,7 @@ export function runAutomatedWeaponFire(input: {
     const dv = rangeBrackets[t.bracket].dc;
     const faMod = fullAutoToHitModifier(rpt, t.bracket);
     const sit = situationalModSumByTarget(t.characterId) + modStrip;
-    const staticBonus = attackSkillTotal + sit + faMod;
+    const staticBonus = attackSkillTotal + sit + faMod + multiActionPenalty;
     const atk = rollDice(`1d10+${staticBonus}`);
     if (!atk) {
       lines.push(`vs **${t.name}**: (roll error)`);
@@ -185,4 +198,5 @@ export function runAutomatedWeaponFire(input: {
   }
 
   postRollLine(shooterName, lines.join('\n'));
+  bumpCombatActionCount();
 }

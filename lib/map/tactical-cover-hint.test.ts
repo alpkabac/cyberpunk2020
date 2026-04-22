@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { Character, MapCoverRegion, SessionSettings, Token } from '../types';
+import { DEFAULT_NARRATION_TTS_CLIENT_CONFIG } from '../narration/narration-tts-client-config';
 import { buildTacticalCoverHints, losBlockedByCover, bresenhamLine } from './tactical-cover-hint';
 
 describe('tactical-cover-hint', () => {
@@ -17,6 +18,7 @@ describe('tactical-cover-hint', () => {
   it('buildTacticalCoverHints prefers cells that block more enemies', () => {
     const settings: SessionSettings = {
       ttsEnabled: false,
+      narrationTts: DEFAULT_NARRATION_TTS_CLIENT_CONFIG,
       ttsVoice: 'default',
       autoRollDamage: true,
       allowPlayerTokenMovement: true,

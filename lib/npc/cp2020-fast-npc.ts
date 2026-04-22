@@ -26,15 +26,28 @@ const THREAT_DELTA: Record<FastNpcThreat, number> = {
   elite: 2,
 };
 
+/** p.30: Solo +3, Nomad & Cop +2, all other roles +0. Result is clamped 1–10 (never below 1). */
+export function armorWeaponTableModifier(role: RoleType): number {
+  if (role === 'Solo') return 3;
+  if (role === 'Nomad' || role === 'Cop') return 2;
+  return 0;
+}
+
+/** Full die + modifier so players see why a Solo never rolls “table 1” on a natural 1. */
+export function rollArmorWeaponTableRoll(role: RoleType, rng: Cp2020Rng): {
+  d10: number;
+  modifier: number;
+  tableIndex: number;
+} {
+  const d10 = rollD10(rng);
+  const modifier = armorWeaponTableModifier(role);
+  const tableIndex = Math.max(1, Math.min(10, d10 + modifier));
+  return { d10, modifier, tableIndex };
+}
+
 /** p.30 armor & weapon table: d10 + role modifier (clamped 1–10). */
 export function armorWeaponTableIndex(role: RoleType, rng: Cp2020Rng): number {
-  const mod =
-    role === 'Solo'
-      ? 3
-      : role === 'Nomad' || role === 'Cop'
-        ? 2
-        : 0;
-  return Math.max(1, Math.min(10, rollD10(rng) + mod));
+  return rollArmorWeaponTableRoll(role, rng).tableIndex;
 }
 
 function rollStat2d6(rng: Cp2020Rng): number {
@@ -45,7 +58,7 @@ function rollStat2d6(rng: Cp2020Rng): number {
   return v;
 }
 
-function armorFromTableIndex(idx: number): { name: string; armor: Armor } {
+export function armorFromTableIndex(idx: number): { name: string; armor: Armor } {
   const id = crypto.randomUUID();
   const baseItem = {
     id,
@@ -80,7 +93,7 @@ function armorFromTableIndex(idx: number): { name: string; armor: Armor } {
   return { name: 'MetalGear', armor: jacket('MetalGear', 25, 25, 25) };
 }
 
-function weaponFromTableIndex(idx: number, rng: Cp2020Rng): { name: string; weapon: Weapon } {
+export function weaponFromTableIndex(idx: number, rng: Cp2020Rng): { name: string; weapon: Weapon } {
   const id = crypto.randomUUID();
   const base = {
     id,

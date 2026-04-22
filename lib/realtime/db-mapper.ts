@@ -23,6 +23,10 @@ import type {
   Zone,
 } from '../types';
 import { createStatBlock } from '../types';
+import {
+  DEFAULT_NARRATION_TTS_CLIENT_CONFIG,
+  mergeNarrationTtsClientConfig,
+} from '../narration/narration-tts-client-config';
 import { resolveCyberwareInitiativeFromRaw } from '../game-logic/cyberware-initiative-resolve';
 import {
   MAP_GRID_DEFAULT_COLS,
@@ -296,6 +300,7 @@ const DEFAULT_SCENE: Scene = {
 
 const DEFAULT_SETTINGS: SessionSettings = {
   ttsEnabled: true,
+  narrationTts: DEFAULT_NARRATION_TTS_CLIENT_CONFIG,
   ttsVoice: 'default',
   autoRollDamage: true,
   allowPlayerTokenMovement: true,
@@ -348,6 +353,9 @@ export function parseSessionSettingsJson(v: unknown): SessionSettings {
 
   return {
     ttsEnabled: typeof o.ttsEnabled === 'boolean' ? o.ttsEnabled : DEFAULT_SETTINGS.ttsEnabled,
+    narrationTts: mergeNarrationTtsClientConfig(
+      o.narrationTts !== undefined ? o.narrationTts : DEFAULT_SETTINGS.narrationTts,
+    ),
     ttsVoice: str(o.ttsVoice, DEFAULT_SETTINGS.ttsVoice),
     autoRollDamage:
       typeof o.autoRollDamage === 'boolean' ? o.autoRollDamage : DEFAULT_SETTINGS.autoRollDamage,

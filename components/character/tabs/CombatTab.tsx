@@ -18,7 +18,10 @@ import {
   RangeBracket,
 } from '@/lib/game-logic/lookups';
 import { sheetRollContext } from '@/lib/dice-roll-send-to-gm';
-import { sumEquippedCyberwareInitiativeBonus } from '@/lib/session/combat-state';
+import {
+  multiActionRollPenaltyForCharacter,
+  sumEquippedCyberwareInitiativeBonus,
+} from '@/lib/session/combat-state';
 import {
   MAP_GRID_DEFAULT_COLS,
   MAP_GRID_DEFAULT_ROWS,
@@ -121,6 +124,7 @@ export function CombatTab({ character, editable }: CombatTabProps) {
       i.id === itemId ? { ...i, equipped: !i.equipped } : i,
     );
     updateCharacterField(character.id, 'items', updatedItems);
+    void useGameStore.getState().recordCombatActionCommitted(character.id);
   };
 
   const initMod = character.combatModifiers?.initiative ?? 0;
@@ -153,6 +157,12 @@ export function CombatTab({ character, editable }: CombatTabProps) {
   const mapTokens = useGameStore((state) => state.map.tokens);
   const mapCoverRegions = useGameStore((state) => state.map.coverRegions);
   const mapGridSettings = useGameStore((state) => state.session.settings);
+  const combatState = useGameStore((state) => state.session.combatState);
+
+  const multiActionPenalty = useMemo(
+    () => multiActionRollPenaltyForCharacter(combatState, character.id),
+    [combatState, character.id],
+  );
 
   const gridColsRows = useMemo(
     () => ({
@@ -516,7 +526,8 @@ export function CombatTab({ character, editable }: CombatTabProps) {
   // Roll attack: REF+skill+WA + ranged checklist (ranged only)
   const handleAttackRoll = (weapon: Weapon, bracket: RangeBracket) => {
     const base = getAttackSkillTotal(weapon);
-    const modSum = weapon.weaponType === 'Melee' ? 0 : getRangedModSum(weapon.id);
+    const modSum =
+      (weapon.weaponType === 'Melee' ? 0 : getRangedModSum(weapon.id)) + multiActionPenalty;
     setSelectedRangeByWeapon((prev) => ({ ...prev, [weapon.id]: bracket }));
     const isAutoWeapon = weapon.isAutoCapable || weapon.attackType === 'Auto';
     const gm =
@@ -605,11 +616,13 @@ export function CombatTab({ character, editable }: CombatTabProps) {
     }
     runAutomatedWeaponFire({
       shooterName: character.name,
+      shooterCharacterId: character.id,
       weapon: w,
       mode,
       attackSkillTotal: getAttackSkillTotal(w),
       situationalModSumByTarget: (tid) => getRangedModSumForTarget(w.id, tid),
       modStrip,
+      multiActionPenalty,
       targets,
       coverByTargetId,
     });
@@ -650,7 +663,8 @@ export function CombatTab({ character, editable }: CombatTabProps) {
     if (success) {
       playWeaponFireSfx(weapon, mode);
       const base = getAttackSkillTotal(weapon);
-      const modSum = weapon.weaponType === 'Melee' ? 0 : getRangedModSum(weapon.id);
+      const modSum =
+        (weapon.weaponType === 'Melee' ? 0 : getRangedModSum(weapon.id)) + multiActionPenalty;
       const isAutoWeapon = weapon.isAutoCapable || weapon.attackType === 'Auto';
       const isMelee = weapon.weaponType === 'Melee';
       const bracket: RangeBracket = isMelee ? 'PointBlank' : getResolvedRangeBracket(weapon);
@@ -1154,6 +1168,13 @@ export function CombatTab({ character, editable }: CombatTabProps) {
                 Use <strong>Apply Damage</strong> after a hit — with a target selected it applies to them; otherwise this
                 sheet.
               </p>
+              {combatState &&
+                combatState.entries.length > 0 &&
+                multiActionPenalty !== 0 && (
+                  <p className="text-[10px] font-semibold text-amber-950 bg-amber-100 border border-amber-800 px-2 py-1 rounded">
+                    Multi-action: <strong>−3</strong> on attack rolls (successive actions this initiative turn).
+                  </p>
+                )}
               <div className="flex flex-wrap gap-3 items-end">
                 <label className="flex flex-col gap-0.5 min-w-[12rem]">
                   <span className="font-semibold text-[10px] uppercase tracking-wide text-gray-700">Target</span>

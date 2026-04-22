@@ -11,16 +11,26 @@ const MAX_IDB_ENTRIES = 80;
 
 const memory = new Map<string, Blob>();
 
-function cacheKey(sessionId: string, messageId: string): string {
-  return `${sessionId}\0${messageId}`;
+function cacheKey(sessionId: string, messageId: string, configFp: string): string {
+  const fp = configFp.length > 0 ? configFp : 'default';
+  return `${sessionId}\0${messageId}\0${fp}`;
 }
 
-export function getNarrationTtsFromMemory(sessionId: string, messageId: string): Blob | undefined {
-  return memory.get(cacheKey(sessionId, messageId));
+export function getNarrationTtsFromMemory(
+  sessionId: string,
+  messageId: string,
+  configFp: string,
+): Blob | undefined {
+  return memory.get(cacheKey(sessionId, messageId, configFp));
 }
 
-export function setNarrationTtsInMemory(sessionId: string, messageId: string, blob: Blob): void {
-  memory.set(cacheKey(sessionId, messageId), blob);
+export function setNarrationTtsInMemory(
+  sessionId: string,
+  messageId: string,
+  configFp: string,
+  blob: Blob,
+): void {
+  memory.set(cacheKey(sessionId, messageId, configFp), blob);
 }
 
 export function clearNarrationTtsMemoryForSession(sessionId: string): void {
@@ -68,8 +78,12 @@ async function idbPruneOld(db: IDBDatabase): Promise<void> {
   });
 }
 
-export async function getNarrationTtsFromIdb(sessionId: string, messageId: string): Promise<Blob | null> {
-  const key = cacheKey(sessionId, messageId);
+export async function getNarrationTtsFromIdb(
+  sessionId: string,
+  messageId: string,
+  configFp: string,
+): Promise<Blob | null> {
+  const key = cacheKey(sessionId, messageId, configFp);
   const db = await openDb();
   if (!db) return null;
   return new Promise((resolve) => {
@@ -83,8 +97,13 @@ export async function getNarrationTtsFromIdb(sessionId: string, messageId: strin
   });
 }
 
-export async function setNarrationTtsInIdb(sessionId: string, messageId: string, blob: Blob): Promise<void> {
-  const key = cacheKey(sessionId, messageId);
+export async function setNarrationTtsInIdb(
+  sessionId: string,
+  messageId: string,
+  configFp: string,
+  blob: Blob,
+): Promise<void> {
+  const key = cacheKey(sessionId, messageId, configFp);
   const db = await openDb();
   if (!db) return;
   await new Promise<void>((resolve) => {

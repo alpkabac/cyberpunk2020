@@ -394,6 +394,47 @@ export const GM_TOOL_DEFINITIONS = [
   {
     type: 'function' as const,
     function: {
+      name: 'npc_resolve_fnff_attack',
+      description:
+        '**Preferred for NPC combat attacks (FNFF):** resolve an NPC\'s melee or ranged attack in one step — to-hit vs DV, hit location, damage through armor, ammo, multi-action penalty, initiative action count, and NPC stun/death saves. Only when the attacker is type `npc`, initiative shows them as the active combatant, and the weapon is on their sheet. Use `range_bracket_override` when tokens are not on the map. For burst/full-auto the weapon must be auto-capable. Do **not** chain roll_dice + apply_damage for standard NPC shots when this tool applies.',
+      parameters: {
+        type: 'object',
+        properties: {
+          attacker_character_id: { type: 'string', description: 'NPC sheet id (CHARACTERS_JSON) — must be active initiative' },
+          weapon_id: { type: 'string', description: 'Weapon item id on that NPC' },
+          attack_kind: {
+            type: 'string',
+            enum: ['melee', 'semi', 'burst', 'full_auto'],
+            description:
+              'melee = adjacent on grid; semi = single shot; burst = 3-round burst (Close/Medium only); full_auto = one volley split across listed targets',
+          },
+          targets: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: { target_character_id: { type: 'string' } },
+              required: ['target_character_id'],
+            },
+            description: 'Defenders to attack (one for melee/semi/burst; one or more for full_auto)',
+          },
+          ranged_modifier_total: {
+            type: 'number',
+            description: 'Optional sum of extra FNFF to-hit modifiers (cover, movement, etc.), default 0',
+          },
+          range_bracket_override: {
+            type: 'string',
+            enum: ['PointBlank', 'Close', 'Medium', 'Long', 'Extreme'],
+            description: 'Use when map distance is unknown; otherwise bracket is from token positions and map scale',
+          },
+          reason: { type: 'string', description: 'Short note for the chat log' },
+        },
+        required: ['attacker_character_id', 'weapon_id', 'attack_kind', 'targets'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
       name: 'equip_item',
       description:
         'Toggle a character item equipped/unequipped. Triggers armor SP recalculation for hit locations.',

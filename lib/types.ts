@@ -3,6 +3,7 @@
  */
 
 import type { GmSelectableOpenRouterModelId } from './gm/gm-openrouter-models';
+import type { NarrationTtsClientConfig } from './narration/narration-tts-client-config';
 
 // ============================================================================
 // Character Types
@@ -489,6 +490,11 @@ export type GmSessionLanguage = 'en' | 'tr';
 
 export interface SessionSettings {
   ttsEnabled: boolean;
+  /**
+   * Room-wide narration TTS engine + params (Cartesia / Chatterbox / Kokoro).
+   * Synced via `sessions.settings` so every client uses the same voice and one server prepare per line.
+   */
+  narrationTts: NarrationTtsClientConfig;
   ttsVoice: string;
   autoRollDamage: boolean;
   allowPlayerTokenMovement: boolean;
@@ -547,6 +553,11 @@ export interface CombatState {
   /** Index into `entries` (sorted highest initiative first). */
   activeTurnIndex: number;
   entries: InitiativeEntry[];
+  /**
+   * Actions already completed by the **active** combatant this initiative turn.
+   * First action has no multi-action penalty; each further action applies −3 to applicable rolls.
+   */
+  actionsThisTurn?: number;
   /**
    * When set, this PC (`type === "character"`) owes start-of-turn stun recovery /
    * ongoing death saves — client should resolve then clear (future: PATCH combat_state).

@@ -213,6 +213,11 @@ export function MapCanvas({
         return;
       }
       const st = useGameStore.getState();
+      const movedTok = st.map.tokens.find((t) => t.id === tokenId);
+      const moverCid = movedTok?.characterId?.trim();
+      if (moverCid) {
+        void st.recordCombatActionCommitted(moverCid);
+      }
       const cols = normalizeGridDimension(st.session.settings.mapGridCols, MAP_GRID_DEFAULT_COLS);
       const rows = normalizeGridDimension(st.session.settings.mapGridRows, MAP_GRID_DEFAULT_ROWS);
       const cell = pctToCell(x, y, cols, rows);

@@ -6,11 +6,13 @@ import { useGameStore } from '@/lib/store/game-store';
 import { useShallow } from 'zustand/react/shallow';
 import type { SessionSoundtrackState } from '@/lib/types';
 import { persistSessionSoundtrackState } from '@/lib/session/persist-session-soundtrack-state';
+import { unlockHtmlAudioFromUserGesture } from '@/lib/audio/unlock-html-audio';
 import {
   SOUNDTRACK_BUCKET,
   defaultSessionSoundtrackState,
   isSoundtrackAudioFileName,
   publicSoundtrackObjectUrl,
+  resolveSoundtrackPlaybackUrl,
 } from '@/lib/session/soundtrack-state';
 
 function sessionInCombat(combatState: { entries: { length: number } } | null | undefined): boolean {
@@ -35,6 +37,7 @@ export function SessionSoundtrackPlayer({ sessionId, supabase }: SessionSoundtra
   const [ambientFiles, setAmbientFiles] = useState<{ name: string }[]>([]);
   const [combatFiles, setCombatFiles] = useState<{ name: string }[]>([]);
   const [listErr, setListErr] = useState<string | null>(null);
+  const [playbackErr, setPlaybackErr] = useState<string | null>(null);
   const [persistErr, setPersistErr] = useState<string | null>(null);
   const [localBusy, setLocalBusy] = useState(false);
   const [rangeMax, setRangeMax] = useState(0);
@@ -49,6 +52,7 @@ export function SessionSoundtrackPlayer({ sessionId, supabase }: SessionSoundtra
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const lastLoadedPathRef = useRef<string>('');
   const lastAppliedRevRef = useRef<number>(-1);
+  const loadGenRef = useRef(0);
   const scrubbingRef = useRef(false);
 
   useEffect(() => {
@@ -76,6 +80,17 @@ export function SessionSoundtrackPlayer({ sessionId, supabase }: SessionSoundtra
       cancelled = true;
     };
   }, [supabase]);
+
+  /** play() after async signed-URL + decode is often blocked unless audio was unlocked from a gesture. */
+  useEffect(() => {
+    const prime = () => unlockHtmlAudioFromUserGesture();
+    window.addEventListener('pointerdown', prime, { capture: true, passive: true });
+    window.addEventListener('keydown', prime, { capture: true, passive: true });
+    return () => {
+      window.removeEventListener('pointerdown', prime, { capture: true });
+      window.removeEventListener('keydown', prime, { capture: true });
+    };
+  }, []);
 
   const activePath = soundtrackState
     ? inCombat
@@ -132,50 +147,124 @@ export function SessionSoundtrackPlayer({ sessionId, supabase }: SessionSoundtra
     const audio = audioRef.current;
     if (!audio) return;
 
+    let cancelled = false;
+
     if (!soundtrackState) {
+      loadGenRef.current += 1;
       lastLoadedPathRef.current = '';
       lastAppliedRevRef.current = -1;
+      setPlaybackErr(null);
       audio.pause();
       audio.removeAttribute('src');
       audio.load();
-      return;
+      return () => {
+        cancelled = true;
+      };
     }
 
-    const url = publicSoundtrackObjectUrl(activePath);
-
-    if (!activePath || !url) {
+    const pubProbe = publicSoundtrackObjectUrl(activePath);
+    if (!activePath.trim() || !pubProbe) {
+      loadGenRef.current += 1;
       lastLoadedPathRef.current = '';
       lastAppliedRevRef.current = -1;
+      setPlaybackErr(null);
       audio.pause();
       audio.removeAttribute('src');
       audio.load();
-      return;
+      return () => {
+        cancelled = true;
+      };
     }
 
     const rev = soundtrackState.revision;
     const shouldPlay = soundtrackState.isPlaying;
 
-    if (lastLoadedPathRef.current !== activePath) {
-      lastLoadedPathRef.current = activePath;
-      audio.src = url;
-      audio.load();
-      const onMeta = () => {
-        audio.volume = musicVolumeRef.current;
-        audio.currentTime = 0;
-        if (shouldPlay) void audio.play().catch(() => {});
-        else audio.pause();
-        lastAppliedRevRef.current = rev;
-      };
-      audio.addEventListener('loadedmetadata', onMeta, { once: true });
-      return;
-    }
-
-    if (lastAppliedRevRef.current !== rev) {
+    const applyRevTransport = () => {
+      if (lastAppliedRevRef.current === rev) return;
       lastAppliedRevRef.current = rev;
       if (shouldPlay) void audio.play().catch(() => {});
       else audio.pause();
+    };
+
+    if (lastLoadedPathRef.current !== activePath) {
+      const gen = ++loadGenRef.current;
+      setPlaybackErr(null);
+
+      void (async () => {
+        const { url, lastError } = await resolveSoundtrackPlaybackUrl(supabase, activePath);
+        if (cancelled || gen !== loadGenRef.current) return;
+        if (!audioRef.current) return;
+        const el = audioRef.current;
+
+        if (!url) {
+          setPlaybackErr(
+            lastError ?? 'Could not build a playback URL. Check the soundtrack bucket and policies.',
+          );
+          lastLoadedPathRef.current = '';
+          return;
+        }
+
+        el.src = url;
+        el.load();
+
+        const onErr = () => {
+          if (cancelled || gen !== loadGenRef.current) return;
+          const code = el.error?.code;
+          const detail = el.error?.message ?? '';
+          setPlaybackErr(
+            `Playback failed (code ${code ?? '?'}${detail ? `: ${detail}` : ''}). ` +
+              'If you see HTTP 502 on the Storage request, confirm the `soundtrack` bucket exists, ' +
+              'is readable (signed URL or public), and your Supabase project is active.',
+          );
+        };
+
+        let transportRan = false;
+        const runTransport = () => {
+          if (transportRan || cancelled || gen !== loadGenRef.current) return;
+          transportRan = true;
+          lastLoadedPathRef.current = activePath;
+          setPlaybackErr(null);
+          el.volume = musicVolumeRef.current;
+          el.currentTime = 0;
+          const st = useGameStore.getState().session.soundtrackState;
+          const playNow = st?.isPlaying ?? false;
+          const revNow = st?.revision ?? 0;
+          if (playNow) {
+            void el.play().catch((e) => {
+              if (typeof console !== 'undefined') {
+                console.warn(
+                  '[soundtrack] play() blocked or failed — click Play again or tap the page once',
+                  e,
+                );
+              }
+            });
+          } else el.pause();
+          lastAppliedRevRef.current = revNow;
+        };
+
+        el.addEventListener('error', onErr, { once: true });
+        el.addEventListener('loadedmetadata', runTransport, { once: true });
+        el.addEventListener('canplay', runTransport, { once: true });
+      })();
+
+      return () => {
+        cancelled = true;
+        loadGenRef.current += 1;
+      };
     }
-  }, [soundtrackState, activePath]);
+
+    if (audio.readyState < 1) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    applyRevTransport();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [soundtrackState, activePath, supabase]);
 
   useEffect(() => {
     const a = audioRef.current;
@@ -199,6 +288,7 @@ export function SessionSoundtrackPlayer({ sessionId, supabase }: SessionSoundtra
   }, [activePath, soundtrackState?.revision]);
 
   const togglePlay = () => {
+    unlockHtmlAudioFromUserGesture();
     const base = soundtrackState ?? ensureBaseState();
     if (!base.ambientPath && !base.combatPath) {
       setPersistErr('Add audio files to soundtrack/ambient and soundtrack/combat in Storage.');
@@ -211,6 +301,7 @@ export function SessionSoundtrackPlayer({ sessionId, supabase }: SessionSoundtra
   };
 
   const stepTrack = (delta: number) => {
+    unlockHtmlAudioFromUserGesture();
     const base = soundtrackState ?? ensureBaseState();
     if (filesForMode.length === 0) return;
     const paths = filesForMode.map((f) => `${pathPrefix}/${f.name}`);
@@ -225,6 +316,7 @@ export function SessionSoundtrackPlayer({ sessionId, supabase }: SessionSoundtra
   };
 
   const onPickTrack = (objectPath: string) => {
+    unlockHtmlAudioFromUserGesture();
     const base = soundtrackState ?? ensureBaseState();
     if (inCombat) {
       void pushState({ ...base, combatPath: objectPath, isPlaying: true });
@@ -256,7 +348,7 @@ export function SessionSoundtrackPlayer({ sessionId, supabase }: SessionSoundtra
         </span>
       </div>
 
-      <audio ref={audioRef} preload="metadata" className="hidden" />
+      <audio ref={audioRef} preload="metadata" playsInline className="hidden" />
 
       <div className="min-h-10">
         <p className="text-xs text-zinc-200 truncate font-medium" title={displayPath || undefined}>

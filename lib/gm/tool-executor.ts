@@ -32,6 +32,7 @@ import {
   applyGmUpdateAmmo,
 } from './character-mutations';
 import { npcApplyDamageStunSave, npcApplyDeathSave, rollFlatD10 } from './npc-save-rolls';
+import { runNpcFnffAttackResolution, type NpcFnffAttackKind } from './npc-fnff-attack-resolve';
 import { rollDice } from '../game-logic/dice';
 import { resolveGmRequestRollForServer } from '../game-logic/resolve-gm-request-roll';
 import {
@@ -39,6 +40,7 @@ import {
   sessionEndCombat,
   sessionMaybeAutoEndCombatWhenAllDown,
   sessionNextTurn,
+  sessionRecordCombatAction,
   sessionStartCombat,
 } from '../session/session-combat-service';
 import type { LoreRule } from './lorebook';
@@ -52,6 +54,15 @@ import {
 } from '../map/grid';
 
 const ZONES: Zone[] = ['Head', 'Torso', 'rArm', 'lArm', 'lLeg', 'rLeg'];
+
+/** CP2020 successive-action tracking for the active combatant (ignores if not active). */
+async function tryRecordCombatActionForCharacter(
+  supabase: SupabaseClient,
+  sessionId: string,
+  characterId: string,
+): Promise<void> {
+  await sessionRecordCombatAction(supabase, sessionId, characterId);
+}
 
 export type GmToolName =
   | 'apply_damage'
@@ -83,7 +94,8 @@ export type GmToolName =
   | 'spawn_npc'
   | 'spawn_random_npc'
   | 'spawn_unique_npc'
-  | 'add_chat_as_npc';
+  | 'add_chat_as_npc'
+  | 'npc_resolve_fnff_attack';
 
 export interface ToolExecutorContext {
   supabase: SupabaseClient;
@@ -609,6 +621,36 @@ export function validateGmToolParameters(name: string, raw: unknown): { ok: true
       if (typeof text !== 'string') return { ok: false, error: text.error };
       return { ok: true, name: 'add_chat_as_npc', args: raw };
     }
+    case 'npc_resolve_fnff_attack': {
+      const attacker_character_id = str(raw.attacker_character_id, 'attacker_character_id');
+      if (typeof attacker_character_id !== 'string') return { ok: false, error: attacker_character_id.error };
+      const weapon_id = str(raw.weapon_id, 'weapon_id');
+      if (typeof weapon_id !== 'string') return { ok: false, error: weapon_id.error };
+      const ak = raw.attack_kind;
+      if (ak !== 'melee' && ak !== 'semi' && ak !== 'burst' && ak !== 'full_auto') {
+        return { ok: false, error: 'attack_kind must be melee, semi, burst, or full_auto' };
+      }
+      if (!Array.isArray(raw.targets) || raw.targets.length === 0) {
+        return { ok: false, error: 'targets must be a non-empty array' };
+      }
+      for (let i = 0; i < raw.targets.length; i++) {
+        const t = raw.targets[i];
+        if (!isRecord(t)) return { ok: false, error: `targets[${i}] must be an object` };
+        const tid = str(t.target_character_id, `targets[${i}].target_character_id`);
+        if (typeof tid !== 'string') return { ok: false, error: tid.error };
+      }
+      if (raw.ranged_modifier_total !== undefined && raw.ranged_modifier_total !== null) {
+        const rm = num(raw.ranged_modifier_total, 'ranged_modifier_total');
+        if (typeof rm !== 'number') return { ok: false, error: rm.error };
+      }
+      if (raw.range_bracket_override !== undefined && raw.range_bracket_override !== null) {
+        const rb = String(raw.range_bracket_override);
+        if (!['PointBlank', 'Close', 'Medium', 'Long', 'Extreme'].includes(rb)) {
+          return { ok: false, error: 'range_bracket_override must be PointBlank, Close, Medium, Long, or Extreme' };
+        }
+      }
+      return { ok: true, name: 'npc_resolve_fnff_attack', args: raw };
+    }
     default:
       return { ok: false, error: `Unknown tool: ${name}` };
   }
@@ -925,6 +967,19 @@ export async function executeGmTool(
         .eq('id', tokenId)
         .eq('session_id', ctx.sessionId);
       if (error) return { ok: false, name, error: error.message };
+      const { data: tok } = await ctx.supabase
+        .from('tokens')
+        .select('character_id')
+        .eq('id', tokenId)
+        .eq('session_id', ctx.sessionId)
+        .maybeSingle();
+      const cid =
+        tok && typeof (tok as { character_id?: string | null }).character_id === 'string'
+          ? (tok as { character_id: string }).character_id.trim()
+          : null;
+      if (cid) {
+        void tryRecordCombatActionForCharacter(ctx.supabase, ctx.sessionId, cid);
+      }
       return { ok: true, name, result: { token_id: tokenId, x, y } };
     }
     case 'add_token': {
@@ -1085,6 +1140,7 @@ export async function executeGmTool(
       ctx.charactersById.set(id, updated);
       const { error } = await saveCharacterToSupabase(ctx.supabase, updated);
       if (error) return { ok: false, name, error: error.message };
+      void tryRecordCombatActionForCharacter(ctx.supabase, ctx.sessionId, id);
       return { ok: true, name, result: { character_id: id, item_id: args.item_id, equipped: args.equipped } };
     }
     case 'modify_skill': {
@@ -1141,6 +1197,9 @@ export async function executeGmTool(
       ctx.charactersById.set(id, updated);
       const { error } = await saveCharacterToSupabase(ctx.supabase, updated);
       if (error) return { ok: false, name, error: error.message };
+      if (isReload) {
+        void tryRecordCombatActionForCharacter(ctx.supabase, ctx.sessionId, id);
+      }
       const weapon = updated.items.find((i) => i.id === String(args.weapon_id));
       return { ok: true, name, result: { character_id: id, weapon_id: args.weapon_id, shots_left: weapon ? (weapon as unknown as { shotsLeft: number }).shotsLeft : null } };
     }
@@ -1391,6 +1450,33 @@ export async function executeGmTool(
       });
       if (err) return { ok: false, name, error: err.message };
       return { ok: true, name, result: { npc_name: npcName, posted: true } };
+    }
+    case 'npc_resolve_fnff_attack': {
+      const attackKind = String(args.attack_kind) as NpcFnffAttackKind;
+      const targetsIn = args.targets as Array<Record<string, unknown>>;
+      const targets = targetsIn.map((t) => ({ target_character_id: String(t.target_character_id) }));
+      const rangedMod =
+        args.ranged_modifier_total !== undefined && args.ranged_modifier_total !== null
+          ? Number(args.ranged_modifier_total)
+          : 0;
+      const r = await runNpcFnffAttackResolution({
+        ctx,
+        attackerCharacterId: String(args.attacker_character_id),
+        weaponId: String(args.weapon_id),
+        attackKind,
+        targets,
+        rangedModifierTotal: Number.isFinite(rangedMod) ? rangedMod : 0,
+        rangeBracketOverride: args.range_bracket_override,
+        reason: optStr(args.reason),
+      });
+      if (!r.ok) return { ok: false, name, error: r.error };
+      const combined = r.chatLines.join('\n');
+      const chatErr = await insertChatMessage(ctx.supabase, ctx.sessionId, 'Game Master', combined, 'system', {
+        kind: 'npc_fnff_attack',
+        ...r.result,
+      });
+      if (chatErr) return { ok: false, name, error: chatErr.message };
+      return { ok: true, name, result: r.result };
     }
     default:
       return { ok: false, name, error: 'Unhandled tool' };

@@ -104,17 +104,30 @@ export const voiceTurnFragmentBodySchema = z.object({
 export type VoiceTurnFragmentBody = z.infer<typeof voiceTurnFragmentBodySchema>;
 
 /** POST /api/session/[sessionId]/combat */
-export const sessionCombatPostBodySchema = z.object({
-  action: z.enum([
-    'start_combat',
-    'advance_round',
-    'end_combat',
-    'next_turn',
-    'clear_turn_saves_pending',
-  ]),
-  clear_timed_conditions: z.boolean().optional(),
-  narration: z.string().max(4000).optional(),
-});
+export const sessionCombatPostBodySchema = z
+  .object({
+    action: z.enum([
+      'start_combat',
+      'advance_round',
+      'end_combat',
+      'next_turn',
+      'clear_turn_saves_pending',
+      'record_combat_action',
+    ]),
+    clear_timed_conditions: z.boolean().optional(),
+    narration: z.string().max(4000).optional(),
+    /** Required when `action` is `record_combat_action`. */
+    character_id: z.string().uuid().optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.action === 'record_combat_action' && !data.character_id) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'character_id is required for record_combat_action',
+        path: ['character_id'],
+      });
+    }
+  });
 
 export type SessionCombatPostBody = z.infer<typeof sessionCombatPostBodySchema>;
 

@@ -3,6 +3,26 @@
  * Players can pick from these or enter custom text.
  */
 
+import type { Lifepath } from '@/lib/types';
+
+/** Default empty Life tab / lifepath (chargen wizard and sheet merge). */
+export const EMPTY_LIFEPATH: Lifepath = {
+  style: { clothes: '', hair: '', affectations: '' },
+  ethnicity: '',
+  language: '',
+  familyBackground: '',
+  siblings: '',
+  motivations: {
+    traits: '',
+    valuedPerson: '',
+    valueMost: '',
+    feelAboutPeople: '',
+    valuedPossession: '',
+  },
+  lifeEvents: [],
+  notes: '',
+};
+
 export const LIFEPATH_CLOTHES = [
   'Biker leathers',
   'Blue jeans',

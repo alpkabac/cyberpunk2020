@@ -10,6 +10,7 @@ import {
   NPC_THREAT_CINEMATIC_POINTS,
   resolveCharacterPoints,
   rollCharacterPointsRandom,
+  rollStartingEurobucks,
   ROLE_CAREER_PACKAGES,
   validateCp2020Chargen,
 } from './cp2020-char-gen';
@@ -71,6 +72,36 @@ describe('cp2020-char-gen', () => {
   it('resolveCharacterPoints uses cinematic table when requested', () => {
     const rng = makeRng(1);
     expect(resolveCharacterPoints('cinematic', rng, 'major_hero')).toBe(80);
+  });
+
+  it('starting eurobucks = floor(salary × d6/3), halved when second d6 > 4', () => {
+    let n = 0;
+    const rng = () => {
+      n++;
+      if (n === 1) return 0.999;
+      if (n === 2) return 0;
+      return 0;
+    };
+    expect(monthlySalaryEb('Solo', 6)).toBe(3000);
+    expect(rollStartingEurobucks('Solo', 6, rng)).toBe(6000);
+
+    let m = 0;
+    const rngHalf = () => {
+      m++;
+      if (m === 1) return 0.999;
+      if (m === 2) return 0.85;
+      return 0;
+    };
+    expect(rollStartingEurobucks('Solo', 6, rngHalf)).toBe(3000);
+
+    let k = 0;
+    const rngLow = () => {
+      k++;
+      if (k === 1) return 0.01;
+      if (k === 2) return 0;
+      return 0;
+    };
+    expect(rollStartingEurobucks('Solo', 6, rngLow)).toBe(1000);
   });
 
   it('generateCp2020Character produces a recalculated sheet', () => {

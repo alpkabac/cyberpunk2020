@@ -2,6 +2,7 @@
  * Initiative / combat tracker JSON (sessions.combat_state).
  */
 
+import { multiActionRollPenalty } from '../game-logic/multi-action-penalty';
 import { recalcCharacterForGm } from '../gm/character-mutations';
 import { rollDice } from '../game-logic/dice';
 import type { Character, CombatState, Cyberware, InitiativeEntry } from '../types';
@@ -107,10 +108,17 @@ export function parseCombatStateJson(v: unknown): CombatState | null {
   const startOfTurnSavesPendingFor =
     typeof pendingRaw === 'string' && pendingRaw.trim() !== '' ? pendingRaw.trim() : null;
 
+  const actionsRaw = o.actionsThisTurn;
+  const actionsThisTurn =
+    typeof actionsRaw === 'number' && Number.isFinite(actionsRaw) && actionsRaw >= 0
+      ? Math.floor(actionsRaw)
+      : 0;
+
   const base: CombatState = {
     round: Math.floor(o.round),
     activeTurnIndex,
     entries,
+    actionsThisTurn,
   };
   return startOfTurnSavesPendingFor ? { ...base, startOfTurnSavesPendingFor } : base;
 }
@@ -121,6 +129,7 @@ export function combatStateToJson(state: CombatState): Record<string, unknown> {
     round: state.round,
     activeTurnIndex: state.activeTurnIndex,
     entries: state.entries.map((e) => ({ ...e })),
+    actionsThisTurn: state.actionsThisTurn ?? 0,
   };
   if (state.startOfTurnSavesPendingFor) {
     out.startOfTurnSavesPendingFor = state.startOfTurnSavesPendingFor;
@@ -132,4 +141,19 @@ export function getActiveCombatCharacterId(state: CombatState | null | undefined
   if (!state || state.entries.length === 0) return null;
   const idx = Math.max(0, Math.min(state.activeTurnIndex, state.entries.length - 1));
   return state.entries[idx]?.characterId ?? null;
+}
+
+/**
+ * −3 to the next d10 roll (attack, skill, etc.) when the active combatant has already
+ * taken at least one action this turn.
+ */
+export function multiActionRollPenaltyForCharacter(
+  combatState: CombatState | null | undefined,
+  characterId: string,
+): number {
+  if (!combatState || combatState.entries.length === 0) return 0;
+  const active = getActiveCombatCharacterId(combatState);
+  if (active !== characterId) return 0;
+  const n = combatState.actionsThisTurn ?? 0;
+  return multiActionRollPenalty(n);
 }

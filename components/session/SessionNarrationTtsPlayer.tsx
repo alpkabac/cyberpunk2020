@@ -11,6 +11,10 @@ import {
   setNarrationTtsInIdb,
   setNarrationTtsInMemory,
 } from '@/lib/audio/narration-tts-message-cache';
+import {
+  mergeNarrationTtsClientConfig,
+  narrationTtsConfigFingerprint,
+} from '@/lib/narration/narration-tts-client-config';
 import { supabase } from '@/lib/supabase';
 import { useGameStore } from '@/lib/store/game-store';
 
@@ -24,7 +28,7 @@ export function SessionNarrationTtsPlayer({ sessionId }: { sessionId: string }) 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const prevSessionIdRef = useRef<string | null>(null);
 
-  /** Drop in-memory WAV cache when switching sessions (IDB keeps per-session keys). */
+  /** Drop in-memory cache when switching sessions (IDB keeps per-session keys). */
   useEffect(() => {
     const prev = prevSessionIdRef.current;
     if (prev && prev !== sessionId) {
@@ -52,7 +56,7 @@ export function SessionNarrationTtsPlayer({ sessionId }: { sessionId: string }) 
     const audio = audioRef.current;
     if (!audio) return;
 
-    const { messageId, playAfterMs } = cue;
+    const { messageId, playAfterMs, audioUrl: cueAudioUrl } = cue;
     let cancelled = false;
     const ac = new AbortController();
     let objectUrl: string | null = null;
@@ -73,15 +77,39 @@ export function SessionNarrationTtsPlayer({ sessionId }: { sessionId: string }) 
       });
     };
 
+    const playFromSignedUrl = (url: string) => {
+      if (cancelled) return;
+      unlockHtmlAudioFromUserGesture();
+      audio.volume = useGameStore.getState().ui.audioNarrationVolume;
+      audio.src = url;
+      audio.load();
+      void audio.play().catch((e) => {
+        if (typeof console !== 'undefined') {
+          console.warn(
+            '[narration-tts] play() failed (often autoplay: tap the page or Speak button once)',
+            e,
+          );
+        }
+      });
+    };
+
     const run = async () => {
       if (cancelled) return;
 
-      let blob: Blob | undefined = getNarrationTtsFromMemory(sessionId, messageId);
+      if (cueAudioUrl && cueAudioUrl.length > 0) {
+        playFromSignedUrl(cueAudioUrl);
+        return;
+      }
+
+      const configFp = narrationTtsConfigFingerprint(
+        mergeNarrationTtsClientConfig(useGameStore.getState().session.settings.narrationTts),
+      );
+      let blob: Blob | undefined = getNarrationTtsFromMemory(sessionId, messageId, configFp);
       if (!blob) {
-        const fromIdb = await getNarrationTtsFromIdb(sessionId, messageId);
+        const fromIdb = await getNarrationTtsFromIdb(sessionId, messageId, configFp);
         if (fromIdb) {
           blob = fromIdb;
-          if (!cancelled) setNarrationTtsInMemory(sessionId, messageId, fromIdb);
+          if (!cancelled) setNarrationTtsInMemory(sessionId, messageId, configFp, fromIdb);
         }
       }
       if (blob && !cancelled) {
@@ -104,8 +132,8 @@ export function SessionNarrationTtsPlayer({ sessionId }: { sessionId: string }) 
       }
       const fetched = await res.blob();
       if (cancelled) return;
-      setNarrationTtsInMemory(sessionId, messageId, fetched);
-      void setNarrationTtsInIdb(sessionId, messageId, fetched);
+      setNarrationTtsInMemory(sessionId, messageId, configFp, fetched);
+      void setNarrationTtsInIdb(sessionId, messageId, configFp, fetched);
       playBlob(fetched);
     };
 
@@ -125,5 +153,5 @@ export function SessionNarrationTtsPlayer({ sessionId }: { sessionId: string }) 
     if (a) a.volume = narrationVolume;
   }, [narrationVolume]);
 
-  return <audio ref={audioRef} preload="none" playsInline className="hidden" />;
+  return <audio ref={audioRef} preload="auto" playsInline className="hidden" />;
 }

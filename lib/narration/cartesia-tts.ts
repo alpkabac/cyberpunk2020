@@ -2,14 +2,15 @@ import { createHash } from 'crypto';
 import { reportServerError } from '@/lib/logging/server-report';
 
 const TTS_CACHE_MAX = 64;
-const chunkCache = new Map<string, Buffer>();
+type ChunkEntry = { buffer: Buffer; mimeType: string };
+const chunkCache = new Map<string, ChunkEntry>();
 
-function cacheSet(key: string, buf: Buffer) {
+function cacheSet(key: string, entry: ChunkEntry) {
   if (chunkCache.size >= TTS_CACHE_MAX) {
     const first = chunkCache.keys().next().value;
     if (first) chunkCache.delete(first);
   }
-  chunkCache.set(key, buf);
+  chunkCache.set(key, entry);
 }
 
 function getCartesiaApiKey(): string | null {
@@ -93,15 +94,16 @@ export async function synthesizeCartesiaNarrationWav(
   }
 }
 
-export function chunkTtsCacheKey(sessionId: string, transcript: string): string {
+export function chunkTtsCacheKey(sessionId: string, transcript: string, configFp: string): string {
   const h = createHash('sha256').update(transcript, 'utf8').digest('hex').slice(0, 24);
-  return `${sessionId}:chunk:${h}`;
+  const fp = configFp.length > 0 ? configFp : 'default';
+  return `${sessionId}:chunk:${fp}:${h}`;
 }
 
-export function getCachedChunkWav(key: string): Buffer | undefined {
+export function getCachedChunkWav(key: string): ChunkEntry | undefined {
   return chunkCache.get(key);
 }
 
-export function setCachedChunkWav(key: string, buf: Buffer): void {
-  cacheSet(key, buf);
+export function setCachedChunkWav(key: string, buf: Buffer, mimeType: string): void {
+  cacheSet(key, { buffer: buf, mimeType: mimeType || 'audio/wav' });
 }

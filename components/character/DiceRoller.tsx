@@ -79,6 +79,20 @@ export function DiceRoller() {
   }, [isDiceRollerOpen, flatIntentKey]);
   /** Prevents double POST if "Send now" and close overlap. */
   const sentGmRollEntryIdsRef = useRef<Set<number>>(new Set());
+  /** One combat action per dice open — rerolls in the same session do not increment again. */
+  const attackCombatActionRecordedForOpenRef = useRef(false);
+  const diceRollerWasOpenRef = useRef(false);
+
+  useEffect(() => {
+    const wasOpen = diceRollerWasOpenRef.current;
+    if (isDiceRollerOpen && !wasOpen) {
+      attackCombatActionRecordedForOpenRef.current = false;
+    }
+    if (!isDiceRollerOpen) {
+      attackCombatActionRecordedForOpenRef.current = false;
+    }
+    diceRollerWasOpenRef.current = isDiceRollerOpen;
+  }, [isDiceRollerOpen]);
 
   const doRoll = useCallback((formula: string) => {
     const result = rollDice(formula);
@@ -117,6 +131,12 @@ export function DiceRoller() {
     setRollHistory((prev) => [entry, ...prev].slice(0, 20));
 
     const intent = intentSnapshot;
+    if (intent?.kind === 'attack' && intent.characterId) {
+      if (!attackCombatActionRecordedForOpenRef.current) {
+        attackCombatActionRecordedForOpenRef.current = true;
+        void useGameStore.getState().recordCombatActionCommitted(intent.characterId);
+      }
+    }
     const isFlat = formula.trim().toLowerCase().startsWith('flat:');
 
     if (!isFlat && intent?.kind === 'attack' && result.firstD10Face === 1) {

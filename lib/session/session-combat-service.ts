@@ -7,7 +7,13 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { saveCharacterToSupabase } from '../db/character-serialize';
 import { characterRowToCharacter } from '../realtime/db-mapper';
 import type { Character, ChatMessage, CombatState, InitiativeEntry } from '../types';
-import { combatStateToJson, parseCombatStateJson, rollInitiativeEntry, sortInitiativeEntries } from './combat-state';
+import {
+  combatStateToJson,
+  getActiveCombatCharacterId,
+  parseCombatStateJson,
+  rollInitiativeEntry,
+  sortInitiativeEntries,
+} from './combat-state';
 import { stripTimedConditions, tickConditionsOneRound } from './combat-condition-tick';
 import { recalcCharacterForGm } from '../gm/character-mutations';
 import {
@@ -158,6 +164,7 @@ export async function sessionStartCombat(
     round: 1,
     activeTurnIndex: 0,
     entries,
+    actionsThisTurn: 0,
   };
 
   const err = await persistCombatState(supabase, sessionId, state);
@@ -192,6 +199,7 @@ export async function sessionNextTurn(
     activeTurnIndex: (current.activeTurnIndex + 1) % n,
     startOfTurnSavesPendingFor: null,
     round: initiativeWrapsToNewRound ? current.round + 1 : current.round,
+    actionsThisTurn: 0,
   };
 
   if (initiativeWrapsToNewRound) {
@@ -243,6 +251,7 @@ export async function sessionNextTurn(
         ...state,
         activeTurnIndex: (state.activeTurnIndex + 1) % state.entries.length,
         startOfTurnSavesPendingFor: null,
+        actionsThisTurn: 0,
       };
       continue;
     }
@@ -291,6 +300,7 @@ export async function sessionNextTurn(
         ...state,
         activeTurnIndex: (state.activeTurnIndex + 1) % state.entries.length,
         startOfTurnSavesPendingFor: null,
+        actionsThisTurn: 0,
       };
       continue;
     }
@@ -330,6 +340,7 @@ export async function sessionNextTurn(
         ...state,
         activeTurnIndex: (state.activeTurnIndex + 1) % state.entries.length,
         startOfTurnSavesPendingFor: null,
+        actionsThisTurn: 0,
       };
       continue;
     }
@@ -356,6 +367,33 @@ export async function sessionNextTurn(
 }
 
 /** Clears `startOfTurnSavesPendingFor` after the owning player resolves PC start-of-turn saves. */
+/**
+ * Increment the active combatant's action count (CP2020 successive-action economy).
+ * Only the **current initiative** character may call this.
+ */
+export async function sessionRecordCombatAction(
+  supabase: SupabaseClient,
+  sessionId: string,
+  characterId: string,
+): Promise<{ ok: true; combat_state: CombatState } | { ok: false; error: string }> {
+  const current = await fetchSessionCombatState(supabase, sessionId);
+  if (!current || current.entries.length === 0) {
+    return { ok: false, error: 'No active combat' };
+  }
+  const active = getActiveCombatCharacterId(current);
+  if (!active || active !== characterId) {
+    return { ok: false, error: 'Only the active combatant can record actions for this turn' };
+  }
+  const prev = current.actionsThisTurn ?? 0;
+  const state: CombatState = {
+    ...current,
+    actionsThisTurn: prev + 1,
+  };
+  const err = await persistCombatState(supabase, sessionId, state);
+  if (err) return { ok: false, error: err.message };
+  return { ok: true, combat_state: state };
+}
+
 export async function sessionClearStartOfTurnSavesPending(
   supabase: SupabaseClient,
   sessionId: string,
@@ -402,6 +440,7 @@ export async function sessionAdvanceRound(
     round: current.round + 1,
     activeTurnIndex: 0,
     startOfTurnSavesPendingFor: null,
+    actionsThisTurn: 0,
   };
 
   const err = await persistCombatState(supabase, sessionId, state);

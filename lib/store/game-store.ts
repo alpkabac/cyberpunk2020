@@ -28,6 +28,7 @@ import {
   SessionNarrationImage,
   SessionSoundtrackState,
 } from '../types';
+import { DEFAULT_NARRATION_TTS_CLIENT_CONFIG } from '../narration/narration-tts-client-config';
 import { BROADCAST_EVENTS } from '../realtime/realtime-events';
 import {
   calculateDerivedStats,
@@ -190,7 +191,13 @@ interface GameState {
      * `seq` bumps so clients can schedule playback even for repeated lines.
      * `playAfterMs`: delay from local apply time (not wall-clock sync across devices).
      */
-    narrationTtsCue: { seq: number; messageId: string; playAfterMs: number } | null;
+    narrationTtsCue: {
+      seq: number;
+      messageId: string;
+      playAfterMs: number;
+      /** Signed Storage URL from POST /api/session/narration-tts/prepare (same audio for everyone). */
+      audioUrl: string | null;
+    } | null;
   };
 
   /** Optimistic edit backups for Supabase writes (rollback on RLS/error). */
@@ -254,6 +261,8 @@ interface GameActions {
     opts?: { suppressiveRounds?: number },
   ) => boolean;
   reloadWeapon: (characterId: string, weaponId: string) => void;
+  /** CP2020: count one action for the active combatant (successive-action −3 on further rolls). */
+  recordCombatActionCommitted: (characterId: string) => Promise<void>;
 
   // NPC actions
   addNPC: (npc: Character) => void;
@@ -379,6 +388,8 @@ interface GameActions {
     skipNarrationTtsForUserId?: string;
     /** When true, clients with session `ttsEnabled` off ignore the cue (manual “read aloud” stays forced). */
     respectTtsSetting?: boolean;
+    /** Signed URL after server-side prepare (single synthesis for the room). */
+    audioUrl?: string | null;
   }) => Promise<void>;
   applySessionNarrationTtsFromBroadcast: (payload: unknown) => void;
 
@@ -489,6 +500,7 @@ const initialState: GameState = {
     activeScene: null,
     settings: {
       ttsEnabled: true,
+      narrationTts: DEFAULT_NARRATION_TTS_CLIENT_CONFIG,
       ttsVoice: 'default',
       autoRollDamage: true,
       allowPlayerTokenMovement: true,
@@ -1154,7 +1166,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     return true;
   },
 
-  reloadWeapon: (characterId, weaponId) =>
+  reloadWeapon: (characterId, weaponId) => {
     set((state) => {
       const character = state.characters.byId[characterId] ?? state.npcs.byId[characterId];
       if (!character) return state;
@@ -1186,7 +1198,33 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
           },
         },
       };
-    }),
+    });
+    void get().recordCombatActionCommitted(characterId);
+  },
+
+  recordCombatActionCommitted: async (characterId) => {
+    const sessionId = get().session.id?.trim();
+    if (!sessionId) return;
+    const { supabase } = await import('../supabase');
+    const token = (await supabase.auth.getSession()).data.session?.access_token;
+    if (!token) return;
+    const res = await fetch(`/api/session/${encodeURIComponent(sessionId)}/combat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ action: 'record_combat_action', character_id: characterId }),
+    });
+    const j = (await res.json().catch(() => ({}))) as { combat_state?: unknown };
+    if (!res.ok) return;
+    if (j.combat_state !== undefined && j.combat_state !== null) {
+      const parsed = parseCombatStateJson(j.combat_state);
+      if (parsed) {
+        set((s) => ({ session: { ...s.session, combatState: parsed } }));
+      }
+    }
+  },
 
   // NPC actions
   addNPC: (npc) =>
@@ -1846,6 +1884,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     playAfterMs,
     skipNarrationTtsForUserId,
     respectTtsSetting,
+    audioUrl,
   }) => {
     const send = get().sessionBroadcastSend;
     if (!send) return;
@@ -1859,6 +1898,9 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     }
     if (respectTtsSetting === true) {
       payload.respectTtsSetting = true;
+    }
+    if (typeof audioUrl === 'string' && audioUrl.length > 0) {
+      payload.audioUrl = audioUrl;
     }
     await send(BROADCAST_EVENTS.SESSION_NARRATION_TTS, payload);
   },
@@ -1895,6 +1937,10 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
     }
     playAfterMs = Math.min(Math.max(playAfterMs, 0), 120_000);
 
+    const audioUrlRaw = o.audioUrl;
+    const cueAudioUrl =
+      typeof audioUrlRaw === 'string' && audioUrlRaw.length > 0 ? audioUrlRaw : null;
+
     set((state) => ({
       ui: {
         ...state.ui,
@@ -1902,6 +1948,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
           seq: (state.ui.narrationTtsCue?.seq ?? 0) + 1,
           messageId,
           playAfterMs,
+          audioUrl: cueAudioUrl,
         },
       },
     }));

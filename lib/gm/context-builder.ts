@@ -115,6 +115,7 @@ Output engaging narration; use tools for concrete state changes (damage, money, 
 
 **Humans are players; you are the referee:** The people at the keyboard are **players only**. You are the **only** narrative Game Master. Never call a human "GM", never write as if they referee the world, and never ask them to roll **for an NPC or enemy**. \`CURRENT_MESSAGE_SPEAKER\` is the **player character name** tied to the latest player chat line (who is acting)—not a human referee.
 **request_roll vs roll_dice:** Use \`request_roll\` **only** when you need the **human player** to roll **for their own PC** (or a check only they should make on the sheet). For **any NPC / hostile / ally NPC action**—including **NPC shooting at a PC**, enemy skill checks, and similar—use \`roll_dice\` yourself (with \`character_id\` of that NPC when applicable), narrate the result, then resolve outcomes with tools (\`apply_damage\`, etc.). **Wrong:** \`request_roll\` with the NPC's \`character_id\` so the player rolls the enemy's rifle. **Right:** \`roll_dice\` for the NPC's attack, then damage if it hits.
+**npc_resolve_fnff_attack (NPC combat):** When **initiative combat** is active and the **active combatant** is an **NPC** (\`type\` \`npc\`), **prefer** \`npc_resolve_fnff_attack\` for a **single** server-side resolution of melee, semi-auto, 3-round burst, or full-auto (to-hit, location, damage, armor, ammo, action-economy penalty). Use \`range_bracket_override\` if tokens or map scale are unavailable. Reserve \`roll_dice\` + \`apply_damage\` for edge cases this tool does not cover.
 
 **Character sheets and tools:** The user message block includes CHARACTERS_JSON. Every entry has an \`id\` field (UUID) and \`name\`. You always have this data—do not claim you lack access to character sheets. When \`lifepath\` is non-null, it is the player's **Life tab** (style, motivations, life events, notes)—use it for portrayal and plot hooks; it does not change mechanics unless the table says so.
 For character tools (apply_damage, deduct_money, add_money, heal_damage, add_item, remove_item, equip_item, modify_skill, adjust_improvement_points, update_ammo, set_condition, update_character_field), pass \`character_id\` from that JSON. Prefer the character whose \`name\` matches CURRENT_MESSAGE_SPEAKER when it clearly refers to the **acting player character**; if there is only one PC (type "character"), use that id; if several PCs could apply, ask which **character by name**, never ask the human to paste a UUID.
@@ -424,6 +425,8 @@ export interface CombatTrackerContextPayload {
   round: number | null;
   activeTurnIndex: number | null;
   activeCombatantCharacterId: string | null;
+  /** Actions already taken by the active combatant this initiative turn (0 = next roll has no −3 multi-action penalty). */
+  actionsThisTurn: number | null;
   startOfTurnSavesPendingFor: string | null;
   combatants: CombatTrackerCombatantForLlm[];
 }
@@ -438,6 +441,7 @@ export function buildCombatTrackerContextPayload(
       round: null,
       activeTurnIndex: null,
       activeCombatantCharacterId: null,
+      actionsThisTurn: null,
       startOfTurnSavesPendingFor: null,
       combatants: [],
     };
@@ -469,6 +473,7 @@ export function buildCombatTrackerContextPayload(
     round: combatState.round,
     activeTurnIndex: combatState.activeTurnIndex,
     activeCombatantCharacterId: activeEntry?.characterId ?? null,
+    actionsThisTurn: combatState.actionsThisTurn ?? 0,
     startOfTurnSavesPendingFor: combatState.startOfTurnSavesPendingFor ?? null,
     combatants,
   };
