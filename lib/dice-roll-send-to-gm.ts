@@ -240,8 +240,6 @@ export function mergePendingRollsWithPlayerText(params: {
   }
   return mergeVoiceAndQueuedRollsChronologically({
     voice: {
-      sessionId: '',
-      speakerName: '',
       playerMessage,
       recordingStartedAtMs: messageAnchorMs,
       sttCompletedAtMs: messageAnchorMs,
