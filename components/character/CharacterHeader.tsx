@@ -173,7 +173,7 @@ export function CharacterHeader({ character, editable }: CharacterHeaderProps) {
         {/* Portrait + IP (compact; only as tall as image + IP row) */}
         <div
           className="shrink-0 w-32 flex flex-col self-start border-2 border-black bg-[#faf8ef]"
-          title="Improvement Points — editable here; the AI-GM can also update this (e.g. adjust_improvement_points)."
+          title="Improvement Points — editable here; the GM can track awards here."
         >
           {/* eslint-disable-next-line @next/next/no-img-element -- character portraits use arbitrary external URLs with inline SVG fallback */}
           <img

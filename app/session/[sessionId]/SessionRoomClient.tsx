@@ -9,7 +9,6 @@ import { ChatInterface, ResizableChatPanel } from '@/components/chat';
 import { PopoutCharacterSheet } from '@/components/session/PopoutCharacterSheet';
 import { PopoutSceneImage } from '@/components/session/PopoutSceneImage';
 import { InitiativeTracker } from '@/components/session/InitiativeTracker';
-import { SessionNarrationTtsPlayer } from '@/components/session/SessionNarrationTtsPlayer';
 import { SessionSoundtrackPlayer } from '@/components/session/SessionSoundtrackPlayer';
 import { StartOfTurnDeathSaveAck } from '@/components/session/StartOfTurnDeathSaveAck';
 import { MapCanvas, TokenContextCard } from '@/components/map';
@@ -622,7 +621,7 @@ export function SessionRoomClient() {
                               {isPeerSessionHost && (
                                 <span
                                   className="text-[9px] uppercase bg-violet-900/50 text-violet-200 px-1 rounded border border-violet-700/40 shrink-0"
-                                  title="Session creator — room tools, not the AI GM"
+                                  title="Session creator - room tools"
                                 >
                                   Host
                                 </span>
@@ -914,10 +913,8 @@ export function SessionRoomClient() {
                 supabase={supabase}
                 isGm={isSessionHost}
                 viewerUserId={user?.id ?? null}
-                gmRequestSpeakerName={selectedCharacter?.name ?? user.email ?? 'Referee'}
               />
               <SessionSoundtrackPlayer sessionId={sessionId} supabase={supabase} />
-              <SessionNarrationTtsPlayer sessionId={sessionId} />
             </>
           )}
         </aside>
@@ -1078,6 +1075,7 @@ export function SessionRoomClient() {
                 sessionId={sessionId}
                 speakerName={selectedCharacter?.name ?? user.email ?? 'Player'}
                 focusCharacterId={resolvedCharacterId}
+                isGm={isSessionHost}
                 enabled
               />
             </ResizableChatPanel>

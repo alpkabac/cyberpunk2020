@@ -2,7 +2,7 @@
  * GM-authored “unique” NPCs: explicit stats, special ability, custom skills, and items (incl. weapons/armor/cyberware).
  */
 
-import { recalcCharacterForGm } from '@/lib/gm/character-mutations';
+import { recalcCharacterForGm } from '@/lib/game-logic/character-mutations';
 import type {
   Armor,
   Availability,

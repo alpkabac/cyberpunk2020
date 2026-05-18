@@ -2,7 +2,7 @@
  * Decrement timed conditions each combat round; strip timed entries on end combat.
  */
 
-import { recalcCharacterForGm } from '../gm/character-mutations';
+import { recalcCharacterForGm } from '../game-logic/character-mutations';
 import type { Character } from '../types';
 
 export interface ConditionTickResult {

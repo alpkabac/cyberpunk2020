@@ -12,6 +12,15 @@ describe('Game Store', () => {
     useGameStore.getState().reset();
   });
 
+  it('initializes without voice, TTS, or LLM UI state', () => {
+    const state = useGameStore.getState();
+    expect(state.ui).not.toHaveProperty('isVoiceRecording');
+    expect(state.ui).not.toHaveProperty('pendingVoiceGm');
+    expect(state.ui).not.toHaveProperty('audioNarrationVolume');
+    expect(state.session.settings).not.toHaveProperty('ttsEnabled');
+    expect(state.session.settings).not.toHaveProperty('gmOpenRouterModel');
+  });
+
   describe('Character Management', () => {
     it('should add a character', () => {
       const character: Character = {

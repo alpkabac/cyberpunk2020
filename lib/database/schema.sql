@@ -1,7 +1,7 @@
 -- ============================================================================
--- Cyberpunk 2020 AI-GM Database Schema
+-- Cyberpunk 2020 Multiplayer Table Database Schema
 -- ============================================================================
--- This schema defines all tables for the multiplayer AI-GM application
+-- This schema defines all tables for the multiplayer table application
 -- Run this in your Supabase SQL editor to set up the database
 --
 -- If you already applied an older schema.sql, run the migrations in order:
@@ -38,12 +38,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   
   -- Settings
   settings JSONB DEFAULT '{
-    "ttsEnabled": true,
-    "ttsVoice": "alloy",
     "autoRollDamage": true,
-    "allowPlayerTokenMovement": true,
-    "voiceInputMode": "pushToTalk",
-    "sessionRecordingStartedBy": null
+    "allowPlayerTokenMovement": true
   }'::jsonb,
 
   -- FNFF initiative / turn order (null = not in combat)

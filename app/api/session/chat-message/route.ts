@@ -1,14 +1,70 @@
 import { NextResponse } from 'next/server';
-import { chatMessagePatchBodySchema } from '@/lib/api/schemas/session-routes';
+import { chatMessagePatchBodySchema, chatMessagePostBodySchema } from '@/lib/api/schemas/session-routes';
 import { readJsonBody, validationErrorResponse } from '@/lib/api/validation';
 import { requireAuthFromRequest } from '@/lib/auth/require-auth';
 import { userHasSessionAccess } from '@/lib/auth/session-access';
+import { userIsSessionGm } from '@/lib/auth/session-access';
 import { chatRowToMessage } from '@/lib/realtime/db-mapper';
 import { reportServerError } from '@/lib/logging/server-report';
 import { getServiceRoleClient } from '@/lib/supabase';
+import { canPostSessionChatMessage } from '@/lib/session/chat-message-permissions';
 import { z } from 'zod';
 
 const uuid = z.string().uuid();
+
+export async function POST(request: Request) {
+  const auth = await requireAuthFromRequest(request);
+  if (!auth.ok) return auth.response;
+
+  const rawBody = await readJsonBody(request);
+  if (!rawBody.ok) return rawBody.response;
+
+  const parsed = chatMessagePostBodySchema.safeParse(rawBody.data);
+  if (!parsed.success) {
+    return validationErrorResponse(parsed.error, 'api/session/chat-message:post');
+  }
+
+  const { sessionId, speaker, text, type } = parsed.data;
+  const supabase = getServiceRoleClient();
+
+  const hasSessionAccess = await userHasSessionAccess(supabase, sessionId, auth.user.id);
+  if (!hasSessionAccess) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+
+  const isSessionGm = type === 'narration'
+    ? await userIsSessionGm(supabase, sessionId, auth.user.id)
+    : false;
+  if (!canPostSessionChatMessage({ hasSessionAccess, isSessionGm, type })) {
+    return NextResponse.json({ error: 'Only the session GM can post GM messages' }, { status: 403 });
+  }
+
+  const { data: inserted, error: insErr } = await supabase
+    .from('chat_messages')
+    .insert({
+      session_id: sessionId,
+      speaker: type === 'narration' ? 'Game Master' : speaker,
+      text,
+      type,
+      metadata: {},
+    })
+    .select('*')
+    .single();
+
+  if (insErr || !inserted) {
+    reportServerError(
+      'api/session/chat-message:post',
+      new Error(insErr?.message ?? 'insert returned no row'),
+      { sessionId },
+    );
+    return NextResponse.json({ error: 'Failed to post message' }, { status: 500 });
+  }
+
+  return NextResponse.json({
+    ok: true,
+    message: chatRowToMessage(inserted as Record<string, unknown>),
+  });
+}
 
 export async function PATCH(request: Request) {
   const auth = await requireAuthFromRequest(request);

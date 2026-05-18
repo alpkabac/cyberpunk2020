@@ -59,9 +59,7 @@ export function SessionSoundtrackPlayer({ sessionId, supabase }: SessionSoundtra
   const [rangeMax, setRangeMax] = useState(0);
   const [rangeVal, setRangeVal] = useState(0);
   const musicVolume = useGameStore((s) => s.ui.audioMusicVolume);
-  const narrationVolume = useGameStore((s) => s.ui.audioNarrationVolume);
   const setAudioMusicVolume = useGameStore((s) => s.setAudioMusicVolume);
-  const setAudioNarrationVolume = useGameStore((s) => s.setAudioNarrationVolume);
   const musicVolumeRef = useRef(musicVolume);
   musicVolumeRef.current = musicVolume;
 
@@ -476,24 +474,6 @@ export function SessionSoundtrackPlayer({ sessionId, supabase }: SessionSoundtra
             setAudioMusicVolume(Math.min(1, Math.max(0, Number(e.target.value))))
           }
           className="flex-1 accent-zinc-500 disabled:opacity-40"
-        />
-      </div>
-
-      <div className="flex items-center gap-2">
-        <label className="text-[9px] uppercase text-zinc-500 tracking-wide shrink-0">
-          Voice
-        </label>
-        <input
-          type="range"
-          min={0}
-          max={1}
-          step={0.02}
-          value={narrationVolume}
-          onChange={(e) =>
-            setAudioNarrationVolume(Math.min(1, Math.max(0, Number(e.target.value))))
-          }
-          className="flex-1 accent-violet-500"
-          aria-label="Narration TTS volume"
         />
       </div>
 

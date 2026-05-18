@@ -23,10 +23,6 @@ import type {
   Zone,
 } from '../types';
 import { createStatBlock } from '../types';
-import {
-  DEFAULT_NARRATION_TTS_CLIENT_CONFIG,
-  mergeNarrationTtsClientConfig,
-} from '../narration/narration-tts-client-config';
 import { resolveCyberwareInitiativeFromRaw } from '../game-logic/cyberware-initiative-resolve';
 import {
   MAP_GRID_DEFAULT_COLS,
@@ -34,7 +30,6 @@ import {
   normalizeGridDimension,
 } from '../map/grid';
 import { parseActiveScenarioId } from '../scenarios/catalog';
-import { isGmSelectableOpenRouterModelId } from '../gm/gm-openrouter-models';
 
 const WEAPON_TYPES: WeaponType[] = ['Pistol', 'SMG', 'Shotgun', 'Rifle', 'Heavy', 'Melee', 'Exotic'];
 const ZONES: Zone[] = ['Head', 'Torso', 'rArm', 'lArm', 'rLeg', 'lLeg'];
@@ -299,22 +294,14 @@ const DEFAULT_SCENE: Scene = {
 };
 
 const DEFAULT_SETTINGS: SessionSettings = {
-  ttsEnabled: true,
-  narrationTts: DEFAULT_NARRATION_TTS_CLIENT_CONFIG,
-  ttsVoice: 'default',
   autoRollDamage: true,
   allowPlayerTokenMovement: true,
-  voiceInputMode: 'pushToTalk',
-  sessionRecordingStartedBy: null,
-  sttLanguage: 'en',
-  aiLanguage: 'en',
   mapGridCols: MAP_GRID_DEFAULT_COLS,
   mapGridRows: MAP_GRID_DEFAULT_ROWS,
   mapShowGrid: true,
   mapSnapToGrid: true,
   mapMetersPerSquare: 5,
   activeScenarioId: null,
-  gmOpenRouterModel: 'deepseek/deepseek-v3.2',
 };
 
 export function parseSceneJson(v: unknown): Scene {
@@ -331,20 +318,6 @@ export function parseSceneJson(v: unknown): Scene {
 export function parseSessionSettingsJson(v: unknown): SessionSettings {
   if (!v || typeof v !== 'object') return { ...DEFAULT_SETTINGS };
   const o = v as Record<string, unknown>;
-  const voiceInputMode =
-    o.voiceInputMode === 'session' || o.voiceInputMode === 'pushToTalk'
-      ? o.voiceInputMode
-      : DEFAULT_SETTINGS.voiceInputMode;
-  const sessionRecordingStartedBy =
-    o.sessionRecordingStartedBy === null || o.sessionRecordingStartedBy === undefined
-      ? null
-      : typeof o.sessionRecordingStartedBy === 'string'
-        ? o.sessionRecordingStartedBy
-        : DEFAULT_SETTINGS.sessionRecordingStartedBy;
-
-  const sttLanguage = o.sttLanguage === 'tr' ? 'tr' : 'en';
-  const aiLanguage = o.aiLanguage === 'tr' ? 'tr' : 'en';
-
   const mapMetersRaw = o.mapMetersPerSquare;
   const mapMetersPerSquare =
     typeof mapMetersRaw === 'number' && Number.isFinite(mapMetersRaw)
@@ -352,21 +325,12 @@ export function parseSessionSettingsJson(v: unknown): SessionSettings {
       : DEFAULT_SETTINGS.mapMetersPerSquare;
 
   return {
-    ttsEnabled: typeof o.ttsEnabled === 'boolean' ? o.ttsEnabled : DEFAULT_SETTINGS.ttsEnabled,
-    narrationTts: mergeNarrationTtsClientConfig(
-      o.narrationTts !== undefined ? o.narrationTts : DEFAULT_SETTINGS.narrationTts,
-    ),
-    ttsVoice: str(o.ttsVoice, DEFAULT_SETTINGS.ttsVoice),
     autoRollDamage:
       typeof o.autoRollDamage === 'boolean' ? o.autoRollDamage : DEFAULT_SETTINGS.autoRollDamage,
     allowPlayerTokenMovement:
       typeof o.allowPlayerTokenMovement === 'boolean'
         ? o.allowPlayerTokenMovement
         : DEFAULT_SETTINGS.allowPlayerTokenMovement,
-    voiceInputMode,
-    sessionRecordingStartedBy,
-    sttLanguage,
-    aiLanguage,
     mapGridCols: normalizeGridDimension(
       typeof o.mapGridCols === 'number' ? o.mapGridCols : Number.NaN,
       DEFAULT_SETTINGS.mapGridCols,
@@ -379,10 +343,6 @@ export function parseSessionSettingsJson(v: unknown): SessionSettings {
     mapSnapToGrid: typeof o.mapSnapToGrid === 'boolean' ? o.mapSnapToGrid : DEFAULT_SETTINGS.mapSnapToGrid,
     mapMetersPerSquare,
     activeScenarioId: parseActiveScenarioId(o.activeScenarioId),
-    gmOpenRouterModel:
-      typeof o.gmOpenRouterModel === 'string' && isGmSelectableOpenRouterModelId(o.gmOpenRouterModel)
-        ? o.gmOpenRouterModel
-        : DEFAULT_SETTINGS.gmOpenRouterModel,
   };
 }
 

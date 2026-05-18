@@ -191,7 +191,7 @@ export function LifeTab({ character, editable }: LifeTabProps) {
           Tactical team
         </SectionTitle>
         <p className="text-xs text-gray-600 mb-2">
-          Used for the battle map and AI GM: who shares a side, and who counts as hostile for cover and LOS hints.
+          Used for the battle map and GM: who shares a side, and who counts as hostile for cover and LOS hints.
           Empty sheet defaults to <strong>{defaultTeam}</strong> for this character type.
         </p>
         <div className="flex flex-col gap-2 max-w-md">

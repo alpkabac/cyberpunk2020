@@ -4,7 +4,7 @@ This document describes all the interactive features implemented in Task 7 of th
 
 ## Overview
 
-The character sheet now has full player agency with interactive controls for all major gameplay features. Both players and the AI-GM can perform actions through the UI.
+The character sheet now has full player agency with interactive controls for major gameplay features. Players and the GM can perform actions through the UI.
 
 ## New Components
 
@@ -166,9 +166,9 @@ getAllPrograms()
 
 ## Player Agency Features
 
-All major actions can be performed by both players and AI-GM:
+All major actions can be performed by players and the GM:
 
-| Feature | Player UI | AI-GM Tool |
+| Feature | Player UI | GM Workflow |
 |---------|-----------|------------|
 | Add Items | ✅ ItemBrowser | ✅ add_item |
 | Remove Items | ✅ Remove button | ✅ remove_item |
@@ -205,4 +205,4 @@ Task 7 is now complete! The character sheet has:
 Ready to move on to:
 - **Task 1-3:** Supabase setup and authentication
 - **Task 4:** Real-time multiplayer sync
-- **Task 8:** AI-GM integration
+- **Task 8:** GM workflow integration

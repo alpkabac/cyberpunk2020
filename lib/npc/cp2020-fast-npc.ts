@@ -4,7 +4,7 @@
  * armor & weapons from the NPC d10 + role modifier table.
  */
 
-import { recalcCharacterForGm } from '@/lib/gm/character-mutations';
+import { recalcCharacterForGm } from '@/lib/game-logic/character-mutations';
 import {
   distributeCareerSkills,
   rollD6,

@@ -1,9 +1,6 @@
 /**
- * Core type definitions for the Cyberpunk 2020 AI-GM application
+ * Core type definitions for the Cyberpunk 2020 multiplayer table application
  */
-
-import type { GmSelectableOpenRouterModelId } from './gm/gm-openrouter-models';
-import type { NarrationTtsClientConfig } from './narration/narration-tts-client-config';
 
 // ============================================================================
 // Character Types
@@ -111,7 +108,7 @@ export interface Character {
   sessionId: string;
   name: string;
   type: 'character' | 'npc';
-  /** True when `type === 'npc'`; duplicated for LLM payloads and clarity (Task 19.1). */
+  /** True when `type === 'npc'`; duplicated for payloads and clarity. */
   isNpc: boolean;
   /**
    * Tactical team id (shared string = allies). Empty uses defaults: PCs `party`, NPCs `hostile`.
@@ -460,7 +457,7 @@ export interface ChatMessage {
 }
 
 /**
- * Latest AI-GM `request_roll` (attack) — Combat tab merges sheet modifiers + this DV when
+ * Latest GM `request_roll` (attack): Combat tab merges sheet modifiers + this DV when
  * character/weapon match. Synced from the newest `roll_request` system message in chat.
  */
 export interface PendingGmAttackRequest {
@@ -485,27 +482,9 @@ export interface PendingSuppressivePlacement {
   weaponName: string;
 }
 
-/** Session UI: voice STT + AI-GM reply language (English / Turkish). */
-export type GmSessionLanguage = 'en' | 'tr';
-
 export interface SessionSettings {
-  ttsEnabled: boolean;
-  /**
-   * Room-wide narration TTS engine + params (Cartesia / Chatterbox / Kokoro / OmniVoice).
-   * Synced via `sessions.settings` so every client uses the same engine and fetches the same way per message.
-   */
-  narrationTts: NarrationTtsClientConfig;
-  ttsVoice: string;
   autoRollDamage: boolean;
   allowPlayerTokenMovement: boolean;
-  /** Persisted room-wide voice UX; synced via Postgres + Realtime for late joiners. */
-  voiceInputMode: 'pushToTalk' | 'session';
-  /** Display name of who last turned on group Session mode (best-effort). */
-  sessionRecordingStartedBy: string | null;
-  /** Deepgram speech-to-text language for voice input. */
-  sttLanguage: GmSessionLanguage;
-  /** AI-GM narration and player-facing dialogue language. */
-  aiLanguage: GmSessionLanguage;
 
   /** Tactical map grid: column count (2–99). */
   mapGridCols: number;
@@ -517,16 +496,11 @@ export interface SessionSettings {
   mapMetersPerSquare: number;
 
   /**
-   * Active adventure module (`lib/scenarios/*.md`) for the AI-GM; `null` = none / freeform.
+   * Active adventure module (`lib/scenarios/*.md`) for the table; `null` = none / freeform.
    * Synced via `sessions.settings` + Realtime.
    */
   activeScenarioId: string | null;
 
-  /**
-   * OpenRouter `model` id for this room’s AI-GM (official slug).
-   * Synced via `sessions.settings` + Realtime.
-   */
-  gmOpenRouterModel: GmSelectableOpenRouterModelId;
 }
 
 /** Initiative row for FNFF turn order (persisted on `sessions.combat_state`). */
@@ -565,44 +539,6 @@ export interface CombatState {
   startOfTurnSavesPendingFor?: string | null;
 }
 
-// ============================================================================
-// AI-GM Types
-// ============================================================================
-
-export interface AIGMRequest {
-  sessionId: string;
-  messages: ChatMessage[];
-  characters: Character[];
-  activeScene: Scene;
-}
-
-export interface AIGMResponse {
-  narration: string;
-  toolCalls: ToolCall[];
-  ttsAudio?: string;
-}
-
-export interface ToolCall {
-  name: string;
-  parameters: Record<string, unknown>;
-}
-
-// ============================================================================
-// Voice Types
-// ============================================================================
-
-export interface VoiceProcessingRequest {
-  audioChunk: Buffer;
-  sessionId: string;
-}
-
-export interface VoiceProcessingResponse {
-  transcript: string;
-  speakerId: string;
-  characterId?: string;
-}
-
-// ============================================================================
 // Dice Types
 // ============================================================================
 
@@ -625,10 +561,10 @@ export interface RollResult {
 }
 
 /**
- * Optional context for posting a sheet roll to the AI-GM (`/api/gm`).
+ * Optional context for posting a sheet roll to session chat.
  * Callers should set `rollSummary` + `sessionId` + `speakerName` when in a session (use `sheetRollContext` helper).
  */
-export type DiceRollGmContext = {
+export type DiceRollPostContext = {
   rollSummary?: string;
   sessionId?: string;
   speakerName?: string;
@@ -637,16 +573,11 @@ export type DiceRollGmContext = {
 /** Intent for the dice roller modal (stun/death saves, weapon attack fumbles, stabilization). */
 export type DiceRollIntent =
   /** After damage: flat d10 ≤ saveTarget stays conscious; over target = STUNNED. */
-  | ({ kind: 'stun'; characterId: string; saveTarget?: number } & DiceRollGmContext)
+  | ({ kind: 'stun'; characterId: string; saveTarget?: number } & DiceRollPostContext)
   /** Start of turn: flat d10 vs stun target; success clears STUNNED. */
-  | ({ kind: 'stun_recovery'; characterId: string; saveTarget?: number } & DiceRollGmContext)
-  /**
-   * Ask the AI-GM to rule on stun (fiction / fiat). No dice — posts to `/api/gm`;
-   * GM should apply via `set_condition` stunned or equivalent.
-   */
-  | ({ kind: 'stun_override_request'; characterId: string; note?: string } & DiceRollGmContext)
+  | ({ kind: 'stun_recovery'; characterId: string; saveTarget?: number } & DiceRollPostContext)
   /** Mortal ongoing / forced: flat d10 ≤ saveTarget survives; over = dead (damage → 41). */
-  | ({ kind: 'death'; characterId: string; saveTarget?: number } & DiceRollGmContext)
+  | ({ kind: 'death'; characterId: string; saveTarget?: number } & DiceRollPostContext)
   | ({
       kind: 'attack';
       characterId: string;
@@ -671,7 +602,7 @@ export type DiceRollIntent =
       gmRequestChatMessageId?: string;
       /** When true, session chat dice requests keep the sheet usable (same as gm_request). */
       nonBlockingUi?: boolean;
-    } & DiceRollGmContext)
+    } & DiceRollPostContext)
   /**
    * Medic roll on the medic's sheet: exploding 1d10 + TECH + medical skill ≥ `targetDamage`.
    * On success, `patientCharacterId` is marked `isStabilized` (ongoing death saves suppressed
@@ -681,7 +612,7 @@ export type DiceRollIntent =
       kind: 'stabilization';
       patientCharacterId: string;
       targetDamage: number;
-    } & DiceRollGmContext)
+    } & DiceRollPostContext)
   /** Generic sheet roll with an explicit label (skills, stats, initiative, damage, netrun, etc.). */
   | {
       kind: 'custom';
@@ -690,7 +621,7 @@ export type DiceRollIntent =
       sessionId?: string;
       speakerName?: string;
     }
-  /** GM requested a player roll via `request_roll`; after rolling, post result to `/api/gm`. */
+  /** GM requested a player roll via `request_roll`; after rolling, post result to session chat. */
   | {
       kind: 'gm_request';
       sessionId: string;
@@ -702,30 +633,6 @@ export type DiceRollIntent =
       /** When true (default), backdrop does not capture pointer events so the character sheet stays usable. */
       nonBlockingUi?: boolean;
     };
-
-/**
- * Roll saved from the dice roller ("Save") to merge when sending chat text, push-to-talk, or session voice.
- * `rolledAtMs` orders the block with the message (`recordingStartedAtMs` / send time).
- */
-export interface PendingRollForVoice {
-  id: string;
-  sessionId: string;
-  speakerName: string;
-  playerMessage: string;
-  rolledAtMs: number;
-  formula: string;
-  diceRollIntent: DiceRollIntent | null;
-}
-
-/** Session voice queued before "Send voice to GM". */
-export interface PendingVoiceGmPayload {
-  sessionId: string;
-  speakerName: string;
-  playerMessage: string;
-  playerMessageMetadata?: Record<string, unknown>;
-  recordingStartedAtMs?: number;
-  sttCompletedAtMs?: number;
-}
 
 // ============================================================================
 // Helper to create a default StatBlock

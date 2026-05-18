@@ -107,7 +107,6 @@ export function CombatTab({ character, editable }: CombatTabProps) {
   const npcsById = useGameStore((state) => state.npcs.byId);
   const npcIds = useGameStore((state) => state.npcs.allIds);
   const beginStunSaveRoll = useGameStore((state) => state.beginStunSaveRoll);
-  const beginStunOverrideRequest = useGameStore((state) => state.beginStunOverrideRequest);
   const beginDeathSaveRoll = useGameStore((state) => state.beginDeathSaveRoll);
   const updateCharacterField = useGameStore((state) => state.updateCharacterField);
   const fireWeapon = useGameStore((state) => state.fireWeapon);
@@ -830,19 +829,6 @@ export function CombatTab({ character, editable }: CombatTabProps) {
             </button>
           </div>
 
-          {sessionId && (
-            <div className="mt-2">
-              <button
-                type="button"
-                onClick={() => beginStunOverrideRequest(character.id)}
-                className="text-[11px] uppercase font-semibold text-violet-900 border border-violet-700/60 bg-violet-100/80 px-2 py-1.5 rounded hover:bg-violet-200/90 w-full sm:w-auto"
-                title="Opens dice panel: send a stun ruling request to the AI-GM (no roll). GM applies isStunned via tools."
-              >
-                Ask AI-GM (stun ruling)
-              </button>
-            </div>
-          )}
-
           {character.isStabilized && baseDeathTarget >= 0 && (
             <p className="text-[10px] text-teal-900 font-medium mt-1.5 leading-snug">
               Stabilized — ongoing Mortal death saves are skipped until this character takes new damage.
@@ -1419,13 +1405,13 @@ export function CombatTab({ character, editable }: CombatTabProps) {
                           pendingGmAttackRequest.characterId === character.id &&
                           pendingGmAttackRequest.weaponId === weapon.id && (
                             <div className="border border-cyan-900 bg-cyan-50/95 px-2 py-1.5 text-[10px] text-cyan-950 leading-snug">
-                              <span className="font-bold uppercase">AI-GM attack request</span>
+                              <span className="font-bold uppercase">GM attack request</span>
                               {' — '}Use your checklist below; the roll counts vs{' '}
                               <strong>DV {pendingGmAttackRequest.difficultyValue}</strong>
                               {pendingGmAttackRequest.rangeBracketLabel
                                 ? ` (${pendingGmAttackRequest.rangeBracketLabel})`
                                 : ''}
-                              . Send to GM when done (or close the dice window).
+                              . Post the roll when done (or close the dice window).
                             </div>
                           )}
                         {/* Stats Grid */}
@@ -1661,7 +1647,7 @@ export function CombatTab({ character, editable }: CombatTabProps) {
                                       !burstPreviewOk
                                         ? 'Burst only at Close or Medium range (set distance / map).'
                                         : gmAtkBlock
-                                          ? 'Resolve the AI-GM attack request with a manual roll first.'
+                                          ? 'Resolve the GM attack request with a manual roll first.'
                                           : undefined
                                     }
                                     className="flex-1 border-2 border-black p-2 font-bold uppercase text-sm hover:bg-gray-100 disabled:bg-gray-200 disabled:text-gray-400"
@@ -1678,7 +1664,7 @@ export function CombatTab({ character, editable }: CombatTabProps) {
                                     }
                                     title={
                                       gmAtkBlock
-                                        ? 'Resolve the AI-GM attack request with a manual roll first.'
+                                        ? 'Resolve the GM attack request with a manual roll first.'
                                         : undefined
                                     }
                                     className="flex-1 border-2 border-black p-2 font-bold uppercase text-sm hover:bg-gray-100 disabled:bg-gray-200 disabled:text-gray-400"
@@ -1713,7 +1699,7 @@ export function CombatTab({ character, editable }: CombatTabProps) {
                                       disabled={weapon.shotsLeft < 1 || gmAtkBlock}
                                       title={
                                         gmAtkBlock
-                                          ? 'Resolve the AI-GM attack request with a manual roll first.'
+                                          ? 'Resolve the GM attack request with a manual roll first.'
                                           : 'Spend rounds, then draw the suppressive rectangle on the tactical map.'
                                       }
                                       className="flex-1 min-w-[6rem] border-2 border-black p-2 font-bold uppercase text-sm hover:bg-gray-100 disabled:bg-gray-200 disabled:text-gray-400"

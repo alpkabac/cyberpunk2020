@@ -23,7 +23,6 @@ export function createDefaultPostgresHandlersForGameStore(): PostgresChangeHandl
       if ('settings' in row) {
         const settings = parseSessionSettingsJson(row.settings);
         patch.settings = settings;
-        useGameStore.getState().syncVoiceUiFromSessionSettings(settings);
       }
 
       if ('map_background_url' in row) {

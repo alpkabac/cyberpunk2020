@@ -1,18 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import {
-  buildGmDiceRollMessage,
-  mergePendingRollsWithPlayerText,
-  mergeVoiceAndQueuedRollsChronologically,
-  sheetRollContext,
-} from './dice-roll-send-to-gm';
+import { buildDiceRollChatMessage, sheetRollContext } from './dice-roll-send-to-gm';
 import type { Character } from './types';
 import { createStatBlock } from './types';
 
 const tinyChar = { id: 'c1', name: 'Johnny' } as Character;
 
-describe('buildGmDiceRollMessage', () => {
+describe('buildDiceRollChatMessage', () => {
   it('formats gm_request with rollSummary and dice detail', () => {
-    const m = buildGmDiceRollMessage(
+    const m = buildDiceRollChatMessage(
       {
         kind: 'gm_request',
         sessionId: 's',
@@ -25,13 +20,11 @@ describe('buildGmDiceRollMessage', () => {
     );
     expect(m).not.toBeNull();
     expect(m!.sessionId).toBe('s');
-    expect(m!.playerMessage).toBe(
-      '[Roll] 1d10+5 = 12 (dice: 7, 5) — Rifle (Aimed)',
-    );
+    expect(m!.playerMessage).toBe('[Roll] 1d10+5 = 12 (dice: 7, 5) - Rifle (Aimed)');
   });
 
   it('formats custom sheet roll with session', () => {
-    const m = buildGmDiceRollMessage(
+    const m = buildDiceRollChatMessage(
       {
         kind: 'custom',
         characterId: 'c1',
@@ -43,25 +36,23 @@ describe('buildGmDiceRollMessage', () => {
       { total: 18, rolls: [4, 5, 5, 4] },
     );
     expect(m).not.toBeNull();
-    expect(m!.playerMessage).toBe(
-      'Johnny rolled 18 for Malorian Arms damage (4d6+2)',
-    );
+    expect(m!.playerMessage).toBe('Johnny rolled 18 for Malorian Arms damage (4d6+2)');
     expect(m!.sessionId).toBe('sess-1');
   });
 
   it('uses default labels for stun when rollSummary omitted', () => {
-    const m = buildGmDiceRollMessage(
+    const m = buildDiceRollChatMessage(
       { kind: 'stun', characterId: 'c1', saveTarget: 6, sessionId: 's', speakerName: 'Jane' },
       'flat:1d10',
       { total: 4, rolls: [4] },
     );
     expect(m!.playerMessage).toContain('Stun save');
-    expect(m!.playerMessage).toContain('≤6');
+    expect(m!.playerMessage).toContain('<=6');
     expect(m!.playerMessage).toContain('stayed conscious');
   });
 
   it('formats attack with DV as HIT or MISS and target', () => {
-    const hit = buildGmDiceRollMessage(
+    const hit = buildDiceRollChatMessage(
       {
         kind: 'attack',
         characterId: 'c1',
@@ -84,7 +75,7 @@ describe('buildGmDiceRollMessage', () => {
     expect(hit!.playerMessage).toContain('vs DV **20**');
     expect(hit!.playerMessage).toContain('Ganger');
 
-    const miss = buildGmDiceRollMessage(
+    const miss = buildDiceRollChatMessage(
       {
         kind: 'attack',
         characterId: 'c1',
@@ -101,49 +92,6 @@ describe('buildGmDiceRollMessage', () => {
     );
     expect(miss).not.toBeNull();
     expect(miss!.playerMessage).toContain('**MISS**');
-  });
-});
-
-describe('mergePendingRollsWithPlayerText', () => {
-  it('merges like voice+rolls and passes STT metadata into merged output', () => {
-    const t0 = 1_000;
-    const t1 = 5_000;
-    const m = mergePendingRollsWithPlayerText({
-      playerMessage: 'I shoot.',
-      messageAnchorMs: t1,
-      rolls: [{ rolledAtMs: t0, playerMessage: '[Roll] 1d10+8 = 15' }],
-      playerMessageMetadata: { stt: true },
-    });
-    expect(m.playerMessage).toContain('[Roll]');
-    expect(m.playerMessage).toContain('I shoot');
-    expect(m.playerMessageMetadata?.chronological).toBe(true);
-  });
-
-  it('returns plain text when no rolls', () => {
-    const m = mergePendingRollsWithPlayerText({
-      playerMessage: 'Hi',
-      messageAnchorMs: 1,
-      rolls: [],
-    });
-    expect(m).toEqual({ playerMessage: 'Hi' });
-  });
-});
-
-describe('mergeVoiceAndQueuedRollsChronologically', () => {
-  it('orders voice vs rolls by timestamps and labels segments', () => {
-    const t0 = new Date('2026-01-01T12:00:00Z').getTime();
-    const t1 = t0 + 5000;
-    const m = mergeVoiceAndQueuedRollsChronologically({
-      voice: {
-        playerMessage: 'I agree.',
-        recordingStartedAtMs: t1,
-        sttCompletedAtMs: t1,
-      },
-      rolls: [{ rolledAtMs: t0, playerMessage: '[Roll] 1d10 = 5 — test' }],
-    });
-    expect(m.playerMessage).toContain('Roll');
-    expect(m.playerMessage).toContain('Voice');
-    expect(m.playerMessage.indexOf('1d10')).toBeLessThan(m.playerMessage.indexOf('I agree'));
   });
 });
 

@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import type { Character, MapCoverRegion, SessionSettings, Token } from '../types';
-import { DEFAULT_NARRATION_TTS_CLIENT_CONFIG } from '../narration/narration-tts-client-config';
 import { buildTacticalCoverHints, losBlockedByCover, bresenhamLine } from './tactical-cover-hint';
 
 describe('tactical-cover-hint', () => {
@@ -17,22 +16,14 @@ describe('tactical-cover-hint', () => {
 
   it('buildTacticalCoverHints prefers cells that block more enemies', () => {
     const settings: SessionSettings = {
-      ttsEnabled: false,
-      narrationTts: DEFAULT_NARRATION_TTS_CLIENT_CONFIG,
-      ttsVoice: 'default',
       autoRollDamage: true,
       allowPlayerTokenMovement: true,
-      voiceInputMode: 'pushToTalk',
-      sessionRecordingStartedBy: null,
-      sttLanguage: 'en',
-      aiLanguage: 'en',
       mapGridCols: 5,
       mapGridRows: 3,
       mapShowGrid: true,
       mapSnapToGrid: true,
       mapMetersPerSquare: 2,
       activeScenarioId: null,
-      gmOpenRouterModel: 'deepseek/deepseek-v3.2',
     };
     const regions: MapCoverRegion[] = [
       { id: 'w', c0: 2, r0: 0, c1: 2, r1: 2, coverTypeId: 'sheetrock_wall' },

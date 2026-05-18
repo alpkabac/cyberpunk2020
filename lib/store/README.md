@@ -1,12 +1,12 @@
 # Game Store
 
-Zustand-based state management for the Cyberpunk 2020 AI-GM application.
+Zustand-based state management for the Cyberpunk 2020 multiplayer table application.
 
 ## Overview
 
 The game store manages all client-side state including:
 - **Characters**: Player characters with stats, skills, inventory, and wound tracking
-- **NPCs**: Non-player characters controlled by the AI-GM
+- **NPCs**: Non-player characters controlled by the GM
 - **Session**: Session metadata, settings, and active scene
 - **Map**: Map background and token positions
 - **Chat**: Chat message history and loading state

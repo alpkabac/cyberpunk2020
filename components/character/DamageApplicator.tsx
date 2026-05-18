@@ -218,7 +218,7 @@ export function DamageApplicator({
             </div>
           </div>
 
-          {/* Hit location (FNFF) — client UI; AI GM passes location via apply_damage */}
+          {/* Hit location (FNFF) — client UI; remote services pass location via apply damage */}
           <div className="mb-4 border-2 border-black p-3 bg-slate-50">
             <div className="text-xs font-bold uppercase mb-2">Hit location</div>
             <p className="text-[10px] text-gray-600 mb-2">
@@ -486,7 +486,7 @@ export function DamageApplicator({
 
           <div className="mt-3 text-xs text-gray-600 space-y-1">
             <p>
-              <strong>AI / multiplayer:</strong> Remote players and the AI GM apply damage through the same
+              <strong>Multiplayer:</strong> Remote players apply damage through the same
               character row; GM tools use explicit <code className="bg-gray-100 px-1">location</code> and{' '}
               <code className="bg-gray-100 px-1">raw_damage</code> (no d10 in the API).
             </p>

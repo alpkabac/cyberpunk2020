@@ -163,16 +163,6 @@ export function DevSessionHub() {
           >
             Realtime test (debug)
           </Link>
-          <Link
-            href={valid ? withSession('/gm-scenarios') : '/gm-scenarios'}
-            className={`text-center border px-4 py-3 rounded text-sm font-bold uppercase tracking-wide transition-colors ${
-              valid
-                ? 'border-emerald-500/50 bg-emerald-900/50 text-emerald-100 hover:bg-emerald-800/60'
-                : 'border-zinc-700 text-zinc-600 pointer-events-none'
-            }`}
-          >
-            AI-GM scenarios
-          </Link>
           <span className="text-xs text-zinc-500 flex items-center justify-center border border-dashed border-zinc-700 rounded px-2 text-center">
             URLs include <code className="text-zinc-400 mx-1">?session=…</code> when valid
           </span>

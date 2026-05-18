@@ -6,9 +6,6 @@ import { characterRowEditableByUser } from '@/lib/auth/character-edit-policy';
 import { useGameStore } from '@/lib/store/game-store';
 import { useShallow } from 'zustand/react/shallow';
 import type { SessionCombatPostBody } from '@/lib/api/schemas/session-routes';
-import { getAccessTokenForApi } from '@/lib/auth/client-access-token';
-import { applyGmPostSuccessToStore } from '@/lib/gm/apply-gm-client-response';
-import { openRouterModelForGmApi } from '@/lib/gm/client-gm-openrouter-model';
 import { playSessionUi } from '@/lib/audio/session-sfx';
 
 interface InitiativeTrackerProps {
@@ -17,8 +14,6 @@ interface InitiativeTrackerProps {
   isGm: boolean;
   /** When set, shows start-of-turn save prompts for your PC. */
   viewerUserId?: string | null;
-  /** Speaker name for POST /api/gm (e.g. chat / referee). */
-  gmRequestSpeakerName?: string;
 }
 
 export function InitiativeTracker({
@@ -26,7 +21,6 @@ export function InitiativeTracker({
   supabase,
   isGm,
   viewerUserId = null,
-  gmRequestSpeakerName = 'Referee',
 }: InitiativeTrackerProps) {
   const { combatState, createdBy, diceOpen } = useGameStore(
     useShallow((s) => ({
@@ -38,9 +32,6 @@ export function InitiativeTracker({
   // PCs resolve start-of-turn saves manually (Combat tab or tracker button) — no auto-opening dice roller.
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [narrateBusy, setNarrateBusy] = useState(false);
-  const [narrateErr, setNarrateErr] = useState<string | null>(null);
-  const gmNarrationPending = useGameStore((s) => s.ui.gmNarrationPending);
 
   const postCombat = useCallback(
     async (body: SessionCombatPostBody) => {
@@ -86,7 +77,6 @@ export function InitiativeTracker({
     if (!e) return null;
     return s.characters.byId[e.characterId] ?? s.npcs.byId[e.characterId] ?? null;
   });
-  const showNarrateNpcTurn = isGm && activeCombatant?.type === 'npc';
 
   const viewerMayEndOwnTurn =
     !isGm &&
@@ -96,61 +86,6 @@ export function InitiativeTracker({
     activeCombatant.type === 'character' &&
     activeCombatant.userId === viewerUserId &&
     combatState.startOfTurnSavesPendingFor !== activeCombatant.id;
-
-  const requestNpcTurnNarration = useCallback(async () => {
-    if (!isGm) return;
-    const { session, characters, npcs } = useGameStore.getState();
-    const cs = session.combatState;
-    if (!cs?.entries.length) return;
-    const e = cs.entries[cs.activeTurnIndex];
-    if (!e) return;
-    const ac = characters.byId[e.characterId] ?? npcs.byId[e.characterId];
-    if (!ac || ac.type !== 'npc') return;
-
-    setNarrateErr(null);
-    setNarrateBusy(true);
-    try {
-      const accessToken = await getAccessTokenForApi(supabase);
-      if (!accessToken) {
-        setNarrateErr('Not signed in');
-        return;
-      }
-      const wound = ac.derivedStats?.woundState ?? 'unknown';
-      const stun = ac.isStunned ? 'stunned' : 'not stunned';
-      const playerMessage = `[NPC turn — referee tool] Round ${cs.round}. Active combatant: **${ac.name}** (NPC, sheet id \`${ac.id}\`). Snapshot: wound **${wound}**, ${stun}, damage **${ac.damage}**/41, stabilized **${ac.isStabilized}**.
-
-Follow **GM_TASK** in this request (narrate, resolve mechanics, then \`next_turn\` when the NPC is done).`;
-
-      const res = await fetch('/api/gm', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({
-          sessionId,
-          playerMessage,
-          speakerName: gmRequestSpeakerName,
-          openRouterModel: openRouterModelForGmApi(sessionId),
-          playerMessageMetadata: {
-            kind: 'npc_turn_narration_request',
-            npcCharacterId: ac.id,
-            combatRound: cs.round,
-          },
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setNarrateErr((data as { error?: string }).error ?? res.statusText ?? 'Request failed');
-        return;
-      }
-      applyGmPostSuccessToStore(data);
-    } catch (e) {
-      setNarrateErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setNarrateBusy(false);
-    }
-  }, [gmRequestSpeakerName, isGm, sessionId, supabase]);
 
   const showSotPrompt =
     !!pending &&
@@ -231,27 +166,6 @@ Follow **GM_TASK** in this request (narrate, resolve mechanics, then \`next_turn
           >
             {diceOpen ? 'Close the dice roller first' : 'Open dice roller for saves'}
           </button>
-        </div>
-      )}
-      {showNarrateNpcTurn && activeCombatant && (
-        <div className="rounded border border-violet-800/45 bg-violet-950/25 px-2 py-1.5 space-y-1">
-          <p className="text-[10px] text-violet-100/90 leading-snug">
-            <span className="font-bold uppercase">AI-GM · NPC turn</span>
-            <br />
-            Active: {activeCombatant.name}
-          </p>
-          <button
-            type="button"
-            disabled={narrateBusy || gmNarrationPending}
-            onClick={() => {
-              playSessionUi('commit', 0.9);
-              void requestNpcTurnNarration();
-            }}
-            className="w-full text-[10px] uppercase py-1 rounded border border-violet-600/70 text-violet-100 hover:bg-violet-900/35 disabled:opacity-50"
-          >
-            {narrateBusy || gmNarrationPending ? '…' : 'Narrate turn (AI-GM)'}
-          </button>
-          {narrateErr && <p className="text-[10px] text-red-400">{narrateErr}</p>}
         </div>
       )}
       {viewerMayEndOwnTurn && (

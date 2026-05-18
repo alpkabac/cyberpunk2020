@@ -1,5 +1,5 @@
 /**
- * Persists the active dev/test session id in localStorage so /dev, /gm-scenarios, and
+ * Persists the active dev/test session id in localStorage so /dev and
  * Open session room survive refresh without re-pasting UUIDs.
  */
 

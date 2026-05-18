@@ -1,6 +1,6 @@
 /**
  * Browsers only allow HTMLAudioElement.play() without blocking when the document
- * has a recent user gesture (or "unlocked" audio). TTS runs after async work, so
+ * has a recent user gesture (or "unlocked" audio). Audio can run after async work, so
  * we prime playback from a gesture and from the first tap/key in the session.
  */
 

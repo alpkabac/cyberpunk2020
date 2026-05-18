@@ -6,7 +6,7 @@
 
 import type { Character, CharacterItem, Lifepath, RoleType, Skill, Stats } from '@/lib/types';
 import { ROLE_SPECIAL_ABILITIES, createStatBlock } from '@/lib/types';
-import { recalcCharacterForGm } from '@/lib/gm/character-mutations';
+import { recalcCharacterForGm } from '@/lib/game-logic/character-mutations';
 
 export type Cp2020PointMethod = 'random' | 'fast' | 'cinematic';
 

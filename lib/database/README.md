@@ -1,6 +1,6 @@
 # Database Setup Guide
 
-This directory contains SQL scripts for setting up the Supabase database for the AI-GM Cyberpunk 2020 application.
+This directory contains SQL scripts for setting up the Supabase database for the Cyberpunk 2020 multiplayer table application.
 
 ## Prerequisites
 
@@ -66,7 +66,7 @@ The database uses RLS to enforce access control:
 The `SUPABASE_SERVICE_ROLE_KEY` bypasses RLS and should only be used for:
 - Server-side operations (API routes)
 - Administrative tasks
-- AI-GM tool execution
+- session combat services
 
 Never expose the service role key to the client!
 

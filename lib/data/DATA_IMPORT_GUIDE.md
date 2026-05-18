@@ -250,7 +250,7 @@ This is useful when:
 After importing data, you can:
 
 1. ✅ Use the data access layer in your application
-2. ✅ Build the AI-GM tool executor to reference items
+2. ✅ Build gameplay services to reference items
 3. ✅ Create the shopping system
 4. ✅ Implement character inventory management
 

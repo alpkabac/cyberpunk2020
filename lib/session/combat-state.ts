@@ -3,7 +3,7 @@
  */
 
 import { multiActionRollPenalty } from '../game-logic/multi-action-penalty';
-import { recalcCharacterForGm } from '../gm/character-mutations';
+import { recalcCharacterForGm } from '../game-logic/character-mutations';
 import { rollDice } from '../game-logic/dice';
 import type { Character, CombatState, Cyberware, InitiativeEntry } from '../types';
 import { cyberwareInitiativeBonusFromSheet } from '../game-logic/cyberware-initiative-resolve';

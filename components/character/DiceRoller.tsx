@@ -6,16 +6,10 @@ import { rollDice } from '@/lib/game-logic/dice';
 import { isFlatSaveSuccess } from '@/lib/game-logic/formulas';
 import { resolveAttackFumbleOutcome } from '@/lib/game-logic/fumbles';
 import { fnffAttackTotalMeetsDv } from '@/lib/game-logic/lookups';
-import {
-  buildGmDiceRollMessage,
-  buildStunOverrideGmPayload,
-  mergeVoiceWithSingleRollForGm,
-} from '@/lib/dice-roll-send-to-gm';
+import { buildDiceRollChatMessage } from '@/lib/dice-roll-send-to-gm';
 import { getAccessTokenForApi } from '@/lib/auth/client-access-token';
-import { applyGmPostSuccessToStore } from '@/lib/gm/apply-gm-client-response';
-import { openRouterModelForGmApi } from '@/lib/gm/client-gm-openrouter-model';
 import { supabase } from '@/lib/supabase';
-import type { DiceRollIntent, RollResult } from '@/lib/types';
+import type { ChatMessage, DiceRollIntent, RollResult } from '@/lib/types';
 import { playSessionUi } from '@/lib/audio/session-sfx';
 
 interface DiceRollEntry {
@@ -25,8 +19,8 @@ interface DiceRollEntry {
   timestamp: number;
   /** Intent at roll time (before flat saves clear the store) — used for Save / reroll. */
   intentSnapshot: DiceRollIntent | null;
-  /** Captured when the roll completes so "Send to GM" still works after stun/death clears intent. */
-  sendToGm?: {
+  /** Captured when the roll completes so "Post roll" still works after stun/death clears intent. */
+  sendToChat?: {
     sessionId: string;
     speakerName: string;
     playerMessage: string;
@@ -38,12 +32,10 @@ export function DiceRoller() {
   const diceFormula = useGameStore((state) => state.ui.diceFormula);
   const diceRollIntent = useGameStore((state) => state.ui.diceRollIntent);
   const closeDiceRoller = useGameStore((state) => state.closeDiceRoller);
-  const addPendingRollForVoice = useGameStore((state) => state.addPendingRollForVoice);
 
   const nonBlockingGm =
     (diceRollIntent?.kind === 'gm_request' && diceRollIntent.nonBlockingUi !== false) ||
     (diceRollIntent?.kind === 'attack' && diceRollIntent.nonBlockingUi === true);
-  const isStunOverrideRequest = diceRollIntent?.kind === 'stun_override_request';
 
   const [customFormula, setCustomFormula] = useState('');
   const [rollHistory, setRollHistory] = useState<DiceRollEntry[]>([]);
@@ -56,8 +48,6 @@ export function DiceRoller() {
   } | null>(null);
   const [sheetSendError, setSheetSendError] = useState<string | null>(null);
   const [sheetSending, setSheetSending] = useState(false);
-  const [saveForVoiceHint, setSaveForVoiceHint] = useState(false);
-  const [stunOverrideNote, setStunOverrideNote] = useState('');
 
   const lastRollRef = useRef<DiceRollEntry | null>(null);
   useEffect(() => {
@@ -77,8 +67,8 @@ export function DiceRoller() {
     setStabilizationOutcome(null);
     setFumbleLines(null);
   }, [isDiceRollerOpen, flatIntentKey]);
-  /** Prevents double POST if "Send now" and close overlap. */
-  const sentGmRollEntryIdsRef = useRef<Set<number>>(new Set());
+  /** Prevents double POST if "Post roll" and close overlap. */
+  const postedRollEntryIdsRef = useRef<Set<number>>(new Set());
   /** One combat action per dice open — rerolls in the same session do not increment again. */
   const attackCombatActionRecordedForOpenRef = useRef(false);
   const diceRollerWasOpenRef = useRef(false);
@@ -104,7 +94,7 @@ export function DiceRoller() {
 
     const storeSnap = useGameStore.getState();
     const intentSnapshot = storeSnap.ui.diceRollIntent;
-    let sendPayload = buildGmDiceRollMessage(intentSnapshot, formula, result);
+    let sendPayload = buildDiceRollChatMessage(intentSnapshot, formula, result);
     if (!sendPayload) {
       const sid = storeSnap.session.id?.trim();
       if (sid) {
@@ -124,7 +114,7 @@ export function DiceRoller() {
       result,
       timestamp: Date.now(),
       intentSnapshot,
-      ...(sendPayload ? { sendToGm: sendPayload } : {}),
+      ...(sendPayload ? { sendToChat: sendPayload } : {}),
     };
 
     setLastRoll(entry);
@@ -185,10 +175,6 @@ export function DiceRoller() {
       lastAutoRolledKeyRef.current = null;
       return;
     }
-    if (diceRollIntent?.kind === 'stun_override_request') {
-      lastAutoRolledKeyRef.current = null;
-      return;
-    }
     if (!diceFormula) return;
     if (diceRollIntent?.kind === 'gm_request') {
       const id = requestAnimationFrame(() => setCustomFormula(diceFormula));
@@ -221,16 +207,10 @@ export function DiceRoller() {
     return () => cancelAnimationFrame(id);
   }, [isDiceRollerOpen, diceFormula, doRoll, diceRollIntent]);
 
-  useEffect(() => {
-    if (diceRollIntent?.kind === 'stun_override_request') {
-      setStunOverrideNote(diceRollIntent.note ?? '');
-    }
-  }, [diceRollIntent]);
-
-  const sendRollEntryToGm = useCallback(async (entry: DiceRollEntry): Promise<boolean> => {
-    const payload = entry.sendToGm;
+  const postRollEntryToChat = useCallback(async (entry: DiceRollEntry): Promise<boolean> => {
+    const payload = entry.sendToChat;
     if (!payload) return true;
-    if (sentGmRollEntryIdsRef.current.has(entry.id)) return true;
+    if (postedRollEntryIdsRef.current.has(entry.id)) return true;
     setSheetSendError(null);
     setSheetSending(true);
     try {
@@ -239,13 +219,7 @@ export function DiceRoller() {
         setSheetSendError('Not signed in');
         return false;
       }
-      const pending = useGameStore.getState().ui.pendingVoiceGm;
-      const merge =
-        pending &&
-        pending.sessionId === payload.sessionId
-          ? mergeVoiceWithSingleRollForGm(pending, payload.playerMessage, entry.timestamp)
-          : null;
-      const res = await fetch('/api/gm', {
+      const res = await fetch('/api/session/chat-message', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -253,12 +227,9 @@ export function DiceRoller() {
         },
         body: JSON.stringify({
           sessionId: payload.sessionId,
-          playerMessage: merge ? merge.playerMessage : payload.playerMessage,
-          speakerName: payload.speakerName,
-          openRouterModel: openRouterModelForGmApi(useGameStore.getState().session.id),
-          ...(merge?.playerMessageMetadata
-            ? { playerMessageMetadata: merge.playerMessageMetadata }
-            : {}),
+          text: payload.playerMessage,
+          speaker: payload.speakerName,
+          type: 'roll',
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -266,16 +237,17 @@ export function DiceRoller() {
         setSheetSendError((data as { error?: string }).error ?? res.statusText ?? 'Request failed');
         return false;
       }
-      applyGmPostSuccessToStore(data);
-      if (merge) {
-        useGameStore.getState().clearPendingVoiceGm();
+      if ((data as { message?: unknown }).message) {
+        useGameStore
+          .getState()
+          .mergeRemoteChatMessage((data as { message: ChatMessage }).message);
       }
       const store = useGameStore.getState();
       const intent = entry.intentSnapshot;
       const closeAfterSend =
         intent?.kind === 'gm_request' ||
         (intent?.kind === 'attack' && intent.promptedByGmRequest === true);
-      sentGmRollEntryIdsRef.current.add(entry.id);
+      postedRollEntryIdsRef.current.add(entry.id);
       if (intent?.kind === 'attack' && intent.promptedByGmRequest) {
         const reqId =
           store.ui.pendingGmAttackRequest?.chatMessageId ?? intent.gmRequestChatMessageId;
@@ -299,12 +271,12 @@ export function DiceRoller() {
       const entry = lastRollRef.current;
       const intent = entry?.intentSnapshot;
       const autoSendGmReply =
-        entry?.sendToGm &&
+        entry?.sendToChat &&
         intent &&
         (intent.kind === 'gm_request' ||
           (intent.kind === 'attack' && intent.promptedByGmRequest === true));
       if (autoSendGmReply) {
-        const ok = await sendRollEntryToGm(entry);
+        const ok = await postRollEntryToChat(entry);
         if (!ok) return;
         if (!useGameStore.getState().ui.isDiceRollerOpen) return;
       }
@@ -312,94 +284,14 @@ export function DiceRoller() {
       setStabilizationOutcome(null);
       setSheetSendError(null);
       setSheetSending(false);
-      setSaveForVoiceHint(false);
-      setStunOverrideNote('');
       closeDiceRoller();
     })();
-  }, [closeDiceRoller, sendRollEntryToGm]);
-
-  const sendStunOverrideToGm = useCallback(async () => {
-    const intent = useGameStore.getState().ui.diceRollIntent;
-    if (intent?.kind !== 'stun_override_request') return;
-    const sid = (intent.sessionId?.trim() || useGameStore.getState().session.id?.trim()) ?? '';
-    if (!sid) {
-      setSheetSendError('Join a session to send this request.');
-      return;
-    }
-    const char =
-      useGameStore.getState().characters.byId[intent.characterId] ??
-      useGameStore.getState().npcs.byId[intent.characterId];
-    if (!char) {
-      setSheetSendError('Character not found.');
-      return;
-    }
-    setSheetSendError(null);
-    setSheetSending(true);
-    try {
-      const accessToken = await getAccessTokenForApi(supabase);
-      if (!accessToken) {
-        setSheetSendError('Not signed in');
-        return;
-      }
-      const payload = buildStunOverrideGmPayload({
-        character: char,
-        sessionId: sid,
-        speakerName: intent.speakerName?.trim() || char.name,
-        note: stunOverrideNote,
-      });
-      const res = await fetch('/api/gm', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({
-          sessionId: payload.sessionId,
-          playerMessage: payload.playerMessage,
-          speakerName: payload.speakerName,
-          playerMessageMetadata: payload.playerMessageMetadata,
-          openRouterModel: openRouterModelForGmApi(useGameStore.getState().session.id),
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setSheetSendError((data as { error?: string }).error ?? res.statusText ?? 'Request failed');
-        return;
-      }
-      applyGmPostSuccessToStore(data);
-      useGameStore.getState().clearDiceRollIntent();
-      useGameStore.getState().closeDiceRoller();
-    } catch (e) {
-      setSheetSendError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSheetSending(false);
-    }
-  }, [stunOverrideNote]);
+  }, [closeDiceRoller, postRollEntryToChat]);
 
   const sendSheetRollToGm = useCallback(async () => {
     if (!lastRoll) return;
-    await sendRollEntryToGm(lastRoll);
-  }, [lastRoll, sendRollEntryToGm]);
-
-  const saveRollForNextVoice = useCallback(() => {
-    if (!lastRoll?.sendToGm) {
-      setSheetSendError('Join a session (or select a character with a session) to save rolls for send.');
-      return;
-    }
-    setSheetSendError(null);
-    const payload = lastRoll.sendToGm;
-    addPendingRollForVoice({
-      id: crypto.randomUUID(),
-      sessionId: payload.sessionId,
-      speakerName: payload.speakerName,
-      playerMessage: payload.playerMessage,
-      rolledAtMs: lastRoll.timestamp,
-      formula: lastRoll.formula,
-      diceRollIntent: lastRoll.intentSnapshot,
-    });
-    setSaveForVoiceHint(true);
-    window.setTimeout(() => setSaveForVoiceHint(false), 2500);
-  }, [lastRoll, addPendingRollForVoice]);
+    await postRollEntryToChat(lastRoll);
+  }, [lastRoll, postRollEntryToChat]);
 
   const handleQuickRoll = (formula: string) => {
     setCustomFormula(formula);
@@ -448,7 +340,7 @@ export function DiceRoller() {
       >
         <div className="border-b-4 border-black p-3 flex justify-between items-center bg-[#e8e8d0] shrink-0">
           <h2 className="text-lg font-bold uppercase tracking-wide text-black">
-            {isStunOverrideRequest ? 'Stun override (AI-GM)' : 'Dice roller'}
+            Dice roller
           </h2>
           <button
             type="button"
@@ -460,37 +352,7 @@ export function DiceRoller() {
         </div>
 
         <div className="p-4 text-center overflow-y-auto flex-1 min-h-0">
-          {isStunOverrideRequest && diceRollIntent?.kind === 'stun_override_request' ? (
-            <div className="text-left space-y-3">
-              <p className="text-xs text-black leading-relaxed">
-                Ask the AI-GM to rule whether <strong className="font-bold">{diceRollIntent.speakerName}</strong>{' '}
-                should remain <strong>STUNNED</strong>. The model should apply the result with{' '}
-                <code className="font-mono bg-white border border-black px-1">set_condition</code> (stunned) when it
-                changes the ruling.
-              </p>
-              <label className="block text-left text-xs font-bold uppercase text-black">
-                Player note (optional)
-                <textarea
-                  value={stunOverrideNote}
-                  onChange={(e) => setStunOverrideNote(e.target.value)}
-                  rows={4}
-                  placeholder="e.g. Kerenzikov kicked in, adrenalin from the doc…"
-                  className="mt-1 w-full border-2 border-black px-2 py-1.5 font-sans text-sm text-black bg-white resize-y"
-                />
-              </label>
-              <button
-                type="button"
-                onClick={() => void sendStunOverrideToGm()}
-                disabled={sheetSending}
-                className="w-full border-2 border-black bg-amber-100 text-black py-2 font-bold uppercase text-sm hover:bg-amber-200 disabled:opacity-50"
-              >
-                {sheetSending ? 'Sending…' : 'Send request to AI-GM'}
-              </button>
-              {sheetSendError && (
-                <p className="text-xs text-red-800 border border-red-800 bg-red-50 p-1">{sheetSendError}</p>
-              )}
-            </div>
-          ) : lastRoll ? (
+          {lastRoll ? (
             <div>
               {lastRoll.intentSnapshot &&
                 (lastRoll.intentSnapshot.kind === 'stun' ||
@@ -649,42 +511,26 @@ export function DiceRoller() {
                   Single d10 — no explosion (compare to save target)
                 </div>
               )}
-              {lastRoll.sendToGm && (
+              {lastRoll.sendToChat && (
                 <div className="mt-3 text-left border-2 border-black bg-[#e8e8d0] p-2 space-y-2">
                   {(lastRoll.intentSnapshot?.kind === 'gm_request' ||
                     (lastRoll.intentSnapshot?.kind === 'attack' &&
                       lastRoll.intentSnapshot.promptedByGmRequest)) && (
                     <p className="text-[10px] text-gray-800 leading-snug">
-                      Replying to the AI-GM: closing this window after you roll also sends the result (same as Send
-                      now).
+                      Closing this window after you roll also posts the result to the table log.
                     </p>
                   )}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => void sendSheetRollToGm()}
-                      disabled={sheetSending}
-                      className="border-2 border-black bg-white text-black py-2 font-bold uppercase text-xs hover:bg-amber-50 disabled:opacity-50"
-                    >
-                      {sheetSending ? 'Sending…' : 'Send now'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={saveRollForNextVoice}
-                      disabled={sheetSending}
-                      className="border-2 border-black bg-[#d4d4b8] text-black py-2 font-bold uppercase text-xs hover:bg-[#c8c8a8] disabled:opacity-50"
-                    >
-                      Save
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void sendSheetRollToGm()}
+                    disabled={sheetSending}
+                    className="w-full border-2 border-black bg-white text-black py-2 font-bold uppercase text-xs hover:bg-amber-50 disabled:opacity-50"
+                  >
+                    {sheetSending ? 'Posting...' : 'Post roll'}
+                  </button>
                   <p className="text-[10px] text-black font-mono wrap-break-word">
-                    {lastRoll.sendToGm.playerMessage}
+                    {lastRoll.sendToChat.playerMessage}
                   </p>
-                  {saveForVoiceHint && (
-                    <p className="text-xs text-green-900 border border-green-800 bg-green-100 p-1 font-bold">
-                      Saved — sent with your next text or voice to the AI-GM.
-                    </p>
-                  )}
                   {sheetSendError && (
                     <p className="text-xs text-red-800 border border-red-800 bg-red-50 p-1">{sheetSendError}</p>
                   )}
@@ -729,8 +575,7 @@ export function DiceRoller() {
           )}
         </div>
 
-        {!isStunOverrideRequest && (
-          <div className="px-4 pb-3 border-t-2 border-black/10 shrink-0">
+        <div className="px-4 pb-3 border-t-2 border-black/10 shrink-0">
             <div className="flex gap-2">
               <input
                 type="text"
@@ -748,11 +593,9 @@ export function DiceRoller() {
                 Roll
               </button>
             </div>
-          </div>
-        )}
+        </div>
 
-        {!isStunOverrideRequest && (
-          <div className="px-4 pb-3 shrink-0">
+        <div className="px-4 pb-3 shrink-0">
             <div className="grid grid-cols-4 gap-2">
               {(['1d10', '2d6', '3d6', '4d6'] as const).map((f) => (
                 <button
@@ -765,10 +608,9 @@ export function DiceRoller() {
                 </button>
               ))}
             </div>
-          </div>
-        )}
+        </div>
 
-        {!isStunOverrideRequest && lastRoll && (
+        {lastRoll && (
           <div className="px-4 pb-3 shrink-0">
             <button
               type="button"
@@ -780,7 +622,7 @@ export function DiceRoller() {
           </div>
         )}
 
-        {!isStunOverrideRequest && rollHistory.length > 1 && (
+        {rollHistory.length > 1 && (
           <div className="border-t-2 border-black px-4 py-2 max-h-28 overflow-y-auto bg-white/50 shrink-0">
             <div className="text-xs font-bold uppercase text-black mb-1">History</div>
             <div className="space-y-1">

@@ -40,7 +40,11 @@ import {
 import { fetchSessionSettings } from '../session/fetch-session-settings';
 import { getActiveCombatCharacterId, parseCombatStateJson } from '../session/combat-state';
 import { sessionMaybeAutoEndCombatWhenAllDown, sessionRecordCombatAction } from '../session/session-combat-service';
-import type { ToolExecutorContext } from './tool-executor';
+export interface NpcFnffAttackContext {
+  supabase: SupabaseClient;
+  sessionId: string;
+  charactersById: Map<string, Character>;
+}
 
 const RANGE_BRACKET_IDS = new Set<string>(['PointBlank', 'Close', 'Medium', 'Long', 'Extreme']);
 
@@ -117,7 +121,7 @@ function tokenForCharacter(tokens: TokenRow[], characterId: string): TokenRow | 
 }
 
 async function persistAndNpcSaves(
-  ctx: ToolExecutorContext,
+  ctx: NpcFnffAttackContext,
   victimId: string,
   working: Character,
   info: ReturnType<typeof applyGmDamageDetailed>['info'],
@@ -148,7 +152,7 @@ async function persistAndNpcSaves(
 }
 
 export async function runNpcFnffAttackResolution(input: {
-  ctx: ToolExecutorContext;
+  ctx: NpcFnffAttackContext;
   attackerCharacterId: string;
   weaponId: string;
   attackKind: NpcFnffAttackKind;

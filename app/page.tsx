@@ -12,7 +12,7 @@ export default function Home() {
         </h1>
 
         <p className="text-xl text-gray-400">
-          AI Game Master &bull; Digital Character Sheets &bull; Multiplayer Sessions
+          Human GM Table &bull; Digital Character Sheets &bull; Multiplayer Sessions
         </p>
 
         <div className="border-t border-gray-800 pt-8 space-y-4">
@@ -23,7 +23,7 @@ export default function Home() {
             Session &amp; dev tools
           </Link>
           <p className="text-xs text-zinc-500 max-w-md mx-auto">
-            One place: save session UUID, open the room, character demo, realtime debugger, and AI-GM scenarios — survives
+            One place: save session UUID, open the room, character demo, and realtime debugger - survives
             refresh.
           </p>
 

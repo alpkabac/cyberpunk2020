@@ -1,6 +1,6 @@
 # Character Sheet Component
 
-A comprehensive character sheet component for the Cyberpunk 2020 AI-GM application.
+A comprehensive character sheet component for the Cyberpunk 2020 multiplayer table application.
 
 ## Features
 

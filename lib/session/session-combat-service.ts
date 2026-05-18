@@ -1,6 +1,6 @@
 /**
  * Authoritative combat round / initiative updates (Postgres + chat).
- * Used by AI-GM tools and the session combat API (service-role writes + condition ticks on all sheets).
+ * Used by the session combat API (service-role writes + condition ticks on all sheets).
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -15,12 +15,12 @@ import {
   sortInitiativeEntries,
 } from './combat-state';
 import { stripTimedConditions, tickConditionsOneRound } from './combat-condition-tick';
-import { recalcCharacterForGm } from '../gm/character-mutations';
+import { recalcCharacterForGm } from '../game-logic/character-mutations';
 import {
   npcApplyDeathSave,
   npcApplyStunRecoverySave,
   rollFlatD10,
-} from '../gm/npc-save-rolls';
+} from '../game-logic/npc-save-rolls';
 
 async function insertChatLine(
   supabase: SupabaseClient,

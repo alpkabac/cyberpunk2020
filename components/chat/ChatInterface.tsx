@@ -1,39 +1,17 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useGameStore } from '@/lib/store/game-store';
 import { sortChatMessagesByTimestamp } from '@/lib/chat/chat-order';
-import type { ChatMessage, GmSessionLanguage } from '@/lib/types';
+import type { ChatMessage, DiceRollIntent } from '@/lib/types';
 import {
   resolveGmRequestRoll,
   rollRequestMetadataToInput,
 } from '@/lib/game-logic/resolve-gm-request-roll';
-import { useVoiceRecorder } from '@/lib/hooks/useVoiceRecorder';
-import { applyGmPostSuccessToStore } from '@/lib/gm/apply-gm-client-response';
-import { unlockHtmlAudioFromUserGesture } from '@/lib/audio/unlock-html-audio';
 import { getAccessTokenForApi } from '@/lib/auth/client-access-token';
-import { voiceBlobToGmPlayerMessage } from '@/lib/voice/voice-blob-to-player-message';
-import { requestSessionVoiceTurnMerge } from '@/lib/voice/request-session-voice-turn-merge';
-import { mergePendingRollsWithPlayerText } from '@/lib/dice-roll-send-to-gm';
 import { supabase } from '@/lib/supabase';
-import { persistSessionLanguageSettings } from '@/lib/session/persist-session-language-settings';
-import { persistSessionScenarioSettings } from '@/lib/session/persist-session-scenario-settings';
-import { persistSessionVoiceSettings } from '@/lib/session/persist-session-voice-settings';
-import { persistSessionGmOpenRouterModel } from '@/lib/session/persist-session-gm-openrouter-model';
-import { persistSessionTtsEnabled } from '@/lib/session/persist-session-tts-enabled';
-import { parseGmSseResponse } from '@/lib/gm/consume-gm-sse-stream';
-import { plainTextForNarrationTts } from '@/lib/narration/plain-text-for-tts';
-import { pullCompleteSentences } from '@/lib/narration/pull-complete-sentences';
-import { GmStreamTtsQueue } from '@/lib/audio/gm-stream-tts-queue';
-import { SCENARIO_CATALOG } from '@/lib/scenarios/catalog';
-import {
-  GM_SELECTABLE_OPENROUTER_MODEL_IDS,
-  isGmSelectableOpenRouterModelId,
-} from '@/lib/gm/gm-openrouter-models';
-import { writeGmOpenRouterClientChoice } from '@/lib/gm/client-gm-openrouter-model';
-import { NarrationTtsSettingsPopout } from '@/components/chat/NarrationTtsSettingsPopout';
 
-/** Auto-open the dice UI only for the client whose focused character matches the request (GM must set `character_id`). */
+/** Auto-open the dice UI only for the client whose focused character matches the request. */
 function rollRequestTargetsFocusedCharacter(m: ChatMessage, focusCharacterId: string | null): boolean {
   const meta = m.metadata as Record<string, unknown> | undefined;
   if (!meta || meta.kind !== 'roll_request') return false;
@@ -42,17 +20,6 @@ function rollRequestTargetsFocusedCharacter(m: ChatMessage, focusCharacterId: st
   if (!rid) return false;
   if (!focusCharacterId || !focusCharacterId.trim()) return false;
   return rid === focusCharacterId.trim();
-}
-
-function formatGmStreamClientError(e: unknown): string {
-  const base = e instanceof Error ? e.message : String(e);
-  if (
-    e instanceof TypeError ||
-    /network|fetch|load failed|aborted|stream|incomplete|closed|reset/i.test(base)
-  ) {
-    return `${base} If you only lost the live preview, the GM reply may still appear in chat shortly.`;
-  }
-  return base;
 }
 
 function typeLabel(type: ChatMessage['type'], meta?: Record<string, unknown>): string {
@@ -87,7 +54,7 @@ function bubbleClasses(type: ChatMessage['type'], meta?: Record<string, unknown>
 
 type ChatImgSegment = { kind: 'text'; text: string } | { kind: 'img'; alt: string; src: string };
 
-/** Renders `![alt](https://...)` as inline images; other text stays plain (no full markdown). */
+/** Renders `![alt](https://...)` as inline images; other text stays plain. */
 function segmentChatTextWithMarkdownImages(text: string): ChatImgSegment[] {
   const out: ChatImgSegment[] = [];
   const re = /!\[([^\]]*)\]\((https:[^)\s]+)\)/g;
@@ -135,90 +102,17 @@ function ChatMessageBody({ text }: { text: string }) {
   );
 }
 
-function ChevronTruncateIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden
-    >
-      <path
-        d="M14 6l-6 6 6 6"
-        stroke="currentColor"
-        strokeWidth="2.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function ChevronRegenerateIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden
-    >
-      <path
-        d="M10 6l6 6-6 6"
-        stroke="currentColor"
-        strokeWidth="2.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function SpeakerNarrateIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden
-    >
-      <path
-        d="M11 5L6 9H3v6h3l5 4V5z"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M15.54 8.46a5 5 0 010 7.07M17.66 6.34a8 8 0 010 11.32"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-/** Narration, player lines, dice results, and GM roll requests — hides other system/tool audit lines. */
 function isStoryFocusedMessage(m: ChatMessage): boolean {
   if (m.type === 'player' || m.type === 'narration' || m.type === 'roll') return true;
-  if (m.type === 'system') {
-    return m.metadata?.kind === 'roll_request';
-  }
+  if (m.type === 'system') return m.metadata?.kind === 'roll_request';
   return false;
 }
 
 export interface ChatInterfaceProps {
   sessionId: string;
-  /** Shown as chat speaker for player messages and roll replies (e.g. character name). */
   speakerName: string;
-  /** When false, input is disabled (e.g. not signed in). */
   enabled?: boolean;
-  /** Selected character id — used when GM omits character_id on the request. */
+  isGm?: boolean;
   focusCharacterId?: string | null;
 }
 
@@ -226,1078 +120,214 @@ export function ChatInterface({
   sessionId,
   speakerName,
   enabled = true,
+  isGm = false,
   focusCharacterId = null,
 }: ChatInterfaceProps) {
   const rawMessages = useGameStore((s) => s.chat.messages);
-  const isLoading = useGameStore((s) => s.chat.isLoading);
-  const setChatLoading = useGameStore((s) => s.setChatLoading);
   const openDiceRoller = useGameStore((s) => s.openDiceRoller);
-  const sttLanguage = useGameStore((s) => s.session.settings.sttLanguage);
-  const aiLanguage = useGameStore((s) => s.session.settings.aiLanguage);
-  const activeScenarioId = useGameStore((s) => s.session.settings.activeScenarioId);
-  const gmOpenRouterModel = useGameStore((s) => s.session.settings.gmOpenRouterModel);
-  const ttsEnabled = useGameStore((s) => s.session.settings.ttsEnabled);
-  const voiceInputMode = useGameStore((s) => s.ui.voiceInputMode);
-  const sessionRecordingGroupActive = useGameStore((s) => s.ui.sessionRecordingGroupActive);
-  const sessionRecordingStartedBy = useGameStore((s) => s.ui.sessionRecordingStartedBy);
-  const applySessionRecordingBroadcast = useGameStore((s) => s.applySessionRecordingBroadcast);
-  const broadcastSessionRecordingState = useGameStore((s) => s.broadcastSessionRecordingState);
-  const broadcastSessionVoiceStopAll = useGameStore((s) => s.broadcastSessionVoiceStopAll);
-  const broadcastSessionVoicePeerStart = useGameStore((s) => s.broadcastSessionVoicePeerStart);
-  const sessionVoiceStopAllTick = useGameStore((s) => s.ui.sessionVoiceStopAllTick);
-  const sessionVoiceStopTurnId = useGameStore((s) => s.ui.sessionVoiceStopTurnId);
-  const sessionVoicePeerStartTick = useGameStore((s) => s.ui.sessionVoicePeerStartTick);
-  const clearPendingVoiceGm = useGameStore((s) => s.clearPendingVoiceGm);
-  const pendingRollsForVoice = useGameStore((s) => s.ui.pendingRollsForVoice);
-  const removePendingRollForVoice = useGameStore((s) => s.removePendingRollForVoice);
-  const clearPendingRollsForVoice = useGameStore((s) => s.clearPendingRollsForVoice);
-  const gmNarrationPending = useGameStore((s) => s.ui.gmNarrationPending);
-  const setVoiceRecordingStore = useGameStore((s) => s.setVoiceRecording);
-  const charactersById = useGameStore((s) => s.characters.byId);
-  const npcsById = useGameStore((s) => s.npcs.byId);
-  const includeSpecialAbilityInSkillRolls = useGameStore((s) => s.ui.includeSpecialAbilityInSkillRolls);
-  const removeChatMessagesByIds = useGameStore((s) => s.removeChatMessagesByIds);
   const mergeRemoteChatMessage = useGameStore((s) => s.mergeRemoteChatMessage);
-  const setGmNarrationPending = useGameStore((s) => s.setGmNarrationPending);
-  const sessionBroadcastReady = useGameStore((s) => s.sessionBroadcastSend != null);
+  const removeChatMessagesByIds = useGameStore((s) => s.removeChatMessagesByIds);
+  const includeSpecialAbilityInSkillRolls = useGameStore((s) => s.ui.includeSpecialAbilityInSkillRolls);
 
   const [draft, setDraft] = useState('');
+  const [sendAsGm, setSendAsGm] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
-  const [voiceError, setVoiceError] = useState<string | null>(null);
   const [chatActionError, setChatActionError] = useState<string | null>(null);
-  const [showToolLog, setShowToolLog] = useState(false);
-  const [ttsSettingsOpen, setTtsSettingsOpen] = useState(false);
-  const [ttsSettingsMountKey, setTtsSettingsMountKey] = useState(0);
+  const [showSystemLog, setShowSystemLog] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingDraft, setEditingDraft] = useState('');
-  /** Live AI-GM narration from POST /api/gm/stream; `null` when idle. */
-  const [streamingGmText, setStreamingGmText] = useState<string | null>(null);
-  const {
-    isRecording: voiceRecording,
-    micReady,
-    error: voiceHookError,
-    acquireMic,
-    releaseMic,
-    start: startVoice,
-    stop: stopVoice,
-    stopDiscard,
-  } = useVoiceRecorder();
-  /** Mirrors `voiceRecording` so tick handlers read the latest value in the same render (avoids stale "still recording"). */
-  const voiceRecordingRef = useRef(voiceRecording);
-  voiceRecordingRef.current = voiceRecording;
+  const [sending, setSending] = useState(false);
 
-  /** Session mode: wall-clock when recording started (chronological merge with saved rolls). */
-  const sessionRecordingStartMsRef = useRef<number | null>(null);
-  /** True when the current take was started while Session mode was on (vs push-to-talk). */
-  const recordingStartedInSessionModeRef = useRef(false);
-  /** Last processed `sessionVoicePeerStartTick` so we don't re-run when `voiceRecording` flips to false. */
-  const lastConsumedPeerStartTickRef = useRef(0);
-  /** Last `sessionVoiceStopAllTick` we applied (each increment is handled once for all clients). */
-  const lastHandledStopAllTickRef = useRef(0);
-  /** Skip mirroring the peer tick that echoes from our own Session Mic press (avoids double `startVoice` + stuck recorder). */
-  const ignoreNextPeerStartForLocalMicRef = useRef(false);
   const messages = useMemo(() => sortChatMessagesByTimestamp(rawMessages), [rawMessages]);
   const displayedMessages = useMemo(
-    () => (showToolLog ? messages : messages.filter(isStoryFocusedMessage)),
-    [messages, showToolLog],
+    () => (showSystemLog ? messages : messages.filter(isStoryFocusedMessage)),
+    [messages, showSystemLog],
   );
   const hiddenMessageCount = messages.length - displayedMessages.length;
-  const lastMessageId = useMemo(
-    () => (messages.length > 0 ? messages[messages.length - 1]?.id : undefined),
-    [messages],
-  );
 
-  const ttsQueueRef = useRef<GmStreamTtsQueue | null>(null);
-  useEffect(() => {
-    ttsQueueRef.current = new GmStreamTtsQueue({
-      sessionId,
-      getToken: () => getAccessTokenForApi(supabase),
-      getVolume: () => useGameStore.getState().ui.audioNarrationVolume,
-    });
-    return () => {
-      ttsQueueRef.current?.cancel();
-    };
-  }, [sessionId]);
+  async function authToken(): Promise<string | null> {
+    const token = await getAccessTokenForApi(supabase);
+    if (!token) setSendError('Not signed in');
+    return token;
+  }
 
-  /** Ephemeral broadcast: each client fetches TTS from the app API (GET /api/session/narration-tts) when the cue is applied. */
-  const broadcastNarrationTtsCue = useCallback(
-    (args: {
-      messageId: string;
-      playAfterMs?: number;
-      skipNarrationTtsForUserId?: string;
-      respectTtsSetting?: boolean;
-    }) => {
-      void useGameStore.getState().broadcastSessionNarrationTtsPlay(args);
-    },
-    [],
-  );
-
-  const consumeGmStreamBody = useCallback(async (res: Response, onStreamError: (message: string) => void) => {
-    let sentenceCarry = '';
-    setStreamingGmText('');
-    ttsQueueRef.current?.cancel();
-    ttsQueueRef.current?.resetCancelFlag();
-    try {
-      for await (const { event, data } of parseGmSseResponse(res)) {
-        if (event === 'open') {
-          applyGmPostSuccessToStore(data);
-          continue;
-        }
-        if (event === 'delta') {
-          const text = typeof data.text === 'string' ? data.text : '';
-          if (text.length > 0) {
-            setStreamingGmText((prev) => (prev ?? '') + text);
-            if (useGameStore.getState().session.settings.ttsEnabled) {
-              const { sentences, carry } = pullCompleteSentences(sentenceCarry, text);
-              sentenceCarry = carry;
-              for (const s of sentences) {
-                const t = plainTextForNarrationTts(s);
-                if (t.length >= 2) ttsQueueRef.current?.enqueue(t);
-              }
-            }
-          }
-          continue;
-        }
-        if (event === 'tool_round') {
-          setStreamingGmText('');
-          sentenceCarry = '';
-          ttsQueueRef.current?.cancel();
-          ttsQueueRef.current?.resetCancelFlag();
-          continue;
-        }
-        if (event === 'done') {
-          if (useGameStore.getState().session.settings.ttsEnabled) {
-            const tail = plainTextForNarrationTts(sentenceCarry.trim());
-            if (tail.length >= 2) ttsQueueRef.current?.enqueue(tail);
-            const messageId = typeof data.messageId === 'string' ? data.messageId : null;
-            if (messageId && useGameStore.getState().sessionBroadcastSend) {
-              const { data: authData } = await supabase.auth.getSession();
-              const uid = authData.session?.user?.id;
-              broadcastNarrationTtsCue({
-                messageId,
-                playAfterMs: 200,
-                ...(uid ? { skipNarrationTtsForUserId: uid } : {}),
-                respectTtsSetting: true,
-              });
-            }
-          }
-          sentenceCarry = '';
-          setStreamingGmText(null);
-          continue;
-        }
-        if (event === 'error') {
-          const msg = typeof data.message === 'string' ? data.message : 'AI-GM stream failed';
-          onStreamError(msg);
-          ttsQueueRef.current?.cancel();
-          setStreamingGmText(null);
-        }
-      }
-    } finally {
-      setStreamingGmText(null);
-    }
-  }, [broadcastNarrationTtsCue, supabase]);
-
-  const submitSessionVoiceFragment = useCallback(
-    async (turnId: string, blob: Blob, recordingStartedAtMs: number | undefined) => {
-      setVoiceError(null);
-      setChatLoading(true);
-      try {
-        const {
-          data: { session: authSession },
-        } = await supabase.auth.getSession();
-        const userId = authSession?.user?.id;
-        const accessToken = authSession?.access_token;
-        if (!userId || !accessToken) {
-          setVoiceError('Not signed in');
-          return;
-        }
-        const textResult = await voiceBlobToGmPlayerMessage({
-          blob,
-          focusCharacterId,
-          speakerName,
-          charactersById,
-          npcsById,
-          accessToken,
-          sttLanguage,
-        });
-        if (!textResult.ok) {
-          setVoiceError(textResult.error);
-          return;
-        }
-        const rolls = useGameStore.getState().ui.pendingRollsForVoice.filter((r) => r.sessionId === sessionId);
-        const pendingRollsForJson = rolls.map((r) => ({ rolledAtMs: r.rolledAtMs, playerMessage: r.playerMessage }));
-        const res = await fetch('/api/session/voice-turn/fragment', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-          },
-          body: JSON.stringify({
-            sessionId,
-            turnId,
-            userId,
-            speakerName,
-            characterId: focusCharacterId,
-            playerMessage: textResult.playerMessage,
-            playerMessageMetadata: textResult.playerMessageMetadata,
-            anchorMs: recordingStartedAtMs ?? Date.now(),
-            pendingRolls: pendingRollsForJson,
-          }),
-        });
-        const j = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          setVoiceError((j as { error?: string }).error ?? res.statusText ?? 'Failed to save voice fragment');
-          return;
-        }
-        useGameStore.getState().clearPendingRollsForSession(sessionId);
-        await requestSessionVoiceTurnMerge(sessionId, turnId, accessToken, {
-          openRouterModel: gmOpenRouterModel,
-        });
-      } catch (e) {
-        setVoiceError(e instanceof Error ? e.message : String(e));
-      } finally {
-        setChatLoading(false);
-      }
-    },
-    [
-      sessionId,
-      focusCharacterId,
-      speakerName,
-      charactersById,
-      npcsById,
-      sttLanguage,
-      gmOpenRouterModel,
-      setChatLoading,
-    ],
-  );
-
-  const endRef = useRef<HTMLDivElement>(null);
-  /** After load/refresh, skip auto-opening the dice UI for the latest roll already in history; only open for new roll requests. */
-  const rollAutoOpenPrimedRef = useRef(false);
-  const lastSeenRollRequestIdRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    rollAutoOpenPrimedRef.current = false;
-    lastSeenRollRequestIdRef.current = null;
-    lastConsumedPeerStartTickRef.current = 0;
-    lastHandledStopAllTickRef.current = 0;
-    ignoreNextPeerStartForLocalMicRef.current = false;
-    useGameStore.getState().clearPendingRollsForVoice();
-  }, [sessionId]);
-
-  useEffect(() => {
-    releaseMic();
-  }, [sessionId, releaseMic]);
-
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [lastMessageId, pendingRollsForVoice.length, streamingGmText]);
-
-  const lastRollRequest = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i];
-      if (m.type === 'system' && m.metadata?.kind === 'roll_request') return m;
-    }
-    return null;
-  }, [messages]);
-
-  useEffect(() => {
-    const setPending = useGameStore.getState().setPendingGmAttackRequest;
-    if (!enabled) {
-      setPending(null);
-      return;
-    }
-    const m = lastRollRequest;
-    const meta = m?.metadata as Record<string, unknown> | undefined;
-    if (!m || !meta || meta.kind !== 'roll_request' || meta.roll_kind !== 'attack') {
-      setPending(null);
-      return;
-    }
-    const requestedCid =
-      typeof meta.characterId === 'string' && meta.characterId.trim() ? meta.characterId.trim() : null;
-    if (!requestedCid || !focusCharacterId || focusCharacterId.trim() !== requestedCid) {
-      setPending(null);
-      return;
-    }
-    if (m.id === useGameStore.getState().ui.lastAnsweredGmAttackRequestMessageId) {
-      setPending(null);
-      return;
-    }
-    const input = rollRequestMetadataToInput(meta);
-    const char = charactersById[requestedCid] ?? npcsById[requestedCid] ?? null;
-    const r = resolveGmRequestRoll(char, input, {
-      includeSpecialAbilityInSkillRolls,
-    });
-    if (!r.attackDice || !char) {
-      setPending(null);
-      return;
-    }
-    setPending({
-      chatMessageId: m.id,
-      characterId: char.id,
-      weaponId: r.attackDice.weaponId,
-      difficultyValue: r.attackDice.difficultyValue,
-      rangeBracketLabel: r.attackDice.rangeBracketLabel,
-      targetCharacterId: r.attackDice.targetCharacterId,
-      targetName: r.attackDice.targetName,
-      rollSummary: r.label,
-      reason: typeof meta.reason === 'string' ? meta.reason : undefined,
-    });
-  }, [
-    enabled,
-    lastRollRequest,
-    focusCharacterId,
-    charactersById,
-    npcsById,
-    includeSpecialAbilityInSkillRolls,
-  ]);
-
-  const openGmRollFromMessage = useCallback(
-    (m: ChatMessage) => {
-      const meta = m.metadata as Record<string, unknown> | undefined;
-      if (!meta) return;
-      const input = rollRequestMetadataToInput(meta);
-      const cid =
-        (typeof meta.characterId === 'string' && meta.characterId) || focusCharacterId || null;
-      const char = cid ? charactersById[cid] ?? npcsById[cid] : null;
-      const r = resolveGmRequestRoll(char, input, {
-        includeSpecialAbilityInSkillRolls,
-      });
-      const formula = r.formula.trim();
-      if (!formula) return;
-      const reason = typeof meta.reason === 'string' ? meta.reason : undefined;
-      const rollSummary = r.label?.trim() || undefined;
-      if (r.attackDice && char) {
-        openDiceRoller(formula, {
-          kind: 'attack',
-          ...r.attackDice,
-          gmRequestChatMessageId: m.id,
-          rollSummary: rollSummary ?? `${char.name} attack`,
-          sessionId,
-          speakerName,
-          nonBlockingUi: true,
-        });
-        return;
-      }
-      openDiceRoller(formula, {
-        kind: 'gm_request',
-        sessionId,
-        formula,
-        reason,
-        rollSummary,
-        speakerName,
-        nonBlockingUi: true,
-      });
-    },
-    [
-      focusCharacterId,
-      charactersById,
-      npcsById,
-      includeSpecialAbilityInSkillRolls,
-      sessionId,
-      speakerName,
-      openDiceRoller,
-    ],
-  );
-
-  useEffect(() => {
-    if (!lastRollRequest || !enabled) return;
-    if (!rollRequestTargetsFocusedCharacter(lastRollRequest, focusCharacterId)) return;
-    const id = lastRollRequest.id;
-    if (!rollAutoOpenPrimedRef.current) {
-      rollAutoOpenPrimedRef.current = true;
-      lastSeenRollRequestIdRef.current = id;
-      return;
-    }
-    if (lastSeenRollRequestIdRef.current === id) return;
-    lastSeenRollRequestIdRef.current = id;
-    openGmRollFromMessage(lastRollRequest);
-  }, [lastRollRequest, enabled, openGmRollFromMessage, focusCharacterId]);
-
-  /** Remote (or local) switch to push-to-talk while a session take is active: stop without STT. */
-  useEffect(() => {
-    if (voiceInputMode !== 'pushToTalk' || !voiceRecording || !recordingStartedInSessionModeRef.current) {
-      return;
-    }
-    void (async () => {
-      await stopDiscard();
-      setVoiceRecordingStore(false);
-      sessionRecordingStartMsRef.current = null;
-      recordingStartedInSessionModeRef.current = false;
-    })();
-  }, [voiceInputMode, voiceRecording, stopDiscard, setVoiceRecordingStore]);
-
-  /**
-   * Peer stopped Session mic — finalize our take: stop, STT, POST fragment, merge on server.
-   * (Initiator already stopped in `toggleVoice` before broadcasting; this path is for other clients.)
-   */
-  useEffect(() => {
-    const t = sessionVoiceStopAllTick;
-    const turnId = sessionVoiceStopTurnId;
-    if (t === 0) {
-      lastHandledStopAllTickRef.current = 0;
-      return;
-    }
-    if (t === lastHandledStopAllTickRef.current) return;
-
-    if (voiceInputMode !== 'session') {
-      lastHandledStopAllTickRef.current = t;
-      return;
-    }
-
-    if (!turnId) {
-      lastHandledStopAllTickRef.current = t;
-      return;
-    }
-
-    if (!voiceRecordingRef.current) {
-      lastHandledStopAllTickRef.current = t;
-      return;
-    }
-
-    lastHandledStopAllTickRef.current = t;
-    const anchor = sessionRecordingStartMsRef.current ?? undefined;
-    void (async () => {
-      const blob = await stopVoice();
-      setVoiceRecordingStore(false);
-      sessionRecordingStartMsRef.current = null;
-      recordingStartedInSessionModeRef.current = false;
-      setVoiceError(null);
-      if (!blob || blob.size < 64) {
-        setVoiceError('Recording too short');
-        return;
-      }
-      await submitSessionVoiceFragment(turnId, blob, anchor);
-    })();
-  }, [
-    sessionVoiceStopAllTick,
-    sessionVoiceStopTurnId,
-    voiceInputMode,
-    stopVoice,
-    setVoiceRecordingStore,
-    submitSessionVoiceFragment,
-  ]);
-
-  /**
-   * Peer pressed Mic in Session — mirror start if idle (mic must be pre-authorized).
-   * Uses `voiceRecordingRef` so we don't treat a tick as "already recording" from stale React state after Stop.
-   */
-  useEffect(() => {
-    const t = sessionVoicePeerStartTick;
-    if (t === 0) {
-      lastConsumedPeerStartTickRef.current = 0;
-      return;
-    }
-    if (t === lastConsumedPeerStartTickRef.current) return;
-
-    if (ignoreNextPeerStartForLocalMicRef.current) {
-      ignoreNextPeerStartForLocalMicRef.current = false;
-      lastConsumedPeerStartTickRef.current = t;
-      return;
-    }
-
-    if (!enabled || voiceInputMode !== 'session' || isLoading) return;
-
-    if (voiceRecordingRef.current) {
-      lastConsumedPeerStartTickRef.current = t;
-      return;
-    }
-
-    if (!micReady) return;
-
-    lastConsumedPeerStartTickRef.current = t;
-    void (async () => {
-      setVoiceError(null);
-      recordingStartedInSessionModeRef.current = true;
-      sessionRecordingStartMsRef.current = Date.now();
-      await startVoice();
-      setVoiceRecordingStore(true);
-    })();
-  }, [
-    sessionVoicePeerStartTick,
-    enabled,
-    micReady,
-    voiceInputMode,
-    isLoading,
-    startVoice,
-    setVoiceRecordingStore,
-  ]);
-
-  const send = useCallback(async () => {
+  const submitMessage = async () => {
     const text = draft.trim();
-    if (!text || !enabled) return;
+    if (!text || !enabled || sending) return;
     setSendError(null);
-    setChatLoading(true);
-    unlockHtmlAudioFromUserGesture();
+    setSending(true);
     try {
-      const accessToken = await getAccessTokenForApi(supabase);
-      if (!accessToken) {
-        setSendError('Not signed in');
-        return;
-      }
-      const pr = useGameStore
-        .getState()
-        .ui.pendingRollsForVoice.filter((r) => r.sessionId === sessionId)
-        .map((r) => ({ rolledAtMs: r.rolledAtMs, playerMessage: r.playerMessage }));
-      const merged = mergePendingRollsWithPlayerText({
-        playerMessage: text,
-        messageAnchorMs: Date.now(),
-        rolls: pr,
-      });
-      const res = await fetch('/api/gm/stream', {
+      const token = await authToken();
+      if (!token) return;
+      const res = await fetch('/api/session/chat-message', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           sessionId,
-          playerMessage: merged.playerMessage,
-          speakerName,
-          openRouterModel: gmOpenRouterModel,
-          ...(merged.playerMessageMetadata ? { playerMessageMetadata: merged.playerMessageMetadata } : {}),
+          text,
+          speaker: sendAsGm && isGm ? 'Game Master' : speakerName,
+          type: sendAsGm && isGm ? 'narration' : 'player',
         }),
       });
+      const data = (await res.json().catch(() => ({}))) as { error?: string; message?: ChatMessage };
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setSendError((data as { error?: string }).error ?? res.statusText ?? 'Request failed');
+        setSendError(data.error ?? res.statusText);
         return;
       }
-      await consumeGmStreamBody(res, (m) => setSendError(m));
-      clearPendingVoiceGm();
-      clearPendingRollsForVoice();
+      if (data.message) mergeRemoteChatMessage(data.message);
       setDraft('');
     } catch (e) {
-      setSendError(formatGmStreamClientError(e));
+      setSendError(e instanceof Error ? e.message : String(e));
     } finally {
-      setChatLoading(false);
+      setSending(false);
     }
-  }, [
-    draft,
-    enabled,
-    sessionId,
-    speakerName,
-    gmOpenRouterModel,
-    setChatLoading,
-    clearPendingVoiceGm,
-    clearPendingRollsForVoice,
-    consumeGmStreamBody,
-  ]);
+  };
 
-  const toggleVoice = useCallback(async () => {
-    if (!enabled) return;
-    if (!voiceRecording) {
-      setVoiceError(null);
-      recordingStartedInSessionModeRef.current = voiceInputMode === 'session';
-      sessionRecordingStartMsRef.current = Date.now();
-      await startVoice();
-      setVoiceRecordingStore(true);
-      if (voiceInputMode === 'session') {
-        ignoreNextPeerStartForLocalMicRef.current = true;
-        void broadcastSessionVoicePeerStart();
-        window.setTimeout(() => {
-          if (ignoreNextPeerStartForLocalMicRef.current) {
-            ignoreNextPeerStartForLocalMicRef.current = false;
-          }
-        }, 800);
-      }
-      return;
-    }
-    const wasSessionStop = voiceInputMode === 'session';
-    const turnId = wasSessionStop ? crypto.randomUUID() : '';
-    const anchor = sessionRecordingStartMsRef.current ?? undefined;
-    const blob = await stopVoice();
-    setVoiceRecordingStore(false);
-    recordingStartedInSessionModeRef.current = false;
-    if (wasSessionStop) {
-      sessionRecordingStartMsRef.current = null;
-    }
-    if (wasSessionStop) {
-      queueMicrotask(() => {
-        void broadcastSessionVoiceStopAll(turnId);
-      });
-    }
-    if (!blob || blob.size < 64) {
-      setVoiceError('Recording too short');
-      return;
-    }
-    setVoiceError(null);
-    if (wasSessionStop) {
-      await submitSessionVoiceFragment(turnId, blob, anchor);
-      return;
-    }
-    setChatLoading(true);
-    unlockHtmlAudioFromUserGesture();
+  const patchMessage = async (messageId: string, text: string) => {
+    setChatActionError(null);
     try {
-      const accessToken = await getAccessTokenForApi(supabase);
-      if (!accessToken) {
-        setVoiceError('Not signed in');
-        return;
-      }
-      const textResult = await voiceBlobToGmPlayerMessage({
-        blob,
-        focusCharacterId,
-        speakerName,
-        charactersById,
-        npcsById,
-        accessToken,
-        sttLanguage,
-      });
-      if (!textResult.ok) {
-        setVoiceError(textResult.error);
-        return;
-      }
-      const pr = useGameStore
-        .getState()
-        .ui.pendingRollsForVoice.filter((r) => r.sessionId === sessionId)
-        .map((r) => ({ rolledAtMs: r.rolledAtMs, playerMessage: r.playerMessage }));
-      const ptMerged = mergePendingRollsWithPlayerText({
-        playerMessage: textResult.playerMessage,
-        messageAnchorMs: sessionRecordingStartMsRef.current ?? Date.now(),
-        rolls: pr,
-        playerMessageMetadata: textResult.playerMessageMetadata,
-      });
-      const gmRes = await fetch('/api/gm/stream', {
-        method: 'POST',
+      const token = await authToken();
+      if (!token) return;
+      const res = await fetch('/api/session/chat-message', {
+        method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
+          Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          sessionId,
-          playerMessage: ptMerged.playerMessage,
-          speakerName,
-          ...(ptMerged.playerMessageMetadata
-            ? { playerMessageMetadata: ptMerged.playerMessageMetadata }
-            : textResult.playerMessageMetadata
-              ? { playerMessageMetadata: textResult.playerMessageMetadata }
-              : {}),
-          openRouterModel: gmOpenRouterModel,
-        }),
+        body: JSON.stringify({ sessionId, messageId, text }),
       });
-      if (!gmRes.ok) {
-        const gmData = await gmRes.json().catch(() => ({}));
-        setVoiceError((gmData as { error?: string }).error ?? gmRes.statusText ?? 'AI-GM request failed');
-      } else {
-        await consumeGmStreamBody(gmRes, (m) => setVoiceError(m));
-        clearPendingVoiceGm();
-        clearPendingRollsForVoice();
+      const data = (await res.json().catch(() => ({}))) as { error?: string; message?: ChatMessage };
+      if (!res.ok) {
+        setChatActionError(data.error ?? res.statusText);
+        return;
       }
+      if (data.message) mergeRemoteChatMessage(data.message);
+      setEditingId(null);
+      setEditingDraft('');
     } catch (e) {
-      setVoiceError(formatGmStreamClientError(e));
-    } finally {
-      setChatLoading(false);
+      setChatActionError(e instanceof Error ? e.message : String(e));
     }
-  }, [
-    enabled,
-    voiceRecording,
-    voiceInputMode,
-    startVoice,
-    stopVoice,
-    broadcastSessionVoiceStopAll,
-    broadcastSessionVoicePeerStart,
-    focusCharacterId,
-    sessionId,
-    speakerName,
-    charactersById,
-    npcsById,
-    sttLanguage,
-    gmOpenRouterModel,
-    setChatLoading,
-    setVoiceRecordingStore,
-    clearPendingVoiceGm,
-    clearPendingRollsForVoice,
-    submitSessionVoiceFragment,
-    consumeGmStreamBody,
-  ]);
+  };
 
-  const openRollRequestInRoller = useCallback(
-    (m: ChatMessage) => {
-      openGmRollFromMessage(m);
-    },
-    [openGmRollFromMessage],
-  );
-
-  const rollHint = useCallback(
-    (m: ChatMessage) => {
-      const meta = m.metadata as Record<string, unknown> | undefined;
-      if (!meta) return null;
-      const input = rollRequestMetadataToInput(meta);
-      const cid =
-        (typeof meta.characterId === 'string' && meta.characterId) || focusCharacterId || null;
-      const char = cid ? charactersById[cid] ?? npcsById[cid] : null;
-      const r = resolveGmRequestRoll(char, input, {
-        includeSpecialAbilityInSkillRolls,
+  const deleteMessage = async (messageId: string) => {
+    setChatActionError(null);
+    try {
+      const token = await authToken();
+      if (!token) return;
+      const url = `/api/session/chat-message?sessionId=${encodeURIComponent(sessionId)}&messageId=${encodeURIComponent(messageId)}`;
+      const res = await fetch(url, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
       });
-      if (!r.resolvedFromCharacter || !r.label) return null;
-      return r.label;
-    },
-    [focusCharacterId, charactersById, npcsById, includeSpecialAbilityInSkillRolls],
-  );
-
-  const rollsForSession = useMemo(
-    () =>
-      [...pendingRollsForVoice]
-        .filter((r) => r.sessionId === sessionId)
-        .sort((a, b) => a.rolledAtMs - b.rolledAtMs),
-    [pendingRollsForVoice, sessionId],
-  );
-
-  const truncateFromMessage = useCallback(
-    async (fromMessageId: string) => {
-      if (!enabled) return;
-      setChatActionError(null);
-      setChatLoading(true);
-      try {
-        const accessToken = await getAccessTokenForApi(supabase);
-        if (!accessToken) {
-          setChatActionError('Not signed in');
-          return;
-        }
-        const res = await fetch('/api/session/chat-messages/truncate', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-          },
-          body: JSON.stringify({ sessionId, fromMessageId }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          setChatActionError((data as { error?: string }).error ?? res.statusText ?? 'Truncate failed');
-          return;
-        }
-        const ids = (data as { deletedIds?: string[] }).deletedIds;
-        if (Array.isArray(ids)) {
-          removeChatMessagesByIds(ids);
-          setEditingId(null);
-          setEditingDraft('');
-        }
-      } catch (e) {
-        setChatActionError(e instanceof Error ? e.message : String(e));
-      } finally {
-        setChatLoading(false);
+      const data = (await res.json().catch(() => ({}))) as { error?: string; deletedId?: string };
+      if (!res.ok) {
+        setChatActionError(data.error ?? res.statusText);
+        return;
       }
-    },
-    [enabled, sessionId, setChatLoading, removeChatMessagesByIds],
-  );
+      removeChatMessagesByIds([data.deletedId ?? messageId]);
+    } catch (e) {
+      setChatActionError(e instanceof Error ? e.message : String(e));
+    }
+  };
 
-  const regenerateGmNarration = useCallback(
-    async (narrationMessageId: string) => {
-      if (!enabled) return;
-      setChatActionError(null);
-      setChatLoading(true);
-      try {
-        const accessToken = await getAccessTokenForApi(supabase);
-        if (!accessToken) {
-          setChatActionError('Not signed in');
-          return;
+  const openRollRequest = (message: ChatMessage) => {
+    const meta = message.metadata as Record<string, unknown> | undefined;
+    if (!meta || meta.kind !== 'roll_request') return;
+    const input = rollRequestMetadataToInput(meta);
+    const characterId = rollRequestTargetsFocusedCharacter(message, focusCharacterId)
+      ? focusCharacterId
+      : input.character_id;
+    const store = useGameStore.getState();
+    const character =
+      typeof characterId === 'string'
+        ? store.characters.byId[characterId] ?? store.npcs.byId[characterId] ?? null
+        : null;
+    const resolved = resolveGmRequestRoll(character, input, { includeSpecialAbilityInSkillRolls });
+    if (!resolved.formula) {
+      setChatActionError('Could not resolve requested roll.');
+      return;
+    }
+    const intent: DiceRollIntent = resolved.attackDice
+      ? {
+          kind: 'attack',
+          ...resolved.attackDice,
+          sessionId,
+          speakerName,
+          rollSummary: resolved.label ?? 'Attack roll',
+          gmRequestChatMessageId: message.id,
+          nonBlockingUi: true,
         }
-        const res = await fetch('/api/gm/regenerate', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-          },
-          body: JSON.stringify({ sessionId, narrationMessageId, openRouterModel: gmOpenRouterModel }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          setChatActionError((data as { error?: string }).error ?? res.statusText ?? 'Regenerate failed');
-          return;
-        }
-        const ids = (data as { deletedIds?: string[] }).deletedIds;
-        if (Array.isArray(ids)) {
-          removeChatMessagesByIds(ids);
-          setEditingId(null);
-          setEditingDraft('');
-        }
-        setGmNarrationPending(true);
-      } catch (e) {
-        setChatActionError(e instanceof Error ? e.message : String(e));
-      } finally {
-        setChatLoading(false);
-      }
-    },
-    [
-      enabled,
-      sessionId,
-      gmOpenRouterModel,
-      setChatLoading,
-      removeChatMessagesByIds,
-      setGmNarrationPending,
-    ],
-  );
-
-  const deleteChatMessage = useCallback(
-    async (messageId: string) => {
-      if (!enabled) return;
-      setChatActionError(null);
-      setChatLoading(true);
-      try {
-        const accessToken = await getAccessTokenForApi(supabase);
-        if (!accessToken) {
-          setChatActionError('Not signed in');
-          return;
-        }
-        const q = new URLSearchParams({ sessionId, messageId });
-        const res = await fetch(`/api/session/chat-message?${q.toString()}`, {
-          method: 'DELETE',
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          setChatActionError((data as { error?: string }).error ?? res.statusText ?? 'Delete failed');
-          return;
-        }
-        removeChatMessagesByIds([messageId]);
-        if (editingId === messageId) {
-          setEditingId(null);
-          setEditingDraft('');
-        }
-      } catch (e) {
-        setChatActionError(e instanceof Error ? e.message : String(e));
-      } finally {
-        setChatLoading(false);
-      }
-    },
-    [enabled, sessionId, setChatLoading, removeChatMessagesByIds, editingId],
-  );
-
-  const saveEditedPlayerMessage = useCallback(
-    async (messageId: string, text: string) => {
-      if (!enabled || !text) return;
-      setChatActionError(null);
-      setChatLoading(true);
-      try {
-        const accessToken = await getAccessTokenForApi(supabase);
-        if (!accessToken) {
-          setChatActionError('Not signed in');
-          return;
-        }
-        const res = await fetch('/api/session/chat-message', {
-          method: 'PATCH',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-          },
-          body: JSON.stringify({ sessionId, messageId, text }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          setChatActionError((data as { error?: string }).error ?? res.statusText ?? 'Save failed');
-          return;
-        }
-        const msg = (data as { message?: ChatMessage }).message;
-        if (msg) mergeRemoteChatMessage(msg);
-        setEditingId(null);
-        setEditingDraft('');
-      } catch (e) {
-        setChatActionError(e instanceof Error ? e.message : String(e));
-      } finally {
-        setChatLoading(false);
-      }
-    },
-    [enabled, sessionId, setChatLoading, mergeRemoteChatMessage],
-  );
+      : {
+          kind: 'gm_request',
+          sessionId,
+          formula: resolved.formula,
+          speakerName,
+          rollSummary: resolved.label ?? input.formula ?? 'Requested roll',
+          reason: resolved.label ?? undefined,
+          nonBlockingUi: true,
+        };
+    openDiceRoller(resolved.formula, intent);
+  };
 
   return (
-    <section className="flex flex-col h-full min-h-0 rounded-lg border border-zinc-700 bg-zinc-900/60">
-      <div className="shrink-0 border-b border-zinc-700 px-3 py-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-        <label
-          htmlFor="session-scenario"
-          className="text-[10px] uppercase tracking-widest text-zinc-400 shrink-0"
-        >
-          Scenario
-        </label>
-        <select
-          id="session-scenario"
-          className="flex-1 min-w-40 max-w-full rounded border border-zinc-600 bg-zinc-950 px-2 py-1 text-[11px] text-zinc-200"
-          value={activeScenarioId ?? ''}
-          disabled={!enabled || isLoading}
-          onChange={(e) => {
-            const v = e.target.value;
-            const next = v === '' ? null : v;
-            void persistSessionScenarioSettings(supabase, sessionId, { activeScenarioId: next }).then(
-              (r) => {
-                if (r.error && typeof console !== 'undefined') {
-                  console.warn('[session] scenario settings persist failed', r.error);
-                }
-              },
-            );
-          }}
-        >
-          <option value="">None</option>
-          {SCENARIO_CATALOG.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.title}
-            </option>
-          ))}
-        </select>
-      </div>
-      <header className="shrink-0 border-b border-zinc-700 px-3 py-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-        <h2 className="text-[10px] uppercase tracking-widest text-zinc-400">Session chat</h2>
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <button
-            type="button"
-            className="text-[9px] uppercase tracking-wide text-zinc-500 hover:text-zinc-300 px-1.5 py-0.5 rounded border border-zinc-700 bg-zinc-950/60"
-            title="Narration TTS engine, local server URL, Cartesia toggle"
-            disabled={!enabled || isLoading}
-            onClick={() => {
-              setTtsSettingsMountKey((k) => k + 1);
-              setTtsSettingsOpen(true);
-            }}
-          >
-            TTS
-          </button>
-          <label className="inline-flex items-center gap-1.5 cursor-pointer text-[9px] uppercase tracking-wide text-zinc-500 select-none">
-            <input
-              type="checkbox"
-              className="accent-cyan-600 scale-90"
-              checked={showToolLog}
-              onChange={(e) => setShowToolLog(e.target.checked)}
-            />
-            Tool log
-          </label>
-          <label className="inline-flex items-center gap-1.5 cursor-pointer text-[9px] uppercase tracking-wide text-zinc-500 select-none">
-            <input
-              type="checkbox"
-              className="accent-violet-600 scale-90"
-              checked={ttsEnabled}
-              disabled={!enabled || isLoading}
-              title="Speak each sentence as the AI-GM streams (engine in TTS settings)"
-              onChange={(e) => {
-                const on = e.target.checked;
-                void persistSessionTtsEnabled(supabase, sessionId, { ttsEnabled: on }).then((r) => {
-                  if (r.error && typeof console !== 'undefined') {
-                    console.warn('[session] TTS setting persist failed', r.error);
-                  }
-                });
-              }}
-            />
-            Auto TTS
-          </label>
-          {!showToolLog && hiddenMessageCount > 0 && (
-            <span className="text-[9px] text-zinc-600 font-mono normal-case">
-              {hiddenMessageCount} hidden
-            </span>
-          )}
-          {(isLoading || gmNarrationPending) && (
-            <span className="text-[10px] text-cyan-400/90 font-mono animate-pulse">
-              {isLoading ? 'Working…' : 'AI-GM…'}
-            </span>
-          )}
+    <section className="h-full min-h-0 flex flex-col rounded border border-zinc-800 bg-zinc-950/80 overflow-hidden">
+      <header className="shrink-0 border-b border-zinc-800 px-3 py-2 flex items-center justify-between gap-2">
+        <div>
+          <h2 className="text-xs uppercase tracking-wider text-zinc-300">Table Chat</h2>
+          <p className="text-[10px] text-zinc-500">Players, GM lines, dice, and system log.</p>
         </div>
+        <button
+          type="button"
+          onClick={() => setShowSystemLog((v) => !v)}
+          className="text-[10px] uppercase tracking-wide px-2 py-1 rounded border border-zinc-700 text-zinc-300 hover:bg-zinc-900"
+        >
+          {showSystemLog ? 'Story' : `Log${hiddenMessageCount > 0 ? ` ${hiddenMessageCount}` : ''}`}
+        </button>
       </header>
 
-      <div
-        className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-2 text-sm"
-        role="log"
-        aria-live="polite"
-      >
-        {messages.length === 0 ? (
-          <p className="text-zinc-500 text-xs">No messages yet. Say something to the AI-GM.</p>
-        ) : displayedMessages.length === 0 ? (
-          <p className="text-zinc-500 text-xs">
-            All messages are hidden. Turn on <span className="text-zinc-400">Tool log</span> to see
-            system lines.
-          </p>
+      <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2 text-sm">
+        {displayedMessages.length === 0 ? (
+          <p className="text-xs text-zinc-500">No table messages yet.</p>
         ) : (
-          <>
-            {displayedMessages.map((m) => {
-            const sheetHint =
-              m.type === 'system' && m.metadata?.kind === 'roll_request' ? rollHint(m) : null;
-            const canRegenerateGm = m.type === 'narration' && m.speaker === 'Game Master';
-            const canEditHere = m.type === 'player' && m.speaker === speakerName;
+          displayedMessages.map((m) => {
             const isEditing = editingId === m.id;
+            const canEdit = m.type === 'player';
+            const canDelete = isGm;
             return (
-              <div
+              <article
                 key={m.id}
                 className={`group flex items-stretch min-h-9 rounded-r border-l-2 ${bubbleClasses(m.type, m.metadata)}`}
               >
-                <button
-                  type="button"
-                  title="Remove this message and everything after it"
-                  disabled={!enabled || isLoading}
-                  className="shrink-0 w-7 flex items-center justify-center self-stretch rounded-l-sm border-r border-black/15 bg-black/10 text-zinc-500 hover:text-zinc-200 hover:bg-black/25 disabled:opacity-40 transition-colors"
-                  aria-label="Remove this message and all later messages"
-                  onClick={() => void truncateFromMessage(m.id)}
-                >
-                  <ChevronTruncateIcon />
-                </button>
-                <div className="relative flex-1 min-w-0 py-1.5 pl-2 pr-8">
-                  <div className="absolute top-0.5 right-0.5 z-10 flex items-center gap-0 opacity-25 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-                    {canEditHere && (
-                      <button
-                        type="button"
-                        title="Edit message"
-                        disabled={!enabled || isLoading}
-                        className="px-0.5 py-0 text-[9px] leading-none text-zinc-500 hover:text-cyan-400 disabled:opacity-40"
-                        onClick={() => {
-                          setEditingId(m.id);
-                          setEditingDraft(m.text);
-                        }}
-                      >
-                        edit
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      title="Delete this message only"
-                      disabled={!enabled || isLoading}
-                      className="px-0.5 py-0 text-[9px] leading-none text-zinc-500 hover:text-red-400/90 disabled:opacity-40"
-                      onClick={() => void deleteChatMessage(m.id)}
-                    >
-                      del
-                    </button>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] uppercase tracking-wide opacity-80 pr-6">
-                    <span className="font-bold text-zinc-300">{m.speaker}</span>
+                <div className="flex-1 min-w-0 px-2 py-1.5">
+                  <div className="flex items-center justify-between gap-2 text-[10px] uppercase tracking-wide">
+                    <span className="truncate text-zinc-400">{m.speaker}</span>
                     <span className="text-zinc-500 font-mono">{typeLabel(m.type, m.metadata)}</span>
-                    <span className="text-zinc-600 font-mono">
-                      {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                    {m.type === 'narration' && (
-                      <button
-                        type="button"
-                        className="shrink-0 p-0.5 rounded normal-case text-violet-300/85 hover:text-violet-200 hover:bg-violet-950/40 disabled:opacity-35 transition-colors"
-                        title="Read aloud for everyone (each client fetches from the TTS server; IDB cache on repeat)"
-                        disabled={!enabled || isLoading || !sessionBroadcastReady}
-                        aria-label="Read narration aloud for everyone"
-                        onClick={() => {
-                          unlockHtmlAudioFromUserGesture();
-                          broadcastNarrationTtsCue({ messageId: m.id, playAfterMs: 0 });
-                        }}
-                      >
-                        <SpeakerNarrateIcon />
-                      </button>
-                    )}
                   </div>
                   {isEditing ? (
                     <div className="mt-1 space-y-1">
                       <textarea
                         value={editingDraft}
                         onChange={(e) => setEditingDraft(e.target.value)}
-                        rows={3}
-                        className="w-full bg-zinc-950/80 border border-zinc-600 rounded px-2 py-1.5 text-sm text-zinc-100"
+                        className="w-full min-h-20 resize-y rounded border border-zinc-700 bg-zinc-950 p-2 text-xs text-zinc-100"
                       />
                       <div className="flex gap-2">
                         <button
                           type="button"
-                          disabled={!enabled || isLoading || !editingDraft.trim()}
-                          className="text-[10px] uppercase font-bold px-2 py-0.5 rounded border border-cyan-700/60 text-cyan-200 hover:bg-cyan-950/50 disabled:opacity-40"
-                          onClick={() => void saveEditedPlayerMessage(m.id, editingDraft.trim())}
+                          onClick={() => void patchMessage(m.id, editingDraft.trim())}
+                          className="text-[10px] uppercase px-2 py-1 rounded bg-cyan-700 text-white"
                         >
                           Save
                         </button>
                         <button
                           type="button"
-                          disabled={isLoading}
-                          className="text-[10px] uppercase text-zinc-500 hover:text-zinc-300"
                           onClick={() => {
                             setEditingId(null);
                             setEditingDraft('');
                           }}
+                          className="text-[10px] uppercase px-2 py-1 rounded border border-zinc-700 text-zinc-300"
                         >
                           Cancel
                         </button>
@@ -1306,347 +336,86 @@ export function ChatInterface({
                   ) : (
                     <ChatMessageBody text={m.text} />
                   )}
-                  {sheetHint && (
-                    <p className="mt-1 text-[10px] text-amber-200/80 font-mono">
-                      Sheet match: {sheetHint}
-                    </p>
-                  )}
                   {m.type === 'system' && m.metadata?.kind === 'roll_request' && (
                     <button
                       type="button"
-                      onClick={() => openRollRequestInRoller(m)}
-                      className="mt-2 text-[10px] uppercase font-bold border border-amber-500/60 bg-amber-950/50 text-amber-200 px-2 py-1 rounded hover:bg-amber-900/40"
+                      onClick={() => openRollRequest(m)}
+                      className="mt-2 text-[10px] uppercase tracking-wide px-2 py-1 rounded border border-amber-500/50 text-amber-100 hover:bg-amber-950/50"
                     >
-                      Open dice roller
+                      Open roll
                     </button>
                   )}
                 </div>
-                {canRegenerateGm ? (
-                  <button
-                    type="button"
-                    title="Regenerate this GM reply (removes it and everything after, then runs the AI again)"
-                    disabled={!enabled || isLoading}
-                    className="shrink-0 w-7 flex items-center justify-center self-stretch rounded-r-sm border-l border-black/15 bg-black/10 text-zinc-500 hover:text-violet-200 hover:bg-violet-950/35 disabled:opacity-40 transition-colors"
-                    aria-label="Regenerate GM reply"
-                    onClick={() => void regenerateGmNarration(m.id)}
-                  >
-                    <ChevronRegenerateIcon />
-                  </button>
-                ) : null}
-              </div>
-            );
-          })}
-            {streamingGmText !== null && (
-              <div className="group flex items-stretch min-h-9 rounded-r border-l-2 border-l-violet-400 bg-violet-950/40 text-violet-50">
-                <div className="shrink-0 w-7 flex items-center justify-center self-stretch rounded-l-sm border-r border-black/15 bg-black/10 text-zinc-600">
-                  <span className="text-[9px] font-mono">···</span>
-                </div>
-                <div className="relative flex-1 min-w-0 py-1.5 pl-2 pr-3">
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] uppercase tracking-wide opacity-80">
-                    <span className="font-bold text-violet-200">Game Master</span>
-                    <span className="text-violet-500/90 font-mono">GM</span>
-                    <span className="text-violet-600/90 font-mono animate-pulse">Streaming…</span>
-                  </div>
-                  <ChatMessageBody text={streamingGmText} />
-                </div>
-              </div>
-            )}
-          </>
-        )}
-        {rollsForSession.length > 0 && (
-          <div className="rounded border border-amber-800/50 bg-amber-950/25 px-2 py-2 space-y-2">
-            <p className="text-[10px] uppercase tracking-wide text-amber-200/90">
-              Saved rolls — merge on send ({rollsForSession.length})
-            </p>
-            <ul className="space-y-2">
-              {rollsForSession.map((entry) => (
-                <li
-                  key={entry.id}
-                  className="text-xs border border-amber-800/40 rounded p-2 bg-zinc-950/50 text-zinc-200"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-1 mb-1">
-                    <span className="font-mono text-[10px] text-amber-200/80">
-                      {new Date(entry.rolledAtMs).toLocaleTimeString([], {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        second: '2-digit',
-                      })}{' '}
-                      · {entry.formula}
-                    </span>
-                    <span className="flex gap-1">
+                {(canEdit || canDelete) && !isEditing && (
+                  <div className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col border-l border-zinc-800">
+                    {canEdit && (
                       <button
                         type="button"
-                        className="text-[10px] uppercase text-cyan-400 hover:underline"
                         onClick={() => {
-                          removePendingRollForVoice(entry.id);
-                          openDiceRoller(entry.formula, entry.diceRollIntent);
+                          setEditingId(m.id);
+                          setEditingDraft(m.text);
                         }}
+                        className="px-2 py-1 text-[10px] text-zinc-400 hover:text-cyan-200"
                       >
-                        Reroll
+                        Edit
                       </button>
+                    )}
+                    {canDelete && (
                       <button
                         type="button"
-                        className="text-[10px] uppercase text-red-400/90 hover:underline"
-                        onClick={() => removePendingRollForVoice(entry.id)}
+                        onClick={() => void deleteMessage(m.id)}
+                        className="px-2 py-1 text-[10px] text-zinc-400 hover:text-rose-200"
                       >
-                        Delete
+                        Del
                       </button>
-                    </span>
+                    )}
                   </div>
-                  <p className="text-[11px] text-zinc-300 wrap-break-word line-clamp-3">{entry.playerMessage}</p>
-                </li>
-              ))}
-            </ul>
-          </div>
+                )}
+              </article>
+            );
+          })
         )}
-        <div ref={endRef} />
       </div>
 
-      <footer className="shrink-0 border-t border-zinc-700 p-3 space-y-2">
-        <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wide text-zinc-500">
-          <span className="text-zinc-400">Voice</span>
-          <label className="inline-flex items-center gap-1 cursor-pointer">
+      <footer className="shrink-0 border-t border-zinc-800 p-2 space-y-2">
+        {isGm && (
+          <label className="flex items-center gap-2 text-[11px] text-zinc-300">
             <input
-              type="radio"
-              name="voice-mode"
-              className="accent-cyan-600"
-              checked={voiceInputMode === 'pushToTalk'}
-              disabled={!enabled || voiceRecording || isLoading}
-              onChange={() => {
-                clearPendingVoiceGm();
-                applySessionRecordingBroadcast({ active: false });
-                void broadcastSessionRecordingState({ active: false, actorName: speakerName });
-                void persistSessionVoiceSettings(supabase, sessionId, {
-                  voiceInputMode: 'pushToTalk',
-                  sessionRecordingStartedBy: null,
-                }).then((r) => {
-                  if (r.error && typeof console !== 'undefined') {
-                    console.warn('[session] voice settings persist failed', r.error);
-                  }
-                });
-              }}
+              type="checkbox"
+              checked={sendAsGm}
+              onChange={(e) => setSendAsGm(e.target.checked)}
+              className="accent-violet-500"
             />
-            Push to talk
+            Send as Game Master
           </label>
-          <label className="inline-flex items-center gap-1 cursor-pointer">
-            <input
-              type="radio"
-              name="voice-mode"
-              className="accent-cyan-600"
-              checked={voiceInputMode === 'session'}
-              disabled={!enabled || voiceRecording || isLoading}
-              onChange={() => {
-                clearPendingVoiceGm();
-                const settings = useGameStore.getState().session.settings;
-                const existing =
-                  settings.voiceInputMode === 'session' &&
-                  typeof settings.sessionRecordingStartedBy === 'string' &&
-                  settings.sessionRecordingStartedBy.trim().length > 0
-                    ? settings.sessionRecordingStartedBy.trim()
-                    : null;
-                const actorName = existing ?? speakerName;
-                applySessionRecordingBroadcast({ active: true, actorName });
-                void broadcastSessionRecordingState({ active: true, actorName });
-                void persistSessionVoiceSettings(supabase, sessionId, {
-                  voiceInputMode: 'session',
-                  sessionRecordingStartedBy: actorName,
-                }).then((r) => {
-                  if (r.error && typeof console !== 'undefined') {
-                    console.warn('[session] voice settings persist failed', r.error);
-                  }
-                });
-              }}
-            />
-            Session
-          </label>
-          <span className="text-zinc-600 normal-case tracking-normal">
-            {voiceInputMode === 'session'
-              ? 'Stop ends the take: everyone transcribes; one combined message goes to the GM.'
-              : 'Stop sends to the GM immediately.'}
-          </span>
-          {sessionRecordingGroupActive && sessionRecordingStartedBy && (
-            <span className="w-full text-[10px] normal-case tracking-normal text-cyan-600/90">
-              Group session mode (started by {sessionRecordingStartedBy})
-            </span>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] uppercase tracking-wide text-zinc-500">
-          <span className="text-zinc-400">Voice STT</span>
-          <div className="inline-flex rounded border border-zinc-600 overflow-hidden">
-            {(['en', 'tr'] as const satisfies readonly GmSessionLanguage[]).map((code) => (
-              <button
-                key={code}
-                type="button"
-                disabled={!enabled || isLoading}
-                className={`px-2 py-0.5 normal-case tracking-normal text-[10px] font-mono ${
-                  sttLanguage === code
-                    ? 'bg-cyan-900/55 text-cyan-100'
-                    : 'bg-zinc-950 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300'
-                } disabled:opacity-40`}
-                onClick={() => {
-                  void persistSessionLanguageSettings(supabase, sessionId, { sttLanguage: code }).then(
-                    (r) => {
-                      if (r.error && typeof console !== 'undefined') {
-                        console.warn('[session] language settings persist failed', r.error);
-                      }
-                    },
-                  );
-                }}
-              >
-                {code.toUpperCase()}
-              </button>
-            ))}
-          </div>
-          <span className="text-zinc-400">AI-GM lang</span>
-          <div className="inline-flex rounded border border-zinc-600 overflow-hidden">
-            {(['en', 'tr'] as const satisfies readonly GmSessionLanguage[]).map((code) => (
-              <button
-                key={code}
-                type="button"
-                disabled={!enabled || isLoading}
-                className={`px-2 py-0.5 normal-case tracking-normal text-[10px] font-mono ${
-                  aiLanguage === code
-                    ? 'bg-violet-900/45 text-violet-100'
-                    : 'bg-zinc-950 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300'
-                } disabled:opacity-40`}
-                onClick={() => {
-                  void persistSessionLanguageSettings(supabase, sessionId, { aiLanguage: code }).then(
-                    (r) => {
-                      if (r.error && typeof console !== 'undefined') {
-                        console.warn('[session] language settings persist failed', r.error);
-                      }
-                    },
-                  );
-                }}
-              >
-                {code.toUpperCase()}
-              </button>
-            ))}
-          </div>
-          <span className="text-zinc-600 normal-case tracking-normal max-w-md">
-            STT must match spoken language. GM language affects narration only (tools stay English).
-          </span>
-        </div>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] uppercase tracking-wide text-zinc-500">
-          <span className="text-zinc-400">OpenRouter model</span>
-          <select
-            value={gmOpenRouterModel}
-            disabled={!enabled || isLoading}
-            onChange={(e) => {
-              const v = e.target.value;
-              if (!isGmSelectableOpenRouterModelId(v)) return;
-              void persistSessionGmOpenRouterModel(supabase, sessionId, { gmOpenRouterModel: v }).then(
-                (r) => {
-                  if (r.error && typeof console !== 'undefined') {
-                    console.warn('[session] gm OpenRouter model persist failed', r.error);
-                  } else {
-                    writeGmOpenRouterClientChoice({ modelId: v });
-                  }
-                },
-              );
-            }}
-            className="max-w-[min(100%,24rem)] bg-zinc-950 border border-zinc-600 rounded px-1.5 py-0.5 text-[10px] font-mono normal-case tracking-normal text-zinc-200 disabled:opacity-40"
-            aria-label="OpenRouter model for AI-GM"
-          >
-            {GM_SELECTABLE_OPENROUTER_MODEL_IDS.map((id) => (
-              <option key={id} value={id}>
-                {id}
-              </option>
-            ))}
-          </select>
-          <span className="text-zinc-600 normal-case tracking-normal max-w-md">
-            Synced for everyone in this session (Postgres + Realtime). GLM 5.1 and DeepSeek V3.2 use OpenAI-compatible{' '}
-            <span className="font-mono">reasoning</span>. For NanoGPT, set <span className="font-mono">CP2020_NANOGPT_API_KEY</span>{' '}
-            (optional <span className="font-mono">CP2020_PREFER_NANOGPT_LLM=1</span> if both keys exist).
-          </span>
-        </div>
-        {enabled && (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-zinc-500">
-            {!micReady ? (
-              <button
-                type="button"
-                onClick={() => void acquireMic()}
-                disabled={voiceRecording || isLoading}
-                className="border border-cyan-700/60 bg-cyan-950/40 text-cyan-200 px-2 py-1 rounded hover:bg-cyan-900/50 disabled:opacity-50 normal-case tracking-normal"
-              >
-                Enable microphone (one-time — keeps mic open for Session takes without re-prompting)
-              </button>
-            ) : (
-              <>
-                <span className="text-emerald-500/90 normal-case tracking-normal">Mic ready</span>
-                {!voiceRecording && (
-                  <button
-                    type="button"
-                    onClick={() => releaseMic()}
-                    className="text-zinc-500 hover:text-zinc-300 normal-case tracking-normal underline"
-                  >
-                    Release mic
-                  </button>
-                )}
-                <span className="text-zinc-600 normal-case tracking-normal">
-                  With mic enabled, when anyone presses Mic in Session mode, your client starts recording too.
-                  Stop ends the take for everyone; each client transcribes and the server merges dialogue.
-                </span>
-              </>
-            )}
-          </div>
         )}
         <div className="flex gap-2">
-          <input
-            type="text"
+          <textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
+              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                 e.preventDefault();
-                void send();
+                void submitMessage();
               }
             }}
-            placeholder={enabled ? 'Message the AI-GM…' : 'Sign in to chat'}
-            disabled={!enabled || isLoading}
-            className="flex-1 min-w-0 bg-zinc-950 border border-zinc-600 rounded px-2 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 disabled:opacity-50"
+            disabled={!enabled || sending}
+            placeholder={sendAsGm && isGm ? 'GM narration...' : 'Message the table...'}
+            className="min-h-16 flex-1 resize-none rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-600 disabled:opacity-50"
           />
           <button
             type="button"
-            title={
-              voiceRecording
-                ? 'Stop and transcribe'
-                : voiceInputMode === 'session'
-                  ? 'Start recording (stop to transcribe; then Send voice to GM)'
-                  : 'Start recording (stop sends to GM)'
-            }
-            onClick={() => void toggleVoice()}
-            disabled={!enabled || isLoading}
-            className={`shrink-0 text-white text-sm font-bold uppercase px-3 py-2 rounded border disabled:opacity-50 ${
-              voiceRecording
-                ? 'bg-red-800 hover:bg-red-700 border-red-500/60 animate-pulse'
-                : 'bg-zinc-800 hover:bg-zinc-700 border-zinc-600'
-            }`}
+            disabled={!enabled || sending || draft.trim().length === 0}
+            onClick={() => void submitMessage()}
+            className="self-stretch px-3 rounded bg-cyan-700 text-xs uppercase tracking-wide text-white hover:bg-cyan-600 disabled:opacity-50"
           >
-            {voiceRecording ? 'Stop' : 'Mic'}
-          </button>
-          <button
-            type="button"
-            onClick={() => void send()}
-            disabled={!enabled || isLoading || !draft.trim()}
-            className="shrink-0 bg-cyan-800 hover:bg-cyan-700 disabled:bg-zinc-700 disabled:text-zinc-500 text-white text-sm font-bold uppercase px-4 py-2 rounded border border-cyan-600/50"
-          >
-            Send
+            {sending ? '...' : 'Send'}
           </button>
         </div>
-        {sendError && <p className="text-xs text-red-400">{sendError}</p>}
-        {chatActionError && <p className="text-xs text-red-400">{chatActionError}</p>}
-        {(voiceError || voiceHookError) && (
-          <p className="text-xs text-red-400">{voiceError ?? voiceHookError}</p>
+        {(sendError || chatActionError) && (
+          <p className="text-[11px] text-rose-400">{sendError ?? chatActionError}</p>
         )}
       </footer>
-      <NarrationTtsSettingsPopout
-        key={ttsSettingsMountKey}
-        open={ttsSettingsOpen}
-        onClose={() => setTtsSettingsOpen(false)}
-        sessionId={sessionId}
-        supabase={supabase}
-      />
     </section>
   );
 }

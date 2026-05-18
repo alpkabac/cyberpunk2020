@@ -10,7 +10,6 @@ import {
 import { saveCharacterToSupabase } from '@/lib/db/character-serialize';
 import { createDefaultPostgresHandlersForGameStore } from '@/lib/realtime/apply-realtime-to-store';
 import { reportClientError } from '@/lib/logging/client-report';
-import { BROADCAST_EVENTS } from '@/lib/realtime/realtime-events';
 import { useGameStore } from '@/lib/store/game-store';
 import type {
   SessionPresencePeer,
@@ -105,17 +104,6 @@ export function useSessionRealtimeSync(
                 presenceRef.current?.onPeers(peers);
               }
             : undefined,
-          onBroadcast: (event, payload) => {
-            if (event === BROADCAST_EVENTS.SESSION_RECORDING) {
-              useGameStore.getState().applySessionRecordingBroadcast(payload);
-            } else if (event === BROADCAST_EVENTS.SESSION_VOICE_STOP_ALL) {
-              useGameStore.getState().bumpSessionVoiceStopAllFromBroadcast(payload);
-            } else if (event === BROADCAST_EVENTS.SESSION_VOICE_PEER_START) {
-              useGameStore.getState().bumpSessionVoicePeerStartFromBroadcast();
-            } else if (event === BROADCAST_EVENTS.SESSION_NARRATION_TTS) {
-              useGameStore.getState().applySessionNarrationTtsFromBroadcast(payload);
-            }
-          },
         });
         connectAttempt = 0;
         if (cancelled) {
