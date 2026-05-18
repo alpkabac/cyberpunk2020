@@ -1,6 +1,10 @@
 import { reportServerError } from '@/lib/logging/server-report';
 import type { NarrationTtsClientConfig } from './narration-tts-client-config';
 import { concatWavBuffers, splitTextForOmnivoiceChunks } from './concat-wav-buffers';
+import {
+  OMNIVOICE_SPLIT_AT_CHARS,
+  buildOmnivoiceSpeechRequestBody,
+} from './omnivoice-speech-body';
 
 function normalizeBaseUrl(raw: string): string {
   return raw.trim().replace(/\/+$/, '');
@@ -22,9 +26,6 @@ function assertHttpUrl(base: string): URL {
 
 /** Below maxDuration (120s) on Vercel/Render; single long requests often time out first. */
 const SYNTH_TIMEOUT_MS = 115_000;
-
-/** Long narration: multiple non-streaming calls, then concat WAV (same engine format). */
-const OMNIVOICE_SPLIT_AT_CHARS = 1600;
 
 /**
  * omnivoice-server: POST /v1/audio/speech (OpenAI-style).
@@ -48,7 +49,7 @@ export async function synthesizeOmnivoiceNarration(
     return { ok: false, status: 400, error: msg };
   }
 
-  const o = config.omnivoice ?? {};
+  const o: NonNullable<NarrationTtsClientConfig['omnivoice']> = config.omnivoice ?? {};
   const responseFormat = o.responseFormat === 'pcm' ? 'pcm' : 'wav';
   const parts =
     responseFormat === 'wav' && transcript.length > OMNIVOICE_SPLIT_AT_CHARS
@@ -79,35 +80,7 @@ async function synthOnePart(
   responseFormat: 'wav' | 'pcm',
   logContext?: { sessionId?: string; label?: string },
 ): Promise<{ ok: true; buffer: Buffer; mimeType: string } | { ok: false; status: number; error: string; detail?: string }> {
-  const voice = o.voice?.trim() || 'alloy';
-  const model = o.model?.trim() || 'omnivoice';
-
-  const body: Record<string, unknown> = {
-    model,
-    input: transcript,
-    voice,
-    response_format: responseFormat,
-    stream: false,
-    speed: typeof o.speed === 'number' && Number.isFinite(o.speed) ? o.speed : 1,
-    language: o.language?.trim() || 'tr',
-  };
-
-  if (o.speaker?.trim()) body.speaker = o.speaker.trim();
-  if (o.instructions?.trim()) body.instructions = o.instructions.trim();
-
-  if (typeof o.numStep === 'number' && Number.isFinite(o.numStep)) body.num_step = o.numStep;
-  if (typeof o.guidanceScale === 'number' && Number.isFinite(o.guidanceScale)) {
-    body.guidance_scale = o.guidanceScale;
-  }
-  if (typeof o.positionTemperature === 'number' && Number.isFinite(o.positionTemperature)) {
-    body.position_temperature = o.positionTemperature;
-  }
-  if (typeof o.classTemperature === 'number' && Number.isFinite(o.classTemperature)) {
-    body.class_temperature = o.classTemperature;
-  }
-  if (typeof o.denoise === 'boolean') body.denoise = o.denoise;
-  if (typeof o.tShift === 'number' && Number.isFinite(o.tShift)) body.t_shift = o.tShift;
-  if (typeof o.duration === 'number' && Number.isFinite(o.duration)) body.duration = o.duration;
+  const body = buildOmnivoiceSpeechRequestBody(transcript, o, responseFormat);
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -134,11 +107,12 @@ async function synthOnePart(
         new Error(errBody || res.statusText),
         { status: res.status, ...logContext },
       );
+      const st = res.status >= 400 && res.status < 600 ? res.status : 502;
       return {
         ok: false,
-        status: 502,
+        status: st,
         error: 'OmniVoice TTS error',
-        detail: errBody.slice(0, 500),
+        detail: errBody.slice(0, 2000),
       };
     }
     const buf = Buffer.from(await res.arrayBuffer());

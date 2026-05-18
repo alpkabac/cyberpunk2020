@@ -15,6 +15,8 @@ import {
   mergeNarrationTtsClientConfig,
   narrationTtsConfigFingerprint,
 } from '@/lib/narration/narration-tts-client-config';
+import { tryFetchOmnivoiceWavInBrowser } from '@/lib/narration/omnivoice-local-browser-tts';
+import { plainTextForNarrationTts } from '@/lib/narration/plain-text-for-tts';
 import { supabase } from '@/lib/supabase';
 import { useGameStore } from '@/lib/store/game-store';
 
@@ -97,6 +99,25 @@ export function SessionNarrationTtsPlayer({ sessionId }: { sessionId: string }) 
         return;
       }
 
+      const ttsConfig = mergeNarrationTtsClientConfig(
+        useGameStore.getState().session.settings.narrationTts,
+      );
+      const row = useGameStore.getState().chat.messages.find((m) => m.id === messageId);
+      const transcript =
+        row?.type === 'narration' && typeof row.text === 'string'
+          ? plainTextForNarrationTts(row.text)
+          : '';
+
+      if (transcript.length > 0 && !cancelled) {
+        const localBlob = await tryFetchOmnivoiceWavInBrowser(ttsConfig, transcript, ac.signal);
+        if (localBlob && !cancelled) {
+          setNarrationTtsInMemory(sessionId, messageId, configFp, localBlob);
+          void setNarrationTtsInIdb(sessionId, messageId, configFp, localBlob);
+          playBlob(localBlob);
+          return;
+        }
+      }
+
       const token = await getAccessTokenForApi(supabase);
       if (!token || cancelled) {
         if (typeof console !== 'undefined' && !cancelled) {
@@ -111,7 +132,15 @@ export function SessionNarrationTtsPlayer({ sessionId }: { sessionId: string }) 
       });
       if (!res.ok || cancelled) {
         if (typeof console !== 'undefined' && !cancelled) {
-          console.warn('[narration-tts] fetch failed', res.status);
+          const errText = await res.text().catch(() => '');
+          let detail = errText;
+          try {
+            const j = JSON.parse(errText) as { error?: string; detail?: string };
+            detail = [j.error, j.detail].filter((s) => typeof s === 'string' && s.length > 0).join(' — ');
+          } catch {
+            /* not JSON */
+          }
+          console.warn('[narration-tts] GET /api/session/narration-tts failed', res.status, detail || res.statusText);
         }
         return;
       }
