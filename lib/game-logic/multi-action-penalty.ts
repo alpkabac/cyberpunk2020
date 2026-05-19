@@ -10,5 +10,7 @@ export const CP2020_SUCCESSIVE_ACTION_PENALTY = -3;
  * @param actionsThisTurn — Number of actions already completed this initiative turn (0 = none yet).
  */
 export function multiActionRollPenalty(actionsThisTurn: number): number {
-  return actionsThisTurn > 0 ? CP2020_SUCCESSIVE_ACTION_PENALTY : 0;
+  const completedActions = Math.max(0, Math.floor(actionsThisTurn || 0));
+  if (completedActions === 0) return 0;
+  return CP2020_SUCCESSIVE_ACTION_PENALTY * completedActions;
 }

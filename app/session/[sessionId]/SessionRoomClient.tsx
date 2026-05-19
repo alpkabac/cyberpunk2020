@@ -190,7 +190,7 @@ export function SessionRoomClient() {
       ? characters.byId[resolvedCharacterId] ?? npcs.byId[resolvedCharacterId]
       : null;
 
-  /** Session creator: map/NPC/host tools — not the same as the AI Game Master. */
+  /** Session creator: map/NPC/host tools for the human GM. */
   const isSessionHost =
     user?.id != null && session.createdBy != null && user.id === session.createdBy;
 
@@ -511,7 +511,7 @@ export function SessionRoomClient() {
           {isSessionHost && (
             <span
               className="text-[10px] uppercase bg-violet-900/50 text-violet-200 px-2 py-0.5 rounded border border-violet-700/40"
-              title="You created this room — extra session controls (map, NPCs). The AI is still the Game Master in play."
+              title="You created this room and can use extra session controls such as map and NPC tools."
             >
               Host
             </span>

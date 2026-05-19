@@ -64,6 +64,12 @@ describe('cp2020-char-gen', () => {
     }
   });
 
+  it('Medtechie Diagnose Illness is INT-linked like the book skill list', () => {
+    const rng = makeRng(101);
+    const { skills } = distributeCareerSkills('Medtechie', rng);
+    expect(skills.find((s) => s.name === 'Diagnose Illness')?.linkedStat).toBe('int');
+  });
+
   it('cinematic presets are in playable range', () => {
     expect(cinematicCharacterPoints('average')).toBe(50);
     expect(cinematicCharacterPoints(40)).toBe(40);
@@ -122,6 +128,20 @@ describe('cp2020-char-gen', () => {
     expect(c.skills.length).toBeGreaterThanOrEqual(10);
     expect(c.derivedStats).toBeDefined();
     expect(monthlySalaryEb('Solo', 6)).toBe(3000);
+  });
+
+  it('generated sheets use the canonical FNFF hit location ranges', () => {
+    const rng = makeRng(321);
+    const c = generateCp2020Character({
+      sessionId: '00000000-0000-4000-8000-000000000004',
+      userId: 'u1',
+      name: 'Leg Check',
+      role: 'Solo',
+      method: 'cinematic',
+      rng,
+    });
+    expect(c.hitLocations.rLeg.location).toEqual([7, 8]);
+    expect(c.hitLocations.lLeg.location).toEqual([9, 10]);
   });
 
   it('unclaimed slot uses empty userId', () => {
@@ -184,6 +204,66 @@ describe('cp2020-char-gen', () => {
     expect(errs.some((e) => e.includes('40'))).toBe(true);
   });
 
+  it('allows book pickup skills beyond the old curated shortlist', () => {
+    const rng = makeRng(51);
+    const { skills } = distributeCareerSkills('Solo', rng);
+    const careerValues = Object.fromEntries(skills.map((s) => [s.name, s.value])) as Record<string, number>;
+    const statBases = {
+      int: 7,
+      ref: 8,
+      tech: 5,
+      cool: 5,
+      attr: 5,
+      luck: 5,
+      ma: 5,
+      bt: 5,
+      emp: 5,
+    };
+    const errs = validateCp2020Chargen({
+      sessionId: '00000000-0000-4000-8000-000000000097',
+      userId: 'u',
+      name: 'x',
+      role: 'Solo',
+      age: 24,
+      points: 50,
+      statBases,
+      careerValuesByName: careerValues,
+      pickup: [{ name: 'Shadow/Track', value: 3 }],
+      eurobucks: 1000,
+    });
+    expect(errs).toEqual([]);
+  });
+
+  it('blocks pickup skills that alias a career package skill', () => {
+    const rng = makeRng(52);
+    const { skills } = distributeCareerSkills('Solo', rng);
+    const careerValues = Object.fromEntries(skills.map((s) => [s.name, s.value])) as Record<string, number>;
+    const statBases = {
+      int: 7,
+      ref: 8,
+      tech: 5,
+      cool: 5,
+      attr: 5,
+      luck: 5,
+      ma: 5,
+      bt: 5,
+      emp: 5,
+    };
+    const errs = validateCp2020Chargen({
+      sessionId: '00000000-0000-4000-8000-000000000096',
+      userId: 'u',
+      name: 'x',
+      role: 'Solo',
+      age: 24,
+      points: 50,
+      statBases,
+      careerValuesByName: careerValues,
+      pickup: [{ name: 'Notice', value: 3 }],
+      eurobucks: 1000,
+    });
+    expect(errs.some((e) => e.includes('overlaps the career package'))).toBe(true);
+  });
+
   it('buildCp2020CharacterFromChargen matches a rolled Solo baseline', () => {
     const rng = makeRng(202);
     const role = 'Solo' as const;
@@ -219,7 +299,7 @@ describe('cp2020-char-gen', () => {
       pickup: pickupS.map((s) => ({ name: s.name, value: s.value })),
       eurobucks: 2400,
     });
-    expect(c.skills.length).toBe(career.length + pickupS.length);
+    expect(c.skills.length).toBe(career.length + pickupS.filter((s) => s.value > 0).length);
     expect(c.points).toBe(points);
     expect(c.specialAbility.value).toBe(spec);
     expect(c.derivedStats).toBeDefined();

@@ -211,7 +211,7 @@ export function applyStatModifiers(character: Character): void {
 
 /**
  * Sync equipped armor coverage into character.hitLocations.
- * Computes layered SP per zone from all equipped armor pieces.
+ * Computes layered SP per zone from equipped armor pieces, capped at FNFF's three-layer maximum.
  * Preserves existing ablation so damage history is not lost.
  */
 export function syncArmorToHitLocations(character: Character): void {
@@ -229,11 +229,7 @@ export function syncArmorToHitLocations(character: Character): void {
       }
     }
 
-    const layeredSP = spValues.length === 0
-      ? 0
-      : spValues.length === 1
-        ? spValues[0]
-        : maxLayeredSP(spValues);
+    const layeredSP = wearableArmorSP(spValues);
 
     const existing = character.hitLocations[zone];
     character.hitLocations[zone] = {
@@ -241,6 +237,20 @@ export function syncArmorToHitLocations(character: Character): void {
       stoppingPower: layeredSP,
     };
   }
+}
+
+/**
+ * FNFF wearable armor SP for one hit location: at most three equipped armor layers count.
+ * If an invalid sheet has more, keep the strongest three rather than allowing unlimited stacking.
+ */
+export function wearableArmorSP(spValues: number[]): number {
+  const effectiveLayers = spValues
+    .filter((sp) => sp > 0)
+    .sort((a, b) => b - a)
+    .slice(0, 3);
+  if (effectiveLayers.length === 0) return 0;
+  if (effectiveLayers.length === 1) return effectiveLayers[0];
+  return maxLayeredSP(effectiveLayers);
 }
 
 /**
@@ -456,7 +466,7 @@ export function stackOuterToInnerCoverSp(outerFirstEffectiveSps: number[]): numb
  * Returns the actual damage to add plus flags for book-mandated side effects.
  *
  * Book refs (CP2020Gameplay.md §7 Friday Night Firefight):
- *  - Head Hits: "A head hit always doubles damage." (L6426)
+ *  - Head Hits: "A head hit always doubles damage." (L6426), applied to damage that gets through armor/cover.
  *  - AP: halves SP before subtraction (L6346)
  *  - Cover + armor: proportional combination when both apply (L6297); shoot-through cover (L6428–6434)
  *  - BTM min-1: "A Body Type Modifier may never reduce damage to less than one" (L6407)
@@ -479,6 +489,8 @@ export function calculateDamage(
   headMultiplied: boolean;
   effectiveSP: number;
   spReduction: number;
+  /** Damage removed by AP's half-damage rule after armor/cover penetration. */
+  apDamageReduction: number;
   btmReduction: number;
   /** Attack exceeded effective SP (armor was pierced). Drives ablation + BTM min-1. */
   penetrated: boolean;
@@ -490,12 +502,6 @@ export function calculateDamage(
   headAutoKill: boolean;
 } {
   let damage = Math.max(0, Math.floor(rawDamage || 0));
-  let headMultiplied = false;
-
-  if (location === 'Head') {
-    damage = damage * 2;
-    headMultiplied = true;
-  }
 
   let effArmor = Math.max(0, Math.floor(sp || 0));
   let effCover = Math.max(0, Math.floor(coverStackedSp || 0));
@@ -509,6 +515,17 @@ export function calculateDamage(
   const spReduction = Math.min(damage, effectiveSP);
   damage = Math.max(0, damage - effectiveSP);
   const penetrated = damage > 0;
+
+  const beforeApDamageReduction = damage;
+  if (isAP && damage > 0) {
+    damage = Math.floor(damage / 2);
+  }
+  const apDamageReduction = beforeApDamageReduction - damage;
+
+  const headMultiplied = location === 'Head' && damage > 0;
+  if (headMultiplied) {
+    damage = damage * 2;
+  }
 
   const btmValue = Math.max(0, Math.floor(btm || 0));
   const btmReduction = Math.min(damage, btmValue);
@@ -529,6 +546,7 @@ export function calculateDamage(
     headMultiplied,
     effectiveSP,
     spReduction,
+    apDamageReduction,
     btmReduction,
     penetrated,
     btmClampedToOne,

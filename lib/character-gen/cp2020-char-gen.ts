@@ -7,6 +7,7 @@
 import type { Character, CharacterItem, Lifepath, RoleType, Skill, Stats } from '@/lib/types';
 import { ROLE_SPECIAL_ABILITIES, createStatBlock } from '@/lib/types';
 import { recalcCharacterForGm } from '@/lib/game-logic/character-mutations';
+import { defaultHitLocations, masterSkillList, skillLookupKey, skillNameMatches } from '@/lib/game-logic/lookups';
 
 export type Cp2020PointMethod = 'random' | 'fast' | 'cinematic';
 
@@ -267,7 +268,7 @@ const SKILL_LINKED_STAT: Record<string, keyof Stats> = {
   'Stock Market': 'int',
   'Personal Grooming': 'attr',
   Teaching: 'int',
-  'Diagnose Illness': 'tech',
+  'Diagnose Illness': 'int',
   'Cryotank Operation': 'tech',
   Pharmaceuticals: 'tech',
   Zoology: 'int',
@@ -296,7 +297,7 @@ function skillCategory(stat: keyof Stats): string {
 
 function linkedStatForSkill(name: string, role: RoleType, isSpecial: boolean): keyof Stats {
   if (isSpecial) return SA_LINKED[role] ?? 'int';
-  return SKILL_LINKED_STAT[name] ?? 'int';
+  return SKILL_LINKED_STAT[name] ?? masterSkillLinkedStat(name) ?? 'int';
 }
 
 /** Distribute 40 career points across 10 skills; special ability gets 1–10 inclusive. */
@@ -345,22 +346,33 @@ export function distributeCareerSkills(
   return { skills, specialValue };
 }
 
-/** Pickup skill names (career-excluded pool; VIEW FROM THE EDGE p.46). */
-export const CP2020_PICKUP_POOL: readonly string[] = [
-  'Dodge & Escape',
-  'Driving',
-  'First Aid',
-  'Gambling',
-  'Stealth',
-  'Leadership',
-  'Forgery',
-  'Electronics',
-  'Personal Grooming',
-  'Wardrobe & Style',
-  'Library Search',
-  'Stock Market',
-  'Wilderness Survival',
-];
+const MASTER_SKILL_BY_KEY = new Map(masterSkillList.map((s) => [skillLookupKey(s.name), s]));
+
+function masterSkillLinkedStat(name: string): keyof Stats | null {
+  const linked = MASTER_SKILL_BY_KEY.get(skillLookupKey(name))?.linkedStat;
+  if (
+    linked === 'int' ||
+    linked === 'ref' ||
+    linked === 'tech' ||
+    linked === 'cool' ||
+    linked === 'attr' ||
+    linked === 'bt' ||
+    linked === 'emp'
+  ) {
+    return linked;
+  }
+  return null;
+}
+
+function pickupCareerBlocked(name: string, careerNames: Iterable<string>): boolean {
+  for (const careerName of careerNames) {
+    if (skillNameMatches(name, careerName)) return true;
+  }
+  return false;
+}
+
+/** Pickup skill names: any non-career CP2020 skill from the app's master list (VIEW FROM THE EDGE p.46). */
+export const CP2020_PICKUP_POOL: readonly string[] = masterSkillList.map((s) => s.name);
 
 const PICKUP_POOL: readonly string[] = CP2020_PICKUP_POOL;
 
@@ -383,7 +395,7 @@ export function distributePickupSkills(
   rng: Cp2020Rng,
 ): Skill[] {
   let pool = Math.max(0, Math.floor(refBase + intBase));
-  const available = PICKUP_POOL.filter((n) => !careerNames.has(n));
+  const available = PICKUP_POOL.filter((n) => !pickupCareerBlocked(n, careerNames));
   if (available.length === 0 || pool === 0) return [];
 
   const pickCount = Math.min(available.length, 3 + Math.floor(rng() * 4));
@@ -404,7 +416,7 @@ export function distributePickupSkills(
   }
 
   return chosen.map((name) => {
-    const st = SKILL_LINKED_STAT[name] ?? 'int';
+    const st = SKILL_LINKED_STAT[name] ?? masterSkillLinkedStat(name) ?? 'int';
     return {
       id: crypto.randomUUID(),
       name,
@@ -454,15 +466,6 @@ export function rollStartingEurobucks(role: RoleType, specialAbilityLevel: numbe
   return Math.max(0, total);
 }
 
-const DEFAULT_HIT_LOCATIONS: Character['hitLocations'] = {
-  Head: { location: [1], stoppingPower: 0, ablation: 0 },
-  Torso: { location: [2, 3, 4], stoppingPower: 0, ablation: 0 },
-  rArm: { location: [5], stoppingPower: 0, ablation: 0 },
-  lArm: { location: [6], stoppingPower: 0, ablation: 0 },
-  lLeg: { location: [7, 8], stoppingPower: 0, ablation: 0 },
-  rLeg: { location: [9, 10], stoppingPower: 0, ablation: 0 },
-};
-
 export interface GenerateCp2020CharacterInput {
   sessionId: string;
   /** Empty string or omit for an unclaimed slot (GM). */
@@ -477,7 +480,7 @@ export interface GenerateCp2020CharacterInput {
   rng: Cp2020Rng;
 }
 
-/** Rough power tier for AI-spawned NPCs (cinematic point budget, p.25). */
+/** Rough power tier for generated NPCs (cinematic point budget, p.25). */
 export const NPC_THREAT_CINEMATIC_POINTS = {
   mook: 40,
   average: 52,
@@ -546,7 +549,7 @@ export function generateCp2020Character(input: GenerateCp2020CharacterInput): Ch
     isStunned: false,
     isStabilized: false,
     conditions: [],
-    hitLocations: DEFAULT_HIT_LOCATIONS,
+    hitLocations: defaultHitLocations(),
     sdp: {
       sum: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },
       current: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },
@@ -584,7 +587,7 @@ export interface Cp2020ChargenBuildInput {
   items?: CharacterItem[];
 }
 
-const PICKUP_NAME_SET = new Set(CP2020_PICKUP_POOL);
+const PICKUP_NAME_KEY_SET = new Set(CP2020_PICKUP_POOL.map((name) => skillLookupKey(name)));
 
 export function validateCp2020Chargen(input: Cp2020ChargenBuildInput): string[] {
   const err: string[] = [];
@@ -636,15 +639,16 @@ export function validateCp2020Chargen(input: Cp2020ChargenBuildInput): string[] 
   const seenPickup = new Set<string>();
   let pickupSpent = 0;
   for (const row of pickup) {
-    if (seenPickup.has(row.name)) {
+    const pickupKey = skillLookupKey(row.name);
+    if (seenPickup.has(pickupKey)) {
       err.push(`Duplicate pickup skill "${row.name}".`);
       continue;
     }
-    seenPickup.add(row.name);
-    if (!PICKUP_NAME_SET.has(row.name)) {
+    seenPickup.add(pickupKey);
+    if (!PICKUP_NAME_KEY_SET.has(pickupKey)) {
       err.push(`"${row.name}" is not a valid pickup skill for this app.`);
     }
-    if (careerNames.has(row.name)) {
+    if (pickupCareerBlocked(row.name, careerNames)) {
       err.push(`Pickup skill "${row.name}" overlaps the career package.`);
     }
     const v = row.value;
@@ -691,7 +695,7 @@ function pickupSkillsFromFixed(entries: { name: string; value: number }[]): Skil
   return entries
     .filter((e) => e.value > 0)
     .map(({ name, value }) => {
-      const st = SKILL_LINKED_STAT[name] ?? 'int';
+      const st = SKILL_LINKED_STAT[name] ?? masterSkillLinkedStat(name) ?? 'int';
       return {
         id: crypto.randomUUID(),
         name,
@@ -750,7 +754,7 @@ export function buildCp2020CharacterFromChargen(input: Cp2020ChargenBuildInput):
     isStunned: false,
     isStabilized: false,
     conditions: [],
-    hitLocations: DEFAULT_HIT_LOCATIONS,
+    hitLocations: defaultHitLocations(),
     sdp: {
       sum: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },
       current: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },

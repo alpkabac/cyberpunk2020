@@ -17,7 +17,7 @@ export type HitLocationMode = 'random' | 'aimed' | 'manual';
 
 /**
  * Optional pre-fill when opening from Combat.
- * AI/GM tools do not use this — they call apply_damage with explicit location and raw_damage.
+ * Server-side combat tools do not use this UI; they call the damage pipeline with explicit location and raw damage.
  */
 export interface DamageApplicatorPreset {
   pointBlank?: boolean;
@@ -374,7 +374,9 @@ export function DamageApplicator({
                 onChange={(e) => setIsAP(e.target.checked)}
                 className="w-5 h-5 accent-red-600"
               />
-              <span className="font-bold uppercase text-sm">Armor Piercing (AP) — halves SP</span>
+              <span className="font-bold uppercase text-sm">
+                Armor Piercing (AP) - halves SP and penetrating damage
+              </span>
             </label>
           </div>
 
@@ -407,11 +409,6 @@ export function DamageApplicator({
                     <span className="text-amber-700"> (point blank max)</span>
                   )}
                 </div>
-                {preview.headMultiplied && (
-                  <div className="text-red-600 font-bold">
-                    × 2 (Head Hit) = {effectiveBaseDamage() * 2}
-                  </div>
-                )}
                 {selectedLocation && (
                   <div>
                     − SP {getSP(selectedLocation)}
@@ -421,6 +418,14 @@ export function DamageApplicator({
                     ) : (
                       <span className="text-green-700"> (stopped — no ablation)</span>
                     )}
+                  </div>
+                )}
+                {isAP && preview.apDamageReduction > 0 && (
+                  <div>AP damage reduction: −{preview.apDamageReduction}</div>
+                )}
+                {preview.headMultiplied && (
+                  <div className="text-red-600 font-bold">
+                    Head hit: penetrating damage ×2
                   </div>
                 )}
                 <div>
@@ -487,12 +492,12 @@ export function DamageApplicator({
           <div className="mt-3 text-xs text-gray-600 space-y-1">
             <p>
               <strong>Multiplayer:</strong> Remote players apply damage through the same
-              character row; GM tools use explicit <code className="bg-gray-100 px-1">location</code> and{' '}
+              character row; server-side combat tools use explicit <code className="bg-gray-100 px-1">location</code> and{' '}
               <code className="bg-gray-100 px-1">raw_damage</code> (no d10 in the API).
             </p>
             <p>
-              <strong>Pipeline:</strong> Base → Head ×2 → −SP → −BTM (min 1 if armor pierced) → Final.
-              Armor ablates 1 only on a penetrating hit. Any damage auto-prompts a Stun Save.
+              <strong>Pipeline:</strong> Base → −SP → AP damage halving → Head ×2 → −BTM (min 1 if armor pierced) →
+              Final. Armor ablates 1 only on a penetrating hit. Any damage auto-prompts a Stun Save.
             </p>
           </div>
         </div>

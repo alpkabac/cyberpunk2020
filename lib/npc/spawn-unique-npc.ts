@@ -3,6 +3,7 @@
  */
 
 import { recalcCharacterForGm } from '@/lib/game-logic/character-mutations';
+import { defaultHitLocations } from '@/lib/game-logic/lookups';
 import type {
   Armor,
   Availability,
@@ -59,7 +60,7 @@ function strOr(raw: unknown, fallback: string): string {
   return typeof raw === 'string' ? raw : fallback;
 }
 
-/** Map GM tool item blobs into typed items (minimal weapon/armor/cyberware when details omitted). */
+/** Map GM-authored item blobs into typed items (minimal weapon/armor/cyberware when details omitted). */
 export function itemFromGmSpawnBlob(raw: Record<string, unknown>): CharacterItem | null {
   const id = typeof raw.id === 'string' && raw.id ? raw.id : crypto.randomUUID();
   const name = typeof raw.name === 'string' ? raw.name : 'Item';
@@ -243,15 +244,6 @@ export interface BuildUniqueGmNpcInput {
   team?: string;
 }
 
-const EMPTY_HIT: Character['hitLocations'] = {
-  Head: { location: [1], stoppingPower: 0, ablation: 0 },
-  Torso: { location: [2, 3, 4], stoppingPower: 0, ablation: 0 },
-  rArm: { location: [5], stoppingPower: 0, ablation: 0 },
-  lArm: { location: [6], stoppingPower: 0, ablation: 0 },
-  lLeg: { location: [7, 8], stoppingPower: 0, ablation: 0 },
-  rLeg: { location: [9, 10], stoppingPower: 0, ablation: 0 },
-};
-
 export function buildUniqueGmNpc(input: BuildUniqueGmNpcInput): Character {
   const teamId = (input.team ?? '').trim() || 'hostile';
   const defaultStat = 6;
@@ -304,7 +296,7 @@ export function buildUniqueGmNpc(input: BuildUniqueGmNpcInput): Character {
     isStunned: false,
     isStabilized: false,
     conditions: [],
-    hitLocations: { ...EMPTY_HIT },
+    hitLocations: defaultHitLocations(),
     sdp: {
       sum: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },
       current: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },

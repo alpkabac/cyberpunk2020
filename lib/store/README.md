@@ -10,7 +10,7 @@ The game store manages all client-side state including:
 - **Session**: Session metadata, settings, and active scene
 - **Map**: Map background and token positions
 - **Chat**: Chat message history and loading state
-- **UI**: UI state like selected character, dice roller, voice recording
+- **UI**: UI state like selected character, dice roller, chat focus, and turn prompts
 
 ## Usage
 
@@ -120,8 +120,7 @@ Characters are stored in a normalized structure for efficient lookups and update
   selectedTokenId: string | null,
   isDiceRollerOpen: boolean,
   diceFormula: string | null,
-  isChatInputFocused: boolean,
-  isVoiceRecording: boolean
+  isChatInputFocused: boolean
 }
 ```
 
@@ -163,7 +162,7 @@ Characters are stored in a normalized structure for efficient lookups and update
 - `selectToken(tokenId)` - Select a token
 - `openDiceRoller(formula)` - Open dice roller with formula
 - `closeDiceRoller()` - Close dice roller
-- `setVoiceRecording(isRecording)` - Set voice recording state
+- `setIncludeSpecialAbilityInSkillRolls(include)` - Toggle special ability bonuses on skill rolls
 
 ## Automatic Derived Stats
 

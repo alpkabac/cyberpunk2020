@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import { Character, Zone, Armor } from '@/lib/types';
 import { useGameStore } from '@/lib/store/game-store';
 import { hitLocationRollRanges } from '@/lib/game-logic/lookups';
-import { maxLayeredSP } from '@/lib/game-logic/formulas';
+import { wearableArmorSP } from '@/lib/game-logic/formulas';
 import {
   isSeveredConditionName,
   severedConditionName,
@@ -64,9 +64,7 @@ export function BodyTab({ character, editable }: BodyTabProps) {
         const cov = a.coverage?.[zone];
         if (cov && cov.stoppingPower > 0) spValues.push(cov.stoppingPower);
       }
-      if (spValues.length === 0) result[zone] = 0;
-      else if (spValues.length === 1) result[zone] = spValues[0];
-      else result[zone] = maxLayeredSP(spValues);
+      result[zone] = wearableArmorSP(spValues);
     }
     return result;
   }, [armorItems]);
@@ -363,10 +361,10 @@ export function BodyTab({ character, editable }: BodyTabProps) {
           )}
 
           <p className="text-[10px] text-gray-600 leading-snug border-t border-gray-300 pt-2">
-            <strong>Damage pipeline for this zone:</strong> raw dmg{' '}
-            {selected === 'Head' && <em>×2 (head)</em>} − effective SP{' '}
-            <strong>{effectiveSP}</strong> (AP halves first) − BTM <strong>{btm}</strong>{' '}
-            (min 1 if armor pierced). &gt;8 final to{' '}
+            <strong>Damage pipeline for this zone:</strong> raw dmg − effective SP{' '}
+            <strong>{effectiveSP}</strong> (AP halves SP first, then penetrating damage){' '}
+            {selected === 'Head' && <em>×2 after penetration </em>}− BTM <strong>{btm}</strong> (min 1 if armor
+            pierced). &gt;8 final to{' '}
             {selected === 'Head'
               ? 'head → auto-kill.'
               : selected === 'Torso'

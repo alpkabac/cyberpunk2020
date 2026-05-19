@@ -46,6 +46,19 @@ describe('cp2020-fast-npc', () => {
     expect(c.skills.length).toBeGreaterThan(10);
   });
 
+  it('uses the canonical FNFF leg hit location ranges', () => {
+    const rng = makeRng(77);
+    const { character: c } = buildFastSystemNpc({
+      sessionId: 's',
+      name: 'Leg Check Goon',
+      role: 'Solo',
+      threat: 'average',
+      rng,
+    });
+    expect(c.hitLocations.rLeg.location).toEqual([7, 8]);
+    expect(c.hitLocations.lLeg.location).toEqual([9, 10]);
+  });
+
   it('stat overrides clamp and apply', () => {
     const rng = makeRng(3);
     const { character: c } = buildFastSystemNpc({

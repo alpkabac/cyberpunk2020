@@ -189,7 +189,7 @@ interface GameActions {
 
   /**
    * Full damage pipeline: applies SP subtraction, head multiplier, BTM, ablation
-   * @param isAP - armor piercing ammo halves SP
+   * @param isAP - armor piercing ammo halves SP and penetrating damage
    */
   applyDamage: (
     characterId: string,
@@ -268,12 +268,12 @@ interface GameActions {
     options?: { ignoreStabilization?: boolean },
   ) => void;
   clearDiceRollIntent: () => void;
-  /** Apply stun save from a flat d10 total (for AI / automation). Uses derived stun target + combatModifiers.stunSave. */
+  /** Apply stun save from a flat d10 total. Uses derived stun target + combatModifiers.stunSave. */
   applyStunSaveRollResult: (characterId: string, flatRollTotal: number) => void;
   /** Start-of-turn stun recovery; may chain death save or clear combat pending flag. */
   applyStunRecoveryRollResult: (characterId: string, flatRollTotal: number) => void;
   /**
-   * Apply death save from a flat d10 total (for AI / automation).
+   * Apply death save from a flat d10 total.
    * Fail → damage 41 (Dead on wound track). Per FNFF: failed death save while Mortally wounded means death;
    * we represent that as the Dead state (damage ≥ 41), not a separate flag.
    */
@@ -574,14 +574,15 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
 
   /**
    * Full CP2020 damage pipeline (FNFF):
-   * 1. Head hits: damage x2
-   * 2. AP ammo: halve SP
-   * 3. Subtract SP (ablation is applied ONLY when the attack penetrates SP)
-   * 4. Subtract BTM (minimum 1 point if anything penetrated armor)
-   * 5. Add remainder to damage total
-   * 6. >8 damage to a limb → ensure Mortal 0 (forced death save next);
+   * 1. AP ammo: halve SP/cover
+   * 2. Subtract SP (ablation is applied ONLY when the attack penetrates SP)
+   * 3. AP ammo: halve penetrating damage
+   * 4. Head hits: double penetrating damage
+   * 5. Subtract BTM (minimum 1 point if anything penetrated armor)
+   * 6. Add remainder to damage total
+   * 7. >8 damage to a limb → ensure Mortal 0 (forced death save next);
    *    >8 damage to Head → automatic death (damage = 41).
-   * 7. If any damage landed and the character isn't already dead, auto-open
+   * 8. If any damage landed and the character isn't already dead, auto-open
    *    the Stun Save roller so the book-required stun save isn't skipped.
    *
    * Point blank (FNFF): if pointBlank and weaponDamageFormula parse as NdS+M, base damage = max dice total.

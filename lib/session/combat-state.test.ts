@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { type Character, type CombatState, type InitiativeEntry, createStatBlock } from '../types';
 import {
   combatStateToJson,
+  multiActionRollPenaltyForCharacter,
   parseCombatStateJson,
   sortInitiativeEntries,
   sumEquippedCyberwareInitiativeBonus,
 } from './combat-state';
+import { multiActionRollPenalty } from '../game-logic/multi-action-penalty';
 import { tickConditionsOneRound, stripTimedConditions } from './combat-condition-tick';
 
 function testChar(id: string, name: string): Character {
@@ -112,6 +114,45 @@ describe('combat-state JSON', () => {
     const json = combatStateToJson(state);
     const back = parseCombatStateJson(json);
     expect(back).toEqual(state);
+  });
+});
+
+describe('multi-action penalty', () => {
+  it('scales by completed actions this turn', () => {
+    expect(multiActionRollPenalty(0)).toBe(0);
+    expect(multiActionRollPenalty(1)).toBe(-3);
+    expect(multiActionRollPenalty(2)).toBe(-6);
+    expect(multiActionRollPenalty(3)).toBe(-9);
+  });
+
+  it('only applies to the active combatant', () => {
+    const entries: InitiativeEntry[] = [
+      {
+        characterId: 'active',
+        name: 'Active',
+        ref: 8,
+        initiativeMod: 0,
+        combatSense: 0,
+        cyberInitiativeBonus: 0,
+        d10Total: 5,
+        d10Detail: '5',
+        total: 13,
+      },
+      {
+        characterId: 'waiting',
+        name: 'Waiting',
+        ref: 8,
+        initiativeMod: 0,
+        combatSense: 0,
+        cyberInitiativeBonus: 0,
+        d10Total: 4,
+        d10Detail: '4',
+        total: 12,
+      },
+    ];
+    const state: CombatState = { round: 1, activeTurnIndex: 0, entries, actionsThisTurn: 2 };
+    expect(multiActionRollPenaltyForCharacter(state, 'active')).toBe(-6);
+    expect(multiActionRollPenaltyForCharacter(state, 'waiting')).toBe(0);
   });
 });
 

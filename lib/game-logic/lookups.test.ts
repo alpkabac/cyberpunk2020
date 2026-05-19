@@ -17,6 +17,7 @@ import {
   masterSkillList,
   martialArtsStyleSkillDefinitions,
   fnffAttackTotalMeetsDv,
+  skillNameMatches,
 } from './lookups';
 
 // ============================================================================
@@ -130,6 +131,17 @@ describe('FNFF attack vs DV', () => {
     expect(fnffAttackTotalMeetsDv(20, 20)).toBe(true);
     expect(fnffAttackTotalMeetsDv(21, 20)).toBe(true);
     expect(fnffAttackTotalMeetsDv(19, 20)).toBe(false);
+  });
+});
+
+describe('CP2020 skill aliases', () => {
+  it('matches book shorthand, imported names, and compact weapon skill names', () => {
+    expect(skillNameMatches('Heavy Weapons', 'HeavyWeapons')).toBe(true);
+    expect(skillNameMatches('Education', 'Education & General Knowledge')).toBe(true);
+    expect(skillNameMatches('Persuasion & Fast Talk', 'Persuasion')).toBe(true);
+    expect(skillNameMatches('Weaponsmith', 'Weapons Tech')).toBe(true);
+    expect(skillNameMatches('Awareness/Notice', 'Notice')).toBe(true);
+    expect(skillNameMatches('Gamble', 'Gambling')).toBe(true);
   });
 });
 

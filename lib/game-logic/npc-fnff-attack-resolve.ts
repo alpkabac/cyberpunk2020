@@ -18,6 +18,7 @@ import {
   getRangeBracket,
   rangeBrackets,
   rollFnffHitLocation,
+  skillNameMatches,
   type RangeBracket,
 } from '../game-logic/lookups';
 import {
@@ -58,7 +59,7 @@ export type NpcFnffAttackKind = 'melee' | 'semi' | 'burst' | 'full_auto';
 
 function attackSkillTotal(character: Character, weapon: Weapon): number {
   const skill = character.skills.find(
-    (s) => s.name.toLowerCase() === weapon.attackSkill?.toLowerCase(),
+    (s) => skillNameMatches(s.name, weapon.attackSkill),
   );
   const skillVal = skill?.value ?? 0;
   const refTotal = character.stats.ref.total || 0;

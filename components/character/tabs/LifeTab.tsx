@@ -187,7 +187,7 @@ export function LifeTab({ character, editable }: LifeTabProps) {
       </p>
 
       <section>
-        <SectionTitle tooltip="Same team id = allies on the map. Different teams = enemies for AI cover suggestions and line-of-sight. Leave blank to use defaults: PCs party, NPCs hostile.">
+        <SectionTitle tooltip="Same team id = allies on the map. Different teams = enemies for map cover and line-of-sight helpers. Leave blank to use defaults: PCs party, NPCs hostile.">
           Tactical team
         </SectionTitle>
         <p className="text-xs text-gray-600 mb-2">

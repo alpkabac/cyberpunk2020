@@ -11,6 +11,7 @@ import {
 } from '../game-logic/formulas';
 import { maxDamageFromDiceFormula } from '../game-logic/dice';
 import { severedConditionName } from '../game-logic/conditions';
+import { skillNameMatches } from '../game-logic/lookups';
 
 export function recalcCharacterForGm(character: Character): Character {
   const updated = { ...character };
@@ -237,8 +238,7 @@ export function applyGmModifySkill(
   skillName: string,
   newValue: number,
 ): Character | null {
-  const lower = skillName.toLowerCase();
-  const idx = character.skills.findIndex((s) => s.name.toLowerCase() === lower);
+  const idx = character.skills.findIndex((s) => skillNameMatches(s.name, skillName));
   if (idx === -1) return null;
 
   const updatedSkills = [...character.skills];

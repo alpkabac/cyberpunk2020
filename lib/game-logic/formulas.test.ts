@@ -16,6 +16,8 @@ import {
   getStabilizationMedicBonus,
   calculateDamage,
   stackOuterToInnerCoverSp,
+  syncArmorToHitLocations,
+  wearableArmorSP,
 } from './formulas';
 import { Character, createStatBlock } from '../types';
 
@@ -369,6 +371,46 @@ describe('Property 13: Armor SP Layering', () => {
       { numRuns: 50 }
     );
   });
+
+  it('syncArmorToHitLocations caps effective wearable armor at three layers per zone', () => {
+    const character = {
+      hitLocations: {
+        Head: { location: [1], stoppingPower: 0, ablation: 0 },
+        Torso: { location: [2, 3, 4], stoppingPower: 0, ablation: 0 },
+        rArm: { location: [5], stoppingPower: 0, ablation: 0 },
+        lArm: { location: [6], stoppingPower: 0, ablation: 0 },
+        rLeg: { location: [7, 8], stoppingPower: 0, ablation: 0 },
+        lLeg: { location: [9, 10], stoppingPower: 0, ablation: 0 },
+      },
+      items: [4, 10, 12, 16].map((sp) => ({
+        id: `armor-${sp}`,
+        name: `Armor ${sp}`,
+        type: 'armor' as const,
+        flavor: '',
+        notes: '',
+        cost: 0,
+        weight: 0,
+        equipped: true,
+        coverage: {
+          Head: { stoppingPower: 0, ablation: 0 },
+          Torso: { stoppingPower: sp, ablation: 0 },
+          rArm: { stoppingPower: 0, ablation: 0 },
+          lArm: { stoppingPower: 0, ablation: 0 },
+          rLeg: { stoppingPower: 0, ablation: 0 },
+          lLeg: { stoppingPower: 0, ablation: 0 },
+        },
+        encumbrance: 0,
+      })),
+    } as Character;
+
+    syncArmorToHitLocations(character);
+
+    expect(character.hitLocations.Torso.stoppingPower).toBe(maxLayeredSP([16, 12, 10]));
+  });
+
+  it('wearableArmorSP ignores zeroes and keeps only the strongest three layers', () => {
+    expect(wearableArmorSP([0, 4, 10, 12, 16])).toBe(maxLayeredSP([16, 12, 10]));
+  });
 });
 
 describe('Flat save helper', () => {
@@ -397,12 +439,11 @@ describe('calculateDamage (FNFF pipeline)', () => {
     expect(r.btmClampedToOne).toBe(true);
   });
 
-  it('head hit doubles damage before armor', () => {
+  it('head hit does not bypass armor before doubling', () => {
     const r = calculateDamage(6, 'Head', 10, 3, false);
-    // 6 × 2 = 12, − SP 10 = 2 (penetrated), − BTM 3 → clamped to 1.
-    expect(r.headMultiplied).toBe(true);
-    expect(r.penetrated).toBe(true);
-    expect(r.finalDamage).toBe(1);
+    expect(r.headMultiplied).toBe(false);
+    expect(r.penetrated).toBe(false);
+    expect(r.finalDamage).toBe(0);
     expect(r.headAutoKill).toBe(false);
   });
 
@@ -427,10 +468,19 @@ describe('calculateDamage (FNFF pipeline)', () => {
     expect(r.headAutoKill).toBe(false);
   });
 
-  it('AP halves SP before subtraction', () => {
+  it('AP halves SP before subtraction, then halves penetrating damage before BTM', () => {
     const r = calculateDamage(10, 'Torso', 12, 2, true);
-    // effective SP = floor(12/2) = 6, − = 4, − BTM 2 = 2.
+    // effective SP = floor(12/2) = 6, 4 penetrates, AP halves that to 2, then BTM clamps to 1.
     expect(r.effectiveSP).toBe(6);
+    expect(r.spReduction).toBe(6);
+    expect(r.apDamageReduction).toBe(2);
+    expect(r.finalDamage).toBe(1);
+  });
+
+  it('AP halves damage even with no armor, before BTM', () => {
+    const r = calculateDamage(9, 'Torso', 0, 2, true);
+    expect(r.effectiveSP).toBe(0);
+    expect(r.apDamageReduction).toBe(5);
     expect(r.finalDamage).toBe(2);
   });
 

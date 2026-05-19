@@ -225,6 +225,36 @@ export function parseKnowLanguageLabel(skillName: string): string | null {
   return rest || null;
 }
 
+function compactSkillName(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+const SKILL_NAME_ALIASES: Record<string, string> = {
+  awareness: 'awarenessnotice',
+  notice: 'awarenessnotice',
+  educationgenknow: 'education',
+  educationgeneralknowledge: 'education',
+  persuasion: 'persuasionfasttalk',
+  fasttalk: 'persuasionfasttalk',
+  drive: 'driving',
+  gambling: 'gamble',
+  weaponstech: 'weaponsmith',
+  heavyweapons: 'heavyweapons',
+  heavyweapon: 'heavyweapons',
+  diagnose: 'diagnoseillness',
+  cybertech: 'cybertech',
+};
+
+export function skillLookupKey(name: string): string {
+  const compact = compactSkillName(name);
+  return SKILL_NAME_ALIASES[compact] ?? compact;
+}
+
+export function skillNameMatches(a: string | undefined | null, b: string | undefined | null): boolean {
+  if (!a || !b) return false;
+  return skillLookupKey(a) === skillLookupKey(b);
+}
+
 // ============================================================================
 // Range and DCs
 // ============================================================================
@@ -497,7 +527,7 @@ export const masterSkillList: SkillDefinition[] = [
   { name: 'Chemistry', linkedStat: 'int', category: 'INT' },
   { name: 'Composition', linkedStat: 'int', category: 'INT' },
   { name: 'Diagnose Illness', linkedStat: 'int', category: 'INT' },
-  { name: 'Education & Gen. Know', linkedStat: 'int', category: 'INT' },
+  { name: 'Education', linkedStat: 'int', category: 'INT' },
   { name: 'Expert', linkedStat: 'int', category: 'INT' },
   { name: 'Gamble', linkedStat: 'int', category: 'INT' },
   { name: 'Geology', linkedStat: 'int', category: 'INT' },

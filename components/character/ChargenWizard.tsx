@@ -53,8 +53,16 @@ import {
 } from '@/lib/data/lifepath-options';
 import type { CharacterItem, Lifepath, RoleType, Stats } from '@/lib/types';
 import { ROLE_SPECIAL_ABILITIES } from '@/lib/types';
+import { skillNameMatches } from '@/lib/game-logic/lookups';
 
 const STEPS = ['Profile', 'Stats', 'Career', 'Pickup', 'Life', 'Gear', 'Funds', 'Review'] as const;
+
+function isCareerPickupBlocked(name: string, careerNames: Set<string>): boolean {
+  for (const careerName of careerNames) {
+    if (skillNameMatches(name, careerName)) return true;
+  }
+  return false;
+}
 
 function WizardTip({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -693,7 +701,7 @@ export function ChargenWizard({
 
           {step === 3 && (
             <div className="space-y-3">
-              <WizardTip title="Why pickup skill selection is limited">
+              <WizardTip title="Pickup skills">
                 <p>
                   <span className="text-zinc-300">Pickup skills</span> represent extra training outside your career
                   package. The rules give you a number of pickup points equal to{' '}
@@ -702,12 +710,9 @@ export function ChargenWizard({
                   book assumes you are broadening the character, not doubling up on a career skill at chargen.
                 </p>
                 <p>
-                  The dropdown here is limited to the app&apos;s{' '}
-                  <span className="text-zinc-300">canonical pickup pool</span> (the same names and stat links used in
-                  validation, the digital sheet, and GM tools). That keeps skill categories, defaults, and future IP
-                  spends consistent. Skills you do not see are either part of your current role&apos;s career package or
-                  outside that pool; your referee can still add unusual skills after creation using Improvement Points or
-                  house rules.
+                  The dropdown uses the app&apos;s full CP2020 skill list and filters out current career-package skills.
+                  That keeps skill categories, defaults, and future IP spends consistent while leaving room for broad,
+                  messy street-life training.
                 </p>
               </WizardTip>
               <p className="text-xs text-zinc-400">
@@ -725,7 +730,7 @@ export function ChargenWizard({
                 onClick={rerollPickup}
                 className="w-full text-[10px] uppercase py-1.5 rounded border border-zinc-600 text-zinc-300 hover:bg-zinc-900"
               >
-                Suggest pickup spread (book pool)
+                Suggest pickup spread
               </button>
               <div className="space-y-2">
                 {draft.pickup.length === 0 ? (
@@ -803,23 +808,23 @@ export function ChargenWizard({
                     setDraft((d) => {
                       if (!d) return d;
                       if (d.pickup.some((x) => x.name === name)) return d;
-                      if (careerNames.has(name)) return d;
+                      if (isCareerPickupBlocked(name, careerNames)) return d;
                       return { ...d, pickup: [...d.pickup, { name, value: 1 }] };
                     });
                   }}
                 >
                   <option value="">Choose…</option>
-                  {CP2020_PICKUP_POOL.filter((n) => !careerNames.has(n) && !draft.pickup.some((x) => x.name === n)).map(
-                    (n) => (
-                      <option key={n} value={n}>
-                        {n}
-                      </option>
-                    ),
-                  )}
+                  {CP2020_PICKUP_POOL.filter(
+                    (n) => !isCareerPickupBlocked(n, careerNames) && !draft.pickup.some((x) => skillNameMatches(x.name, n)),
+                  ).map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
                 </select>
               </label>
               {CP2020_PICKUP_POOL.every(
-                (n) => careerNames.has(n) || draft.pickup.some((x) => x.name === n),
+                (n) => isCareerPickupBlocked(n, careerNames) || draft.pickup.some((x) => skillNameMatches(x.name, n)),
               ) && (
                 <p className="text-[10px] text-zinc-500">
                   Every pickup-pool skill is either already on your sheet or blocked because it appears in your career

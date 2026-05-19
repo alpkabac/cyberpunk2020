@@ -144,8 +144,8 @@ export function getActiveCombatCharacterId(state: CombatState | null | undefined
 }
 
 /**
- * −3 to the next d10 roll (attack, skill, etc.) when the active combatant has already
- * taken at least one action this turn.
+ * -3 per completed action to the next d10 roll (attack, skill, etc.) for the active
+ * combatant's successive actions this turn.
  */
 export function multiActionRollPenaltyForCharacter(
   combatState: CombatState | null | undefined,

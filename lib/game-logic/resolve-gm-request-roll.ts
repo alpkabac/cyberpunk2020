@@ -1,4 +1,5 @@
 import type { Character, Reliability, Stats, Weapon } from '@/lib/types';
+import { skillNameMatches } from './lookups';
 
 /** Mirrors `request_roll` tool / chat metadata. */
 export type GmRollRequestKind = 'skill' | 'stat' | 'raw_formula' | 'attack';
@@ -65,7 +66,7 @@ export interface ResolveGmRequestRollResult {
 
 function attackSkillTotal(character: Character, weapon: Weapon): number {
   const skill = character.skills.find(
-    (s) => s.name.toLowerCase() === weapon.attackSkill?.toLowerCase(),
+    (s) => skillNameMatches(s.name, weapon.attackSkill),
   );
   const skillVal = skill?.value ?? 0;
   const refTotal = character.stats.ref.total || 0;

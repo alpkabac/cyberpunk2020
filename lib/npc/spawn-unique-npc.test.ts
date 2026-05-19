@@ -37,6 +37,8 @@ describe('spawn-unique-npc', () => {
     expect(c.stats.int.base).toBe(6);
     expect(c.skills.some((s) => s.name === 'Full Borg' && s.value === 10)).toBe(true);
     expect(c.specialAbility.name).toBe('Combat Sense');
+    expect(c.hitLocations.rLeg.location).toEqual([7, 8]);
+    expect(c.hitLocations.lLeg.location).toEqual([9, 10]);
     const line = formatUniqueNpcAnnouncement(c);
     expect(line).toContain('Boss');
     expect(line).toContain('Solo');

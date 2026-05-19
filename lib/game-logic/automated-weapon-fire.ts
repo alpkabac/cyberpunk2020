@@ -80,7 +80,7 @@ export function runAutomatedWeaponFire(input: {
   situationalModSumByTarget: (targetId: string) => number;
   /** Extra delta from stripping incompatible checklist toggles (typically negative). */
   modStrip: number;
-  /** CP2020 multi-action penalty (0 or −3) applied to each to-hit roll this burst/FA. */
+  /** CP2020 multi-action penalty applied to each to-hit roll this burst/FA. */
   multiActionPenalty?: number;
   targets: AutomatedFireTarget[];
   /** Map cover for damage pipeline (per victim). */

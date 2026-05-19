@@ -14,6 +14,7 @@ import {
 import type { Armor, Character, RoleType, Skill, Stats, Weapon } from '@/lib/types';
 import { ROLE_SPECIAL_ABILITIES } from '@/lib/types';
 import { createStatBlock } from '@/lib/types';
+import { defaultHitLocations } from '@/lib/game-logic/lookups';
 
 const STAT_ORDER: Array<keyof Stats> = ['int', 'ref', 'tech', 'cool', 'attr', 'luck', 'ma', 'bt', 'emp'];
 
@@ -475,14 +476,7 @@ export function buildFastSystemNpc(input: BuildFastSystemNpcInput): FastSystemNp
     isStunned: false,
     isStabilized: false,
     conditions: [],
-    hitLocations: {
-      Head: { location: [1], stoppingPower: 0, ablation: 0 },
-      Torso: { location: [2, 3, 4], stoppingPower: 0, ablation: 0 },
-      rArm: { location: [5], stoppingPower: 0, ablation: 0 },
-      lArm: { location: [6], stoppingPower: 0, ablation: 0 },
-      lLeg: { location: [7, 8], stoppingPower: 0, ablation: 0 },
-      rLeg: { location: [9, 10], stoppingPower: 0, ablation: 0 },
-    },
+    hitLocations: defaultHitLocations(),
     sdp: {
       sum: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },
       current: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },

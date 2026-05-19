@@ -6,7 +6,7 @@ import { useGameStore } from '@/lib/store/game-store';
 import { DamageApplicator, type DamageApplicatorPreset } from '../DamageApplicator';
 import { FireModeTargetModal } from '../FireModeTargetModal';
 import { ItemBrowser } from '../ItemBrowser';
-import { maxLayeredSP, getStabilizationMedicBonus } from '@/lib/game-logic/formulas';
+import { wearableArmorSP, getStabilizationMedicBonus } from '@/lib/game-logic/formulas';
 import {
   rangeBrackets,
   getRangeDistance,
@@ -15,6 +15,7 @@ import {
   concealabilityLabels,
   hitLocationRollRanges,
   rangedCombatModifiers,
+  skillNameMatches,
   RangeBracket,
 } from '@/lib/game-logic/lookups';
 import { sheetRollContext } from '@/lib/dice-roll-send-to-gm';
@@ -401,15 +402,13 @@ export function CombatTab({ character, editable }: CombatTabProps) {
           if (sp > 0) spValues.push(sp);
         }
       });
-    if (spValues.length === 0) return 0;
-    if (spValues.length === 1) return spValues[0];
-    return maxLayeredSP(spValues);
+    return wearableArmorSP(spValues);
   };
 
   // Find attack skill value for a weapon
   const getAttackSkillTotal = (weapon: Weapon): number => {
     const skill = character.skills.find(
-      (s) => s.name.toLowerCase() === weapon.attackSkill?.toLowerCase(),
+      (s) => skillNameMatches(s.name, weapon.attackSkill),
     );
     const skillVal = skill?.value || 0;
     const refTotal = character.stats.ref.total || 0;
@@ -1158,7 +1157,7 @@ export function CombatTab({ character, editable }: CombatTabProps) {
                 combatState.entries.length > 0 &&
                 multiActionPenalty !== 0 && (
                   <p className="text-[10px] font-semibold text-amber-950 bg-amber-100 border border-amber-800 px-2 py-1 rounded">
-                    Multi-action: <strong>−3</strong> on attack rolls (successive actions this initiative turn).
+                    Multi-action: <strong>{multiActionPenalty}</strong> on attack rolls (successive actions this initiative turn).
                   </p>
                 )}
               <div className="flex flex-wrap gap-3 items-end">

@@ -146,4 +146,52 @@ describe('resolveGmRequestRoll', () => {
     expect(r.attackDice?.isMelee).toBe(false);
     expect(r.attackDice?.promptedByGmRequest).toBe(true);
   });
+
+  it('resolves attack skills through CP2020 aliases', () => {
+    const c = minimalChar();
+    c.skills = [
+      {
+        id: 'heavy',
+        name: 'Heavy Weapons',
+        value: 5,
+        linkedStat: 'ref',
+        category: 'REF',
+        isChipped: false,
+      },
+    ];
+    c.items = [
+      {
+        id: 'w-heavy',
+        name: 'Launcher',
+        type: 'weapon',
+        flavor: '',
+        notes: '',
+        cost: 0,
+        weight: 0,
+        equipped: true,
+        source: '',
+        weaponType: 'Heavy',
+        accuracy: 0,
+        concealability: 'N',
+        availability: 'R',
+        ammoType: '',
+        damage: '6d6',
+        ap: false,
+        shotsLeft: 1,
+        shots: 1,
+        rof: 1,
+        reliability: 'ST',
+        range: 200,
+        attackType: 'ranged',
+        attackSkill: 'HeavyWeapons',
+        isAutoCapable: false,
+      },
+    ];
+    const r = resolveGmRequestRoll(
+      c,
+      { roll_kind: 'attack', weapon_id: 'w-heavy', difficulty_value: 20 },
+      { includeSpecialAbilityInSkillRolls: false },
+    );
+    expect(r.formula).toBe('1d10+11');
+  });
 });

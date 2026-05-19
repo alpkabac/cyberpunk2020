@@ -529,7 +529,7 @@ export interface CombatState {
   entries: InitiativeEntry[];
   /**
    * Actions already completed by the **active** combatant this initiative turn.
-   * First action has no multi-action penalty; each further action applies −3 to applicable rolls.
+   * First action has no multi-action penalty; each completed action applies another -3 to applicable rolls.
    */
   actionsThisTurn?: number;
   /**

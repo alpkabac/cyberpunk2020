@@ -59,8 +59,8 @@ describe('Game Store', () => {
           Torso: { location: [2, 3, 4], stoppingPower: 0, ablation: 0 },
           rArm: { location: [5], stoppingPower: 0, ablation: 0 },
           lArm: { location: [6], stoppingPower: 0, ablation: 0 },
-          lLeg: { location: [7, 8], stoppingPower: 0, ablation: 0 },
-          rLeg: { location: [9, 10], stoppingPower: 0, ablation: 0 },
+          rLeg: { location: [7, 8], stoppingPower: 0, ablation: 0 },
+          lLeg: { location: [9, 10], stoppingPower: 0, ablation: 0 },
         },
         sdp: {
           sum: { Head: 0, Torso: 0, rArm: 0, lArm: 0, lLeg: 0, rLeg: 0 },
@@ -275,13 +275,12 @@ describe('Game Store', () => {
       };
 
       useGameStore.getState().addCharacter(character);
-      useGameStore.getState().applyDamage('char-1', 6, 'Head');
+      useGameStore.getState().applyDamage('char-1', 12, 'Head');
 
       const state = useGameStore.getState();
       const updatedChar = selectCharacterById(state, 'char-1');
 
-      // Pipeline: 6 × 2 (head) = 12, − SP 10 = 2 (penetrated),
-      // − BTM 3 would be −1, but FNFF "BTM min 1" clamps to 1.
+      // Pipeline: 12 - SP 10 = 2 (penetrated), head doubles to 4, - BTM 3 = 1.
       expect(updatedChar?.damage).toBe(1);
       expect(updatedChar?.derivedStats?.woundState).toBe('Light');
       // SP stays at 10 (synced from armor), ablation incremented (penetrating hit).
