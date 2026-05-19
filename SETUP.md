@@ -11,7 +11,9 @@ Create `.env.local` from `.env.local.example` and provide the Supabase values:
 
 ## Supabase
 
-Create a Supabase project, run `lib/database/schema.sql`, then apply migrations in order from `lib/database/migrations`.
+For a fresh Supabase project, run `lib/database/schema.sql` only. It already includes the current table shape, RLS policies, realtime setup, and storage buckets.
+
+Use `lib/database/migrations` only for existing databases that predate the squashed schema.
 
 ## Run
 

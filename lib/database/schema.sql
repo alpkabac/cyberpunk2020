@@ -4,10 +4,8 @@
 -- This schema defines all tables for the multiplayer table application
 -- Run this in your Supabase SQL editor to set up the database
 --
--- If you already applied an older schema.sql, run the migrations in order:
---   migrations/001_character_sheet_columns.sql
---   migrations/003_character_conditions.sql
--- to add the same columns without recreating tables.
+-- For a new database, run this file first. The migrations folder is for older
+-- databases that were created before this schema was squashed.
 
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -24,6 +22,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   
   -- Map state
   map_background_url TEXT,
+  map_state JSONB DEFAULT '{"coverRegions":[],"suppressiveZones":[],"pendingSuppressivePlacements":[]}'::jsonb,
   
   -- Active scene
   active_scene JSONB DEFAULT '{
@@ -169,6 +168,20 @@ CREATE TABLE IF NOT EXISTS tokens (
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_tokens_session_id ON tokens(session_id);
 CREATE INDEX IF NOT EXISTS idx_tokens_character_id ON tokens(character_id);
+
+-- ============================================================================
+-- Map Presets Table
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS map_presets (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  session_id UUID REFERENCES sessions(id) ON DELETE CASCADE NOT NULL,
+  name TEXT NOT NULL,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_map_presets_session_id ON map_presets(session_id);
 
 -- ============================================================================
 -- Chat Messages Table
@@ -350,6 +363,420 @@ CREATE TRIGGER update_tokens_updated_at
   BEFORE UPDATE ON tokens
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_map_presets_updated_at
+  BEFORE UPDATE ON map_presets
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+
+-- ============================================================================
+-- Realtime
+-- ============================================================================
+
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.sessions;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.characters;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.tokens;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.chat_messages;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+ALTER TABLE public.characters REPLICA IDENTITY FULL;
+
+-- ============================================================================
+-- Row-Level Security
+-- ============================================================================
+
+ALTER TABLE sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE characters ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tokens ENABLE ROW LEVEL SECURITY;
+ALTER TABLE chat_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE map_presets ENABLE ROW LEVEL SECURITY;
+
+ALTER TABLE weapons ENABLE ROW LEVEL SECURITY;
+ALTER TABLE armor ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cyberware ENABLE ROW LEVEL SECURITY;
+ALTER TABLE gear ENABLE ROW LEVEL SECURITY;
+ALTER TABLE vehicles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE skills_reference ENABLE ROW LEVEL SECURITY;
+ALTER TABLE programs ENABLE ROW LEVEL SECURITY;
+
+CREATE OR REPLACE FUNCTION is_user_in_session(session_uuid UUID)
+RETURNS BOOLEAN AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM sessions WHERE id = session_uuid AND created_by = auth.uid()
+  ) OR EXISTS (
+    SELECT 1 FROM characters WHERE session_id = session_uuid AND user_id = auth.uid()
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION claim_session_character(p_character_id uuid)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  sid uuid;
+  ctype text;
+  cuid uuid;
+BEGIN
+  SELECT session_id, type, user_id INTO sid, ctype, cuid
+  FROM characters
+  WHERE id = p_character_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'character not found';
+  END IF;
+
+  IF ctype IS DISTINCT FROM 'character' THEN
+    RAISE EXCEPTION 'not a player character';
+  END IF;
+
+  IF cuid IS NOT NULL THEN
+    RAISE EXCEPTION 'already claimed';
+  END IF;
+
+  IF NOT is_user_in_session(sid) THEN
+    RAISE EXCEPTION 'not in session';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM characters
+    WHERE session_id = sid
+      AND user_id = auth.uid()
+      AND type = 'character'
+      AND id <> p_character_id
+  ) THEN
+    RAISE EXCEPTION 'already has a character in this session';
+  END IF;
+
+  UPDATE characters
+  SET user_id = auth.uid(), updated_at = NOW()
+  WHERE id = p_character_id;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION claim_session_character(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION claim_session_character(uuid) TO authenticated;
+
+CREATE POLICY "Users can view their sessions"
+  ON sessions FOR SELECT
+  USING (created_by = auth.uid() OR is_user_in_session(id));
+
+CREATE POLICY "Users can create sessions"
+  ON sessions FOR INSERT
+  WITH CHECK (created_by = auth.uid());
+
+CREATE POLICY "Users can update their sessions"
+  ON sessions FOR UPDATE
+  USING (created_by = auth.uid() OR is_user_in_session(id))
+  WITH CHECK (created_by = auth.uid() OR is_user_in_session(id));
+
+CREATE POLICY "Only creators can delete sessions"
+  ON sessions FOR DELETE
+  USING (created_by = auth.uid());
+
+CREATE POLICY "Users can view characters in their sessions"
+  ON characters FOR SELECT
+  USING (is_user_in_session(session_id));
+
+CREATE POLICY "Users can create characters in their sessions"
+  ON characters FOR INSERT
+  WITH CHECK (
+    is_user_in_session(session_id) AND
+    (
+      (type = 'character' AND user_id = auth.uid()) OR
+      (type = 'npc' AND (user_id IS NULL OR user_id = auth.uid())) OR
+      (
+        type = 'character' AND user_id IS NULL AND
+        EXISTS (SELECT 1 FROM sessions WHERE id = session_id AND created_by = auth.uid())
+      ) OR
+      (
+        type = 'character' AND user_id IS NOT NULL AND
+        EXISTS (SELECT 1 FROM sessions WHERE id = session_id AND created_by = auth.uid())
+      )
+    )
+  );
+
+CREATE POLICY "Users can update their own characters"
+  ON characters FOR UPDATE
+  USING (
+    user_id = auth.uid()
+    OR (type = 'npc' AND is_user_in_session(session_id))
+    OR (
+      type = 'character'
+      AND user_id IS NULL
+      AND EXISTS (SELECT 1 FROM sessions WHERE id = session_id AND created_by = auth.uid())
+    )
+  )
+  WITH CHECK (
+    user_id = auth.uid()
+    OR (type = 'npc' AND is_user_in_session(session_id))
+    OR (
+      type = 'character'
+      AND user_id IS NULL
+      AND EXISTS (SELECT 1 FROM sessions WHERE id = session_id AND created_by = auth.uid())
+    )
+  );
+
+CREATE POLICY "Users can delete their own characters"
+  ON characters FOR DELETE
+  USING (
+    user_id = auth.uid()
+    OR (type = 'npc' AND is_user_in_session(session_id))
+    OR (
+      type = 'character'
+      AND user_id IS NULL
+      AND EXISTS (SELECT 1 FROM sessions WHERE id = session_id AND created_by = auth.uid())
+    )
+  );
+
+CREATE POLICY "Users can view tokens in their sessions"
+  ON tokens FOR SELECT
+  USING (is_user_in_session(session_id));
+
+CREATE POLICY "Users can create tokens in their sessions"
+  ON tokens FOR INSERT
+  WITH CHECK (is_user_in_session(session_id));
+
+CREATE POLICY "Users can update tokens they control"
+  ON tokens FOR UPDATE
+  USING (
+    (controlled_by = 'player' AND EXISTS (
+      SELECT 1 FROM characters
+      WHERE characters.id = tokens.character_id
+        AND characters.user_id = auth.uid()
+    )) OR
+    (controlled_by = 'gm' AND EXISTS (
+      SELECT 1 FROM sessions
+      WHERE sessions.id = tokens.session_id
+        AND sessions.created_by = auth.uid()
+    ))
+  )
+  WITH CHECK (
+    (controlled_by = 'player' AND EXISTS (
+      SELECT 1 FROM characters
+      WHERE characters.id = tokens.character_id
+        AND characters.user_id = auth.uid()
+    )) OR
+    (controlled_by = 'gm' AND EXISTS (
+      SELECT 1 FROM sessions
+      WHERE sessions.id = tokens.session_id
+        AND sessions.created_by = auth.uid()
+    ))
+  );
+
+CREATE POLICY "Session participants can delete tokens"
+  ON tokens FOR DELETE
+  USING (is_user_in_session(session_id));
+
+CREATE POLICY "Users can view chat in their sessions"
+  ON chat_messages FOR SELECT
+  USING (is_user_in_session(session_id));
+
+CREATE POLICY "Users can send messages in their sessions"
+  ON chat_messages FOR INSERT
+  WITH CHECK (is_user_in_session(session_id));
+
+CREATE POLICY "Session creators can delete messages"
+  ON chat_messages FOR DELETE
+  USING (EXISTS (
+    SELECT 1 FROM sessions
+    WHERE sessions.id = chat_messages.session_id
+      AND sessions.created_by = auth.uid()
+  ));
+
+CREATE POLICY "Session participants can view map presets"
+  ON map_presets FOR SELECT
+  USING (is_user_in_session(session_id));
+
+CREATE POLICY "GMs can create map presets"
+  ON map_presets FOR INSERT
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM sessions
+      WHERE sessions.id = session_id
+        AND sessions.created_by = auth.uid()
+    )
+  );
+
+CREATE POLICY "GMs can update map presets"
+  ON map_presets FOR UPDATE
+  USING (
+    EXISTS (
+      SELECT 1 FROM sessions
+      WHERE sessions.id = map_presets.session_id
+        AND sessions.created_by = auth.uid()
+    )
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM sessions
+      WHERE sessions.id = map_presets.session_id
+        AND sessions.created_by = auth.uid()
+    )
+  );
+
+CREATE POLICY "GMs can delete map presets"
+  ON map_presets FOR DELETE
+  USING (
+    EXISTS (
+      SELECT 1 FROM sessions
+      WHERE sessions.id = map_presets.session_id
+        AND sessions.created_by = auth.uid()
+    )
+  );
+
+CREATE POLICY "Authenticated users can view weapons"
+  ON weapons FOR SELECT
+  USING (auth.role() = 'authenticated');
+
+CREATE POLICY "Authenticated users can view armor"
+  ON armor FOR SELECT
+  USING (auth.role() = 'authenticated');
+
+CREATE POLICY "Authenticated users can view cyberware"
+  ON cyberware FOR SELECT
+  USING (auth.role() = 'authenticated');
+
+CREATE POLICY "Authenticated users can view gear"
+  ON gear FOR SELECT
+  USING (auth.role() = 'authenticated');
+
+CREATE POLICY "Authenticated users can view vehicles"
+  ON vehicles FOR SELECT
+  USING (auth.role() = 'authenticated');
+
+CREATE POLICY "Authenticated users can view skills"
+  ON skills_reference FOR SELECT
+  USING (auth.role() = 'authenticated');
+
+CREATE POLICY "Authenticated users can view programs"
+  ON programs FOR SELECT
+  USING (auth.role() = 'authenticated');
+
+-- ============================================================================
+-- Storage Buckets
+-- ============================================================================
+
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('avatars', 'avatars', true)
+ON CONFLICT (id) DO UPDATE SET public = EXCLUDED.public;
+
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('soundtrack', 'soundtrack', true)
+ON CONFLICT (id) DO UPDATE SET public = EXCLUDED.public;
+
+CREATE OR REPLACE FUNCTION public.can_manage_character_avatar_object(p_name text, p_bucket_id text)
+RETURNS boolean
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+STABLE
+AS $$
+DECLARE
+  sid uuid;
+  cid uuid;
+  seg1 text;
+  seg2 text;
+  seg3 text;
+BEGIN
+  IF p_bucket_id IS DISTINCT FROM 'avatars' THEN
+    RETURN false;
+  END IF;
+  IF p_name IS NULL OR btrim(p_name) = '' THEN
+    RETURN false;
+  END IF;
+
+  seg1 := split_part(p_name, '/', 1);
+  seg2 := split_part(p_name, '/', 2);
+  seg3 := split_part(p_name, '/', 3);
+  IF seg1 = '' OR seg2 = '' OR seg3 = '' THEN
+    RETURN false;
+  END IF;
+
+  BEGIN
+    sid := seg1::uuid;
+    cid := seg2::uuid;
+  EXCEPTION WHEN invalid_text_representation THEN
+    RETURN false;
+  END;
+
+  RETURN EXISTS (
+    SELECT 1
+    FROM characters c
+    WHERE c.session_id = sid
+      AND c.id = cid
+      AND (
+        c.user_id = auth.uid()
+        OR EXISTS (
+          SELECT 1 FROM sessions s
+          WHERE s.id = c.session_id AND s.created_by = auth.uid()
+        )
+      )
+  );
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.can_manage_character_avatar_object(text, text) FROM PUBLIC;
+
+CREATE POLICY "Public read avatars"
+  ON storage.objects FOR SELECT
+  USING (bucket_id = 'avatars');
+
+CREATE POLICY "Avatar upload for character editors"
+  ON storage.objects FOR INSERT
+  TO authenticated
+  WITH CHECK (public.can_manage_character_avatar_object(name, bucket_id));
+
+CREATE POLICY "Avatar update for character editors"
+  ON storage.objects FOR UPDATE
+  TO authenticated
+  USING (public.can_manage_character_avatar_object(name, bucket_id))
+  WITH CHECK (public.can_manage_character_avatar_object(name, bucket_id));
+
+CREATE POLICY "Avatar delete for character editors"
+  ON storage.objects FOR DELETE
+  TO authenticated
+  USING (public.can_manage_character_avatar_object(name, bucket_id));
+
+CREATE POLICY "Public read soundtrack objects"
+  ON storage.objects FOR SELECT
+  USING (bucket_id = 'soundtrack');
+
+CREATE POLICY "Soundtrack insert for authenticated"
+  ON storage.objects FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    bucket_id = 'soundtrack'
+    AND (name ~ '^ambient/[^/]+$' OR name ~ '^combat/[^/]+$')
+  );
+
+CREATE POLICY "Soundtrack update for authenticated"
+  ON storage.objects FOR UPDATE
+  TO authenticated
+  USING (bucket_id = 'soundtrack' AND (name ~ '^ambient/[^/]+$' OR name ~ '^combat/[^/]+$'))
+  WITH CHECK (bucket_id = 'soundtrack' AND (name ~ '^ambient/[^/]+$' OR name ~ '^combat/[^/]+$'));
 
 -- ============================================================================
 -- Comments for documentation

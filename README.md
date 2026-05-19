@@ -25,7 +25,7 @@ npm install
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `NEXT_PUBLIC_APP_URL`
 
-3. Run the database schema and migrations from `lib/database`.
+3. For a fresh Supabase project, run `lib/database/schema.sql` only. The migrations folder is for older databases.
 
 4. Start the dev server:
 
